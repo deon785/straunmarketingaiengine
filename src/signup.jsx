@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import './Signup.css';
+import { Link } from 'react-router-dom'; 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faPhone, 
@@ -72,14 +73,21 @@ const Auth = () => {
     if (isSignUp && phone) {
       const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
       if (!phoneRegex.test(phone.replace(/[\s\-\(\)\.]/g, ''))) {
-        setMessage({ text: 'Please enter a valid phone number', type: 'error' });
+        setMessage({ text: 'Please enter a valid phone number starting with +263', type: 'error' });
         return false;
       }
     }
 
     return true;
   };
-
+  
+  const handleFormSwitch = () => {
+    setIsSignUp(!isSignUp);
+    setMessage({ text: '', type: '' }); // Clear any existing messages
+    // Also clear phone validation if needed
+    setPhone('');
+  };
+  
   // Handle Sign Up
   const handleSignUp = async (e) => {
     e.preventDefault();
@@ -306,7 +314,8 @@ const Auth = () => {
     return value ? '#5f7fa0' : '#000000ff';
   };
 
-  return (
+return (
+  <div className="auth-page-wrapper">
     <div className="auth-container">
       <div className="signup-container" style={{
         background: 'white',
@@ -645,7 +654,47 @@ const Auth = () => {
         </div>
       </div>
     </div>
+    
+    <footer className="signup-footer" style={{
+      position: 'fixed',
+      bottom: '0',
+      left: '0',
+      right: '0',
+      textAlign: 'center',
+      padding: '8px',
+      background: 'rgba(0, 0, 0, 0.9)',
+      color: '#ccc',
+      fontSize: '12px',
+      zIndex: '1000'
+    }}>
+      <p>&copy; 2025 Straun Marketing AI Engine. All rights reserved.</p>
+      <div style={{ marginTop: '2px' }}>
+        <Link 
+          to="/privacy" 
+          style={{ 
+            color: '#48bb78', 
+            textDecoration: 'none',
+            margin: '0 8px'
+          }}
+        >
+          Privacy
+        </Link>
+        <span style={{ color: '#666' }}>|</span>
+        <Link 
+          to="/terms" 
+          style={{ 
+            color: '#48bb78', 
+            textDecoration: 'none',
+            margin: '0 8px'
+          }}
+        >
+          Terms
+        </Link>
+      </div>
+    </footer>
+  </div>
   );
+
 };
 
 export default Auth;

@@ -191,3 +191,46 @@ html, body {
     border-radius: 0;
   }
 }
+
+/* Footer styling */
+.signup-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 8px 0;
+  text-align: center;
+  z-index: 1000;
+}
+
+.signup-footer-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  color: #ccc;
+  font-size: 14px;
+}
+
+.signup-footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 5px;
+}
+
+.signup-footer-links a {
+  color: #48bb78;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.signup-footer-links a:hover {
+  color: #38a169;
+  text-decoration: underline;
+}
+
+/* Adjust main content to not hide behind footer */
+.signup-container {
+  padding-bottom: 60px; /* Space for footer */
+}

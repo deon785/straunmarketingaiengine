@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import './App.css';
@@ -6,24 +6,118 @@ import './App.css';
 // --- Components ---
 import SellerSetupForm from './SellerSetupForm'; 
 import BuyerSetupForm from './BuyerSetupForm'; 
+import SafeHTML from './SafeHTML.jsx';
+import UserSettings from './UserSettings.jsx';
+import DOMPurify from 'dompurify';
+import TopNavigationBar from './TopNavigationBar';
+import { Link } from 'react-router-dom';
+
+import ReactGA from "react-ga4";
+import WishlistButton from './WishlistButton.jsx';
+import WishlistManager from './WishlistManager.jsx';
+
+// Style for the big green buttons
+const mainButtonStyle = (color) => ({
+    width: '100%',
+    backgroundColor: color,
+    color: 'white',
+    border: 'none',
+    padding: '12px',
+    borderRadius: '12px',
+    fontWeight: 'bold',
+    fontSize: '15px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '10px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+});
+
+// Style for the smaller Blue/Orange buttons
+const smallButtonStyle = (color) => ({
+    flex: 1,
+    backgroundColor: color,
+    color: 'white',
+    border: 'none',
+    padding: '12px',
+    borderRadius: '12px',
+    fontWeight: 'bold',
+    fontSize: '14px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px'
+});
+
+// === SANITIZATION HELPER FUNCTIONS ===
+const sanitizeInput = (input, maxLength = 100) => {
+    if (!input) return '';
+    return input
+        .toString()
+        .trim()
+        .replace(/[<>"'`&;\\]/g, '')
+        .substring(0, maxLength);
+};
+
+const sanitizeEmail = (email) => {
+    if (!email) return '';
+    return email
+        .toLowerCase()
+        .trim()
+        .replace(/[<>"'`&;\\]/g, '')
+        .substring(0, 254);
+};
+
+const sanitizePhone = (phone) => {
+    if (!phone) return '';
+    return phone
+        .toString()
+        .replace(/[^\d+]/g, '')
+        .trim()
+        .substring(0, 20);
+};
+
+const sanitizeLocation = (location) => {
+    if (!location) return '';
+    return location
+        .trim()
+        .replace(/[<>"'`&;\\]/g, '')
+        .replace(/\s+/g, ' ')
+        .substring(0, 100);
+};
+
+const sanitizeProductName = (name) => {
+    if (!name) return '';
+    return name
+        .trim()
+        .replace(/[<>"'`&;\\]/g, '')
+        .replace(/\s+/g, ' ')
+        .substring(0, 200);
+};
 
 // Helper function for word variations
 function getWordVariations(word) {
+    const sanitizedWord = sanitizeInput(word.toLowerCase(), 50);
+    if (!sanitizedWord) return [];
+    
     const variations = new Set();
     
-    // Add common variations
-    if (word.endsWith('s')) {
-        variations.add(word.slice(0, -1)); // laptop
-        variations.add(word + 'es');      // laptops (if word ends with 's')
+    if (sanitizedWord.endsWith('s')) {
+        variations.add(sanitizedWord.slice(0, -1));
+        variations.add(sanitizedWord + 'es');
     } else {
-        variations.add(word + 's');       // laptops
-        variations.add(word + 'es');      // boxes
+        variations.add(sanitizedWord + 's');
+        variations.add(sanitizedWord + 'es');
     }
     
-    // Add common word endings
     ['ing', 'ed', 'er', 'est', 'ly'].forEach(ending => {
-        if (!word.endsWith(ending)) {
-            variations.add(word + ending);
+        if (!sanitizedWord.endsWith(ending)) {
+            const variation = sanitizedWord + ending;
+            if (variation.length <= 50) {
+                variations.add(variation);
+            }
         }
     });
     
@@ -48,19 +142,354 @@ function SocialAIMarketingEngine() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     
+    // --- NEW STATE FOR ALL PRODUCTS ---
+    const [allProducts, setAllProducts] = useState([]);
+    
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
     const [profileLoading, setProfileLoading] = useState(false);
+    const [items, setItems] = useState([]);
 
-    // Debug log for state changes
-    useEffect(() => {
-        console.log("🔄 STATE UPDATE:", {
-            selectedMode,
-            isProfileComplete,
-            userEmail: user?.email,
-            hasProfileData: !!profileData
+    const [showSettings, setShowSettings] = useState(false);
+    
+    // Add these to your state declarations
+    const [initialDataLoading, setInitialDataLoading] = useState(false);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
+    const [productsFetchLoading, setProductsFetchLoading] = useState(false);
+
+    const [signOutLoading, setSignOutLoading] = useState(false);
+    const [openingWhatsApp, setOpeningWhatsApp] = useState(false);
+    const [calling, setCalling] = useState(false);
+
+    const [notifications, setNotifications] = useState([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [zoomedImage, setZoomedImage] = useState(null);
+
+    const [isNavCollapsed, setIsNavCollapsed] = useState(false);
+    const [isVisible, setIsVisible] = useState(false);
+    const [showWishlist, setShowWishlist] = useState(false);
+   
+    const [currentPage, setCurrentPage] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
+    const ITEMS_PER_PAGE = 6;
+
+    // FIXED: Added missing closing brace and fixed variable reference
+    const loadMoreProducts = async () => {
+        setLoading(true);
+        try {
+            const from = currentPage * ITEMS_PER_PAGE;
+            const to = from + ITEMS_PER_PAGE - 1;
+
+            const { data, count, error } = await supabase
+                .from('products')
+                .select('*', { count: 'exact' })
+                .ilike('name', `%${productSearch}%`)
+                .range(from, to)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            if (data && data.length > 0) {
+                setProductsFound(prev => [...prev, ...data]);
+                setCurrentPage(prev => prev + 1);
+                setHasMore(data.length === ITEMS_PER_PAGE);
+            } else {
+                setHasMore(false);
+            }
+        } catch (err) {
+            console.error('Error loading more products:', err);
+            setError('Failed to load more products');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const scrollToTop = () => {
+        window.scrollTo({
+            top: 0,
+            behavior: 'smooth'
         });
-    }, [selectedMode, isProfileComplete, user, profileData]);
+    };
+
+    const fetchNotifications = useCallback(async () => {
+        if (!user) return;
+        
+        const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+        
+        if (!error && data) {
+            setNotifications(data);
+            const unread = data.filter(n => !n.read).length;
+            setUnreadCount(unread);
+        }
+    }, [user]);
+
+    const markAsRead = async (notificationId) => {
+        await supabase
+            .from('notifications')
+            .update({ read: true })
+            .eq('id', notificationId);
+        
+        setNotifications(prev => 
+            prev.map(n => n.id === notificationId ? {...n, read: true} : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+    };
+
+    const validatePhoneNumber = (phone) => {
+        const clean = phone.replace(/\D/g, '');
+        return clean.length >= 9 && clean.length <= 12;
+    };
+
+    // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---  
+    const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
+        setOpeningWhatsApp(true);
+
+        if (!validatePhoneNumber(targetPhoneNumber)) {
+            alert("This user has an invalid phone number. We cannot connect you.");
+            setOpeningWhatsApp(false);
+            return;
+        }
+
+        try {
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('phone_number')
+                .eq('id', currentUser?.id)
+                .single();
+
+            await supabase.from('notifications').insert([
+                { 
+                    user_id: targetUserId,
+                    sender_id: currentUser?.id,
+                    product_id: product?.id,
+                    buyer_phone: profile?.phone_number || 'No phone provided',
+                    product_image: product?.image_url,
+                    message: type === 'seller'
+                        ? `📢 New buyer interested in ${targetName}!` 
+                        : `👋 Seller is reaching out about ${targetName}!`,
+                    link_type: type,    
+                    status: 'unread'
+                }
+            ]);
+
+            if (!targetPhoneNumber) {
+                alert('Phone number not available');
+                return;
+            }
+            
+            const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
+            const finalNumber = cleanNumber.startsWith('263') 
+                ? cleanNumber 
+                : `263${cleanNumber.replace(/^0/, '')}`;
+            
+            const message = encodeURIComponent(
+                type === 'seller' 
+                    ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
+                    : `Hi! I'm interested in your ${targetName}. Is it still available?`
+            );
+            
+            const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
+            window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+                
+            if (typeof ReactGA !== 'undefined') {
+                ReactGA.event({
+                    category: 'Conversion',
+                    action: 'WhatsApp Contact Clicked',
+                    label: type
+                });
+            }
+        } catch (error) {
+            console.error('Error in handleContact:', error);
+            alert('Failed to initiate WhatsApp contact. Please try again.');
+        } finally {
+            setOpeningWhatsApp(false);
+        }
+    };
+
+    const handleCall = (phoneNumber) => {
+        setCalling(true);
+        if (!phoneNumber) {
+            alert('Phone number not available');
+            setCalling(false);
+            return;
+        }
+
+        const cleanNumber = phoneNumber.replace(/\D/g, '');
+        if (!validatePhoneNumber(cleanNumber)) {
+            alert('Invalid phone number format');
+            setCalling(false);
+            return;
+        }
+            
+        try {
+            window.open(`tel:${cleanNumber}`, '_self');
+        } catch (error) {
+            console.error('Error opening call:', error);
+        } finally {
+            setTimeout(() => setCalling(false), 1000);
+        }
+    };
+
+    const handleShareToStatus = (product) => {
+        const text = `🔥 *CHECK THIS OUT!* \n\n` +
+                    `*Item:* ${product.name}\n` +
+                    `*Price:* $${product.price}\n` +
+                    `*Details:* ${product.description}\n\n` +
+                    `Contact me here or see more on our AI App! 🚀`;
+
+        const encodedText = encodeURIComponent(text);
+        const whatsappUrl = `https://wa.me/?text=${encodedText}`;
+        
+        window.open(whatsappUrl, '_blank');
+    };
+
+    // Fetch products with seller info
+    const fetchProducts = useCallback(async () => {
+        setProductsFetchLoading(true);
+        setError(null);
+        try {
+            const { data: products, error: productsError } = await supabase
+                .from('products')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (productsError) {
+                throw new Error(`Failed to fetch products: ${productsError.message}`);
+            }
+            
+            if (!products || products.length === 0) {
+                setItems([]);
+                setAllProducts([]);
+                return;
+            }
+
+            const sellerIds = [...new Set(products.map(p => p.seller_id).filter(id => id))];
+            
+            let sellersMap = {};
+            if (sellerIds.length > 0) {
+                const { data: sellers, error: sellersError } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location, phone_number, is_seller')
+                    .in('user_id', sellerIds);
+
+                if (!sellersError && sellers) {
+                    sellersMap = sellers.reduce((map, seller) => {
+                        map[seller.user_id] = seller;
+                        return map;
+                    }, {});
+                }
+            }
+
+            const productsWithSellers = products.map(product => ({
+                ...product,
+                seller: sellersMap[product.seller_id] || null
+            }));
+            
+            setItems(productsWithSellers);
+            setAllProducts(productsWithSellers);
+            
+        } catch (err) {
+            console.error("❌ Error in fetchProducts:", err);
+            setError(err.message || "Failed to load products. Please try again.");
+        } finally {
+            setProductsFetchLoading(false);
+        }
+    }, []);
+
+    // Fetch user profile
+    const fetchProfile = useCallback(async () => {
+        if (!user) return;
+        
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
+            
+            if (error) {
+                console.error("❌ Profile fetch error:", error);
+                return;
+            }
+            
+            setProfileData(data);
+        } catch (err) {
+            console.error("❌ Error in fetchProfile:", err);
+        }
+    }, [user]);
+
+    // Combined useEffect for initial data load
+    useEffect(() => {
+        if (user) {
+            setInitialDataLoading(true);
+            Promise.all([fetchProducts(), fetchProfile()])
+                .finally(() => setInitialDataLoading(false));
+        }
+    }, [user, fetchProducts, fetchProfile]);
+
+    useEffect(() => {
+        const toggleVisibility = () => {
+            setIsVisible(window.pageYOffset > 300);
+        };
+
+        window.addEventListener('scroll', toggleVisibility);
+        return () => window.removeEventListener('scroll', toggleVisibility);
+    }, []);
+
+    useEffect(() => {
+        if (user) {
+            fetchNotifications();
+        }
+    }, [user, fetchNotifications]);
+
+    useEffect(() => {
+        setIsNavCollapsed(prospects.length > 0 || productsFound.length > 0);
+    }, [prospects, productsFound]);
+
+    const toggleNavCollapse = () => {
+        setIsNavCollapsed(!isNavCollapsed);
+    };
+
+    // Listen for real-time notifications
+    useEffect(() => {
+        if (!user) return;
+
+        const notificationSubscription = supabase
+            .channel('notifications-channel')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'notifications',
+                    filter: `user_id=eq.${user.id}`
+                },
+                (payload) => {
+                    alert(`📢 ${payload.new.message}`);
+                    fetchNotifications();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(notificationSubscription);
+        };
+    }, [user, fetchNotifications]);
+
+    // Fetch products when buyer mode is activated
+    useEffect(() => {
+        if (user && isProfileComplete && selectedMode === 'buyer') {
+            fetchProducts();
+        }
+    }, [user, isProfileComplete, selectedMode, fetchProducts]);
 
     // --- AUTHENTICATION EFFECT ---
     useEffect(() => {
@@ -106,7 +535,7 @@ function SocialAIMarketingEngine() {
         checkAuth();
     }, [navigate]);
 
-    // --- CHECK EXISTING PROFILE DATA (FOR PRE-FILLING ONLY) ---
+    // --- CHECK EXISTING PROFILE DATA ---
     useEffect(() => {
         const checkExistingProfile = async () => {
             if (!user) {
@@ -124,14 +553,9 @@ function SocialAIMarketingEngine() {
                     .eq('user_id', user.id)
                     .maybeSingle();
 
-                console.log("📊 Existing profile data found:", data);
-
                 if (data) {
                     setProfileData(data);
-                    // DO NOT set isProfileComplete to true here
-                    // Let the user choose a mode and complete the form
                 } else {
-                    console.log("📊 No existing profile data");
                     setProfileData(null);
                 }
             } catch (err) {
@@ -143,7 +567,6 @@ function SocialAIMarketingEngine() {
         };
 
         if (user) {
-            console.log("👤 User detected, checking for existing profile data...");
             checkExistingProfile();
         }
     }, [user]);
@@ -154,17 +577,13 @@ function SocialAIMarketingEngine() {
             if (!user || profileData) return;
             
             try {
-                // Check if profile exists
                 const { data: existingProfile } = await supabase
                     .from('profiles')
                     .select('user_id')
                     .eq('user_id', user.id)
                     .maybeSingle();
                 
-                // Create basic profile if doesn't exist
                 if (!existingProfile) {
-                    console.log("🆕 Creating basic profile for new user");
-                    
                     const basicProfile = {
                         user_id: user.id,
                         username: user.email,
@@ -199,23 +618,21 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE MODE SELECTION ---
     const handleModeSelect = (mode) => {
-        console.log("🎯 Mode selected:", mode);
-        console.log("🔄 Setting selectedMode to:", mode);
-        console.log("🔄 Setting isProfileComplete to FALSE (showing form)");
-        
         setSelectedMode(mode);
-        setIsProfileComplete(false); // Force showing form
+        setIsProfileComplete(false);
         setError(null);
         
-        // Clear any existing search results
         setProductsFound([]);
         setProspects([]);
         setProductSearch('');
+        setAllProducts([]);
+        setIsNavCollapsed(false);
+        setCurrentPage(0);
+        setHasMore(true);
     };
 
     // --- HANDLE SWITCH MODE ---
     const handleSwitchMode = () => {
-        console.log("🔄 Switching mode - resetting to mode selection");
         setSelectedMode(null);
         setIsProfileComplete(false);
         setProfileData(null);
@@ -223,70 +640,94 @@ function SocialAIMarketingEngine() {
         setProspects([]);
         setProductSearch('');
         setError(null);
+        setAllProducts([]);
+        setCurrentPage(0);
+        setHasMore(true);
     };
 
-    // --- HANDLE PROFILE COMPLETION (CORRECTED VERSION) ---
+    // --- HANDLE PROFILE COMPLETION ---
     const handleProfileComplete = async (details) => {
         try {
-            console.log("🟡 ============ START handleProfileComplete ============");
-            console.log("🟡 Details received from form:", JSON.stringify(details, null, 2));
-            console.log("🟡 Selected mode:", selectedMode);
-            console.log("🟡 User ID:", user?.id);
-            
             if (!user) {
                 throw new Error('No user authenticated');
             }
             
-            setLoading(true);
+            setProfileUpdateLoading(true);
             setError(null);
 
-            // 1. Input validation
-            const trimmedLocation = details.location?.trim();
-            const trimmedPhoneNumber = details.phone_number?.trim();
+            const sanitizedLocation = sanitizeLocation(details.location);
+            const sanitizedPhoneNumber = sanitizePhone(details.phone_number);
+            const sanitizedProduct = sanitizeProductName(details.product_listed);
 
-            if (!trimmedLocation) {
+            if (!sanitizedLocation) {
                 throw new Error('Location is required and cannot be empty.');
             }
-            if (!trimmedPhoneNumber) {
+            if (!sanitizedPhoneNumber) {
                 throw new Error('Phone number is required and cannot be empty.');
             }
 
-            // 2. Mode-specific validation
-            if (selectedMode === 'buyer' && (!details.interests || details.interests.length === 0)) {
-                throw new Error('Please enter at least one interest for buyer setup');
+            if (selectedMode === 'buyer') {
+                let interestsToCheck = details.interests;
+                
+                if (typeof interestsToCheck === 'string') {
+                    interestsToCheck = interestsToCheck.split(',').filter(i => i.trim());
+                }
+                
+                if (!interestsToCheck || interestsToCheck.length === 0) {
+                    throw new Error('Please enter at least one interest for buyer setup');
+                }
+                
+                let sanitizedInterests = [];
+                if (Array.isArray(interestsToCheck)) {
+                    sanitizedInterests = interestsToCheck
+                        .map(interest => sanitizeInput(interest, 50))
+                        .filter(interest => interest.length > 0);
+                } else {
+                    sanitizedInterests = [sanitizeInput(interestsToCheck.toString(), 50)]
+                        .filter(interest => interest.length > 0);
+                }
+                
+                if (sanitizedInterests.length === 0) {
+                    throw new Error('Please enter at least one valid interest for buyer setup');
+                }
             }
 
-            if (selectedMode === 'seller' && !details.product_listed?.trim()) {
+            if (selectedMode === 'seller' && !sanitizedProduct) {
                 throw new Error('Please enter at least one product to sell for seller setup');
             }
 
-            // 3. Prepare profile update
             const isSellerMode = selectedMode === 'seller';
             const isBuyerMode = selectedMode === 'buyer';
             const now = new Date().toISOString();
             
+            let sanitizedInterestsArray = [];
+            if (isBuyerMode && details.interests) {
+                let interestsArray = details.interests;
+                
+                if (typeof interestsArray === 'string') {
+                    interestsArray = interestsArray.split(',');
+                }
+                
+                sanitizedInterestsArray = interestsArray
+                    .filter(i => i != null && i !== '')
+                    .map(i => sanitizeInput(i.toString().trim().toLowerCase(), 50))
+                    .filter(i => i.length > 0);
+            }
+                    
             const profileUpdate = {
                 user_id: user.id,
-                username: user.email || user.user_metadata?.email || 'unknown',
-                location: trimmedLocation, 
-                phone_number: trimmedPhoneNumber, 
+                username: sanitizeEmail(user.email || user.user_metadata?.email || 'unknown'),
+                location: sanitizedLocation,
+                phone_number: sanitizedPhoneNumber,
                 updated_at: now,
-                created_at: now, // Always set new created_at for new record
+                created_at: now,
                 is_seller: isSellerMode,
                 is_buyer: isBuyerMode,
                 seller_setup_completed: isSellerMode,
                 buyer_setup_completed: isBuyerMode,
-                interests: isBuyerMode && details.interests 
-                    ? (Array.isArray(details.interests) ? details.interests : [details.interests])
-                        .filter(i => i?.trim())
-                        .map(i => i.trim().toLowerCase())
-                    : []
+                interests: sanitizedInterestsArray
             };
 
-            console.log("📤 Saving profile to Supabase:", JSON.stringify(profileUpdate, null, 2));
-
-                // 4. Start transaction
-                // 1. First, check if a profile already exists for this user
             const { data: existingProfile, error: fetchError } = await supabase
                 .from('profiles')
                 .select('*')
@@ -295,20 +736,18 @@ function SocialAIMarketingEngine() {
 
             if (fetchError) throw fetchError;
 
-            // 2. Prepare the update/insert data
-            const profileData = {
+            const profileUpdateData = {
                 ...profileUpdate,
                 is_active: true,
                 updated_at: new Date().toISOString(),
                 created_at: existingProfile?.created_at || new Date().toISOString()
             };
 
-            // 3. If profile exists, update it; otherwise, insert a new one
             let savedProfileData;
             if (existingProfile) {
                 const { data: updated, error: updateError } = await supabase
                     .from('profiles')
-                    .update(profileData)
+                    .update(profileUpdateData)
                     .eq('user_id', user.id)
                     .select()
                     .single();
@@ -318,7 +757,7 @@ function SocialAIMarketingEngine() {
             } else {
                 const { data: inserted, error: insertError } = await supabase
                     .from('profiles')
-                    .insert([profileData])
+                    .insert([profileUpdateData])
                     .select()
                     .single();
                 
@@ -326,15 +765,25 @@ function SocialAIMarketingEngine() {
                 savedProfileData = inserted;
             }
 
-            // 4. Handle seller products if in seller mode
-            if (isSellerMode && details.product_listed?.trim()) {
+            if (isSellerMode && sanitizedProduct) {
+                const sanitizedDescription = DOMPurify.sanitize(details.description || '', {
+                    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li', 'a', 'img'],
+                    ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style'],
+                    ALLOWED_URI_REGEXP: /^(?:(?:https?):\/\/|\/)/i,
+                    FORBID_ATTR: ['onclick', 'onload', 'onerror'],
+                    KEEP_CONTENT: true
+                })
+                .trim()
+                .substring(0, 1000);
+
                 const productInsert = {
                     seller_id: user.id,
-                    name: details.product_listed.trim(),
-                    location: trimmedLocation,
-                    phone_number: trimmedPhoneNumber,
-                    price: details.price || 0,
-                    description: details.description || '',
+                    name: sanitizedProduct,
+                    location: sanitizedLocation,
+                    phone_number: sanitizedPhoneNumber,
+                    price: typeof details.price === 'number' ? 
+                       Math.max(0, Math.min(details.price, 999999.99)) : 0,
+                    description: sanitizedDescription, 
                     created_at: new Date().toISOString()
                 };
                 
@@ -344,14 +793,15 @@ function SocialAIMarketingEngine() {
 
                 if (productError) {
                     console.error("❌ Error saving product:", productError);
-                    // Don't fail the whole operation if product save fails
                 }
             }
 
-            // 5. Update local state
             setProfileData(savedProfileData);
             setIsProfileComplete(true);
-            console.log("✅ Profile update completed successfully");
+            
+            if (isBuyerMode) {
+                fetchProducts();
+            }
 
         } catch (error) {
             console.error('❌ Error in handleProfileComplete:', error);
@@ -359,42 +809,56 @@ function SocialAIMarketingEngine() {
             setIsProfileComplete(false);
             throw error;
         } finally {
-            setLoading(false);
-            console.log("🟡 ============ END handleProfileComplete ============");
+            setProfileUpdateLoading(false);
         }
     };
+
     // --- HANDLE SEARCH ---
     const handleSearch = async () => {
-        if (!productSearch.trim()) {
-            setError('Please enter a product name to search.');
-            return;
-        }
-        
-        if (loading) return;
-        
-        if (!isProfileComplete) {
-            setError('Please complete your profile before searching.');
-            return;
-        }
-        
-        if (selectedMode === 'seller') {
-            await findProspects();
-        } else {
-            await findProducts();
+        setSearchLoading(true);
+        setError(null);
+        try {
+            const sanitizedSearch = sanitizeProductName(productSearch);
+            
+            if (!sanitizedSearch || sanitizedSearch.trim().length === 0) {
+                setError('Please enter a product name to search.');
+                return;
+            }
+            
+            if (!isProfileComplete) {
+                setError('Please complete your profile before searching.');
+                return;
+            }
+            
+            if (selectedMode === 'seller') {
+                await findProspects();
+            } else {
+                await findProducts();
+            }
+        } catch (error) {
+            setError(error.message || 'Search failed');
+        } finally {
+            setSearchLoading(false);
         }
     };
 
     // --- FIND PRODUCTS (BUYER MODE) ---
     const findProducts = async () => {
-        setLoading(true); 
+        setSearchLoading(true);
         setError(null);
         
         try {
-            // UPDATED: Select 'phone_number' from products table
+            const sanitizedSearch = sanitizeProductName(productSearch);
+            
+            if (!sanitizedSearch || sanitizedSearch.length < 2) {
+                setError('Please enter a product name with at least two characters.');
+                return;
+            }
+
             const { data: products, error: fetchError } = await supabase
                 .from('products')
-                .select('name, price, location, description, seller_id, created_at, phone_number')
-                .ilike('name', `%${productSearch.trim()}%`)
+                .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
+                .ilike('name', `%${sanitizedSearch}%`)
                 .order('price', { ascending: true });
 
             if (fetchError) {
@@ -405,53 +869,45 @@ function SocialAIMarketingEngine() {
 
             setProductsFound(products || []);
 
-            // Insert search record
             await supabase.from('searches').insert([
                 { 
                     buyer_id: user.id, 
                     seller_id: null,
-                    product_name: productSearch.trim(),
+                    product_name: sanitizedSearch,
                     search_type: 'product',
                     prospects_found: 0,
                     created_at: new Date().toISOString()
-                },
+                }
             ]);
         } catch (err) {
             console.error('Find products error:', err);
             setError('An unexpected error occurred. Please try again.');
         } finally {
-            setLoading(false);
+            setSearchLoading(false);
         }
     };
 
-    // --- FIND PROSPECTS (SELLER MODE) - HYBRID BEST VERSION ---
+    // --- FIND PROSPECTS (SELLER MODE) ---
     const findProspects = async () => {
-        setLoading(true);
+        setSearchLoading(true);
         setError(null);
         setProspects([]);
         
         try {
-            // Validate search term first
-            const searchTerm = productSearch?.trim();
+            const searchTerm = sanitizeProductName(productSearch);
+            
             if (!searchTerm || searchTerm.length < 2) {
                 setError('Please enter a product name with at least two characters.');
                 return;
             }
 
-            const sellerLocation = profileData?.location?.trim();
+            const sellerLocation = sanitizeLocation(profileData?.location);
             
-            console.log("🔍 Starting prospects search:", {
-                searchTerm,
-                sellerLocation,
-                user_id: user?.id
-            });
-
             if (!sellerLocation) {
                 setError('Could not find seller profile location. Please update your profile.');
                 return;
             }
 
-            // 1. Fetch all potential buyers with non-null interests
             const { data: allBuyers, error: prospectsError } = await supabase
                 .from('profiles')
                 .select('user_id, username, location, interests, phone_number')
@@ -465,29 +921,22 @@ function SocialAIMarketingEngine() {
             }
 
             if (!allBuyers || allBuyers.length === 0) {
-                console.log("ℹ️ No buyers found in database");
                 setProspects([]);
                 return;
             }
 
-            // 2. Normalize search term and prepare for matching
             const searchTermLower = searchTerm.toLowerCase();
             const searchWords = searchTermLower
-                .split(/[\s,]+/)  // Split by spaces or commas
+                .split(/[\s,]+/)
                 .filter(w => w.length >= 2)
-                .map(word => word.replace(/[^a-z0-9]/g, ''))  // Remove non-alphanumeric chars
-                .filter(Boolean);  // Remove empty strings
+                .map(word => word.replace(/[^a-z0-9]/g, ''))
+                .filter(Boolean);
             
-            // 3. Filter buyers based on interests
             const matchingProspects = allBuyers.filter(buyer => {
-                if (!buyer.interests) {
-                    console.log(`Buyer ${buyer.user_id} has no interests`);
-                    return false;
-                }
+                if (!buyer.interests) return false;
 
                 let interestsArray = [];
                 try {
-                    // Parse interests (same as before)
                     if (typeof buyer.interests === 'string') {
                         try {
                             interestsArray = JSON.parse(buyer.interests);
@@ -498,82 +947,64 @@ function SocialAIMarketingEngine() {
                         interestsArray = buyer.interests;
                     }
 
-                    // Normalize interests
                     interestsArray = interestsArray
                         .filter(i => i != null)
-                        .map(i => i.toString().trim().toLowerCase())
+                        .map(i => sanitizeInput(i.toString().trim(), 50))
                         .filter(i => i.length > 0);
-
-                    console.log(`Buyer ${buyer.user_id} interests:`, interestsArray);
                 } catch (e) {
-                    console.error(`Error processing interests:`, e);
                     return false;
                 }
 
-                // Check for matches with improved word comparison
                 const hasMatch = interestsArray.some(interest => {
-                    // Check if any search word is included in the interest
                     const wordMatch = searchWords.some(word => {
-                        // Check direct inclusion
                         if (interest.includes(word)) return true;
                         
-                        // Check for singular/plural forms
                         if (word.endsWith('s') && interest.includes(word.slice(0, -1))) return true;
                         if (!word.endsWith('s') && interest.includes(word + 's')) return true;
                         
-                        // Check for common word variations
                         const variations = getWordVariations(word);
                         return variations.some(variation => interest.includes(variation));
                     });
 
-                    // Check if the full search term is included in the interest
                     const fullTermMatch = 
                         interest.includes(searchTermLower) ||
                         (searchTermLower.endsWith('s') && interest.includes(searchTermLower.slice(0, -1))) ||
                         (!searchTermLower.endsWith('s') && interest.includes(searchTermLower + 's'));
 
-                    console.log(`Interest "${interest}": wordMatch=${wordMatch}, fullTermMatch=${fullTermMatch}`);
                     return wordMatch || fullTermMatch;
                 });
 
-                console.log(`Buyer ${buyer.user_id} match result:`, hasMatch);
                 return hasMatch;
             });
 
-            // 4. Sort by location (local first)
             const sortedProspects = [...matchingProspects].sort((a, b) => {
                 const sellerLocLower = sellerLocation.toLowerCase();
                 const aLocation = a.location ? a.location.toLowerCase() : '';
                 const bLocation = b.location ? b.location.toLowerCase() : '';
                 
-                // Priority 1: Local buyers first
                 if (aLocation === sellerLocLower && bLocation !== sellerLocLower) return -1;
                 if (aLocation !== sellerLocLower && bLocation === sellerLocLower) return 1;
                 
-                // Priority 2: Alphabetical by location
                 return aLocation.localeCompare(bLocation);
             });
 
-           // 5. Format results
             const formattedProspects = sortedProspects.map(prospect => {
-                // Parse interests if it's a string
                 let interests = [];
                 try {
                     interests = typeof prospect.interests === 'string' 
                         ? JSON.parse(prospect.interests) 
                         : (Array.isArray(prospect.interests) ? prospect.interests : []);
                 } catch (e) {
-                    console.error('Error parsing interests:', e);
                     interests = [];
                 }
 
                 return {
                     id: prospect.user_id,
-                    email: prospect.username,
-                    location: prospect.location || 'Location not specified',
+                    email: sanitizeEmail(prospect.username),
+                    location: sanitizeLocation(prospect.location || 'Location not specified'),
                     interest: searchTerm,
                     interests: interests,
-                    phone_number: prospect.phone_number,
+                    phone_number: sanitizePhone(prospect.phone_number),
                     isSameLocation: prospect.location && 
                                 prospect.location.toLowerCase() === sellerLocation.toLowerCase()
                 };
@@ -581,7 +1012,6 @@ function SocialAIMarketingEngine() {
             
             setProspects(formattedProspects);
 
-            // 6. Log the search if we found results
             if (formattedProspects.length > 0) {
                 try {
                     await supabase
@@ -596,7 +1026,6 @@ function SocialAIMarketingEngine() {
                         }]);
                 } catch (logError) {
                     console.error('Error logging search:', logError);
-                    // Don't fail the search if logging fails
                 }
             }
 
@@ -604,13 +1033,13 @@ function SocialAIMarketingEngine() {
             console.error('❌ Find prospects error:', err);
             setError(err.message || 'An error occurred while searching for prospects. Please try again.');
         } finally {
-            setLoading(false);
+            setSearchLoading(false);
         }
     };
 
     const handleSignOut = async () => {
         try {
-            setLoading(true);
+            setSignOutLoading(true);
             const { error } = await supabase.auth.signOut();
             if (error) throw error;
             
@@ -621,13 +1050,16 @@ function SocialAIMarketingEngine() {
             setProspects([]);
             setProductsFound([]);
             setProductSearch('');
+            setAllProducts([]);
+            setCurrentPage(0);
+            setHasMore(true);
             
             navigate('/');
         } catch (error) {
             console.error('Sign out error:', error);
             setError('Error signing out. Please try again.');
         } finally {
-            setLoading(false);
+            setSignOutLoading(false);
         }
     };
 
@@ -638,14 +1070,7 @@ function SocialAIMarketingEngine() {
     };
 
     // --- CONDITIONAL RENDERING ---
-    console.log("🔍 ============ CONDITIONAL RENDERING CHECK ============");
-    console.log("🔍 selectedMode:", selectedMode);
-    console.log("🔍 isProfileComplete:", isProfileComplete);
-    console.log("🔍 user exists:", !!user);
-    console.log("🔍 profileData:", profileData);
-
     if (authLoading) {
-        console.log("⏳ Rendering auth loading");
         return (
             <div className="loading-container">
                 <div className="loading-spinner"></div>
@@ -654,8 +1079,16 @@ function SocialAIMarketingEngine() {
         );
     }
 
+    if (initialDataLoading && !isProfileComplete && selectedMode) {
+        return (
+            <div className="loading-container">
+                <div className="loading-spinner"></div>
+                <p>Loading your data...</p>
+            </div>
+        );
+    }
+
     if (!user) {
-        console.log("🚫 No user, redirecting");
         return (
             <div className="loading-container">
                 <p>Redirecting to login...</p>
@@ -665,9 +1098,6 @@ function SocialAIMarketingEngine() {
 
     // --- SHOW MODE SELECTION IF NO MODE SELECTED ---
     if (!selectedMode) {
-        console.log("🎯 Rendering mode selection screen");
-        
-        // Get existing profile status for display only
         const hasProfileData = profileData?.location && profileData?.phone_number;
         const existingMode = profileData?.is_seller ? 'seller' : 
                             profileData?.is_buyer ? 'buyer' : null;
@@ -761,10 +1191,6 @@ function SocialAIMarketingEngine() {
 
     // --- SHOW SETUP FORM IF MODE SELECTED BUT PROFILE NOT COMPLETE ---
     if (selectedMode && !isProfileComplete) {
-        console.log("📝 RENDERING SETUP FORM (isProfileComplete = false)");
-        console.log("Selected mode:", selectedMode);
-        console.log("Existing profile data for pre-filling:", profileData);
-        
         return (
             <div className="app-container">
                 <div className="profile-setup-screen">
@@ -790,13 +1216,12 @@ function SocialAIMarketingEngine() {
                             <button 
                                 onClick={handleSwitchMode}
                                 className="change-mode-button"
-                                disabled={loading}
+                                disabled={profileUpdateLoading} 
                             >
                                 Change Mode
                             </button>
                         </div>
                         
-                        {/* Show existing data info if available */}
                         {profileData && (profileData.location || profileData.phone_number) && (
                             <div className="existing-profile-info">
                                 <p className="existing-info-note">
@@ -813,14 +1238,14 @@ function SocialAIMarketingEngine() {
                                 onProfileComplete={handleProfileComplete}
                                 existingData={profileData}
                                 isSellerFlow={true}
-                                loading={loading}
+                                loading={profileUpdateLoading} 
                             />
                         ) : (
                             <BuyerSetupForm 
                                 onProfileComplete={handleProfileComplete}
                                 existingData={profileData}
                                 isBuyerFlow={true}
-                                loading={loading}
+                                loading={profileUpdateLoading}
                             />
                         )}
                     </div>
@@ -829,319 +1254,639 @@ function SocialAIMarketingEngine() {
         );
     }
 
-    // --- MAIN SOCIAL MARKETING INTERFACE (ONLY after form is completed) ---
-    console.log("🚀 ============ RENDERING MAIN INTERFACE ============");
-    console.log("🚀 isProfileComplete is TRUE! User completed the setup form.");
-    console.log("🚀 Current mode in main interface:", selectedMode);
-    
+    // --- MAIN INTERFACE ---
     return (
-        <div className="app-container">
-            <div className="main-social-interface">
-                <header className="social-header">
-                    <div className="header-content">
-                        <h1 className="social-title">
-                            {selectedMode === 'seller' 
-                                ? 'Find Customers for Your Products' 
-                                : 'Find Products to Buy'}
-                            <span className="user-mode">
-                                {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
-                            </span>
-                        </h1>
-                        
-                        <div className="user-controls">
-                            <div className="user-info-card">
-                                {/* User info stays the same */}
-                                <div className="user-basic-info">
-                                    <div className="user-avatar">
-                                        {user.email.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="user-details">
-                                        <div className="user-email">{user.email}</div>
-                                        <div className="user-location">
-                                            <span className="location-icon">📍</span>
-                                            {profileData?.location || 'No location set'}
-                                        </div>
-                                        <div className="user-profile-status">
-                                            <span className="status-badge complete">
-                                                ✓ {selectedMode === 'seller' ? 'Seller' : 'Buyer'} Setup Complete
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="user-mode-info">
-                                    <span className={`mode-tag ${selectedMode}`}>
-                                        {selectedMode === 'seller' ? 'SELLER' : 'BUYER'}
-                                    </span>
-                                    <div className="user-actions">
-                                        <button 
-                                            onClick={handleSwitchMode}
-                                            className="switch-mode-button"
-                                        >
-                                            Switch Mode
-                                        </button>
-                                        <button 
-                                            onClick={handleSignOut}
-                                            className="signout-button"
-                                            disabled={loading}
-                                        >
-                                            Sign Out
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </header>
+        <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : 'nav-expanded'}`}>
+            <div className="app-container">
+                <TopNavigationBar 
+                    user={user}
+                    selectedMode={selectedMode}
+                    profileData={profileData}
+                    signOutLoading={signOutLoading}
+                    onSwitchMode={handleSwitchMode}
+                    onSignOut={handleSignOut}
+                    onSettingsClick={() => setShowSettings(true)}
+                    onToggleCollapse={toggleNavCollapse}
+                    isCollapsed={isNavCollapsed}
+                />
+                
+                {/* Floating "Saved Searches" Button - Only shown when NOT in wishlist view */}
+                {!showWishlist && (
+                    <button
+                        onClick={() => setShowWishlist(true)}
+                        style={{
+                            position: 'fixed',
+                            bottom: '80px',
+                            right: '20px',
+                            backgroundColor: '#7209b7',
+                            color: 'white',
+                            border: 'none',
+                            padding: '12px 16px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            zIndex: 1000,
+                            transition: 'all 0.3s ease',
+                        }}
+                        title="View Saved Searches"
+                    >
+                        <span style={{ fontSize: '18px' }}>📋</span>
+                        Saved Searches
+                    </button>
+                )}
+                
+                {/* Scroll to Top Button */}
+                <button
+                    onClick={scrollToTop}
+                    style={{
+                        position: 'fixed',
+                        bottom: '20px',
+                        right: '20px',
+                        backgroundColor: '#667eea',
+                        color: 'white',
+                        width: '50px',
+                        height: '50px',
+                        borderRadius: '50%',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '20px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                        zIndex: 1000,
+                        opacity: isVisible ? 1 : 0,
+                        visibility: isVisible ? 'visible' : 'hidden',
+                        transition: 'all 0.3s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                    title="Scroll to top"
+                >
+                    ↑
+                </button>
 
-                <main className="social-main-content">
-                    <div className="search-section-card">
-                        <div className="search-header">
-                            <h2>
-                                {selectedMode === 'seller' 
-                                    ? '🔍 Find Customers for Your Products' 
-                                    : '🔍 Find Products to Buy'}
-                            </h2>
-                            <p className="search-instruction">
-                                {selectedMode === 'seller'
-                                    ? 'Enter a product name to find customers interested in buying it'
-                                    : 'Enter a product name to find sellers offering it'}
-                            </p>
-                        </div>
-                        
-                        <div className="search-input-group">
-                            <div className="search-input-wrapper">
-                                <input 
-                                    type="text" 
-                                    placeholder={
-                                        selectedMode === 'seller' 
-                                            ? "E.g., Weighted Blanket, iPhone 13, Gaming Chair..." 
-                                            : "E.g., Headphones, Laptop, Furniture..."
-                                    }
-                                    value={productSearch}
-                                    onChange={(e) => {
-                                        setProductSearch(e.target.value);
-                                        setError(null);
-                                    }}
-                                    onKeyPress={handleKeyPress}
-                                    className="search-input-large"
-                                    disabled={loading}
-                                />
-                                <div className="search-examples">
-                                    <span>Examples: </span>
-                                    {selectedMode === 'seller' 
-                                        ? 'Weighted Blanket, Headphones, Laptop'
-                                        : 'Shoes, Phone, Furniture'}
-                                </div>
+                {/* Notifications */}
+                <div className="notification-container">
+                    <button 
+                        className="notification-button"
+                        onClick={() => setShowNotifications(!showNotifications)}
+                    >
+                        🔔
+                        {unreadCount > 0 && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '-5px',
+                                right: '-10px',
+                                backgroundColor: '#ff3b30',
+                                color: 'white',
+                                borderRadius: '50%',
+                                width: '18px',
+                                height: '18px',
+                                fontSize: '11px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 'bold',
+                                border: '2px solid #000'
+                            }}>
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </div>
+                        )}
+                    </button>
+                
+
+                    {showNotifications && (
+                        <div className="notification-dropdown">
+                            <div className="notification-header">
+                                <h3>Notifications ({unreadCount})</h3>
+                                <button onClick={() => setShowNotifications(false)}>×</button>
                             </div>
                             
-                            <button 
-                                onClick={handleSearch} 
-                                disabled={loading || !productSearch.trim()}
-                                className="search-button-large"
-                            >
-                                {loading ? (
+                            {notifications.length === 0 ? (
+                                <div className="notification-empty">No notifications yet</div>
+                            ) : (
+                                <div className="notification-list">
+                                    {notifications.map(notification => (
+                                        <div 
+                                            key={notification.id} 
+                                            className={`notification-item ${notification.read ? 'read' : 'unread'}`}
+                                            onClick={() => markAsRead(notification.id)}
+                                        >
+                                            <div className="notification-message">
+                                                {notification.message}
+                                            </div>
+                                            <div className="notification-time">
+                                                {new Date(notification.created_at).toLocaleTimeString()}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Wishlist View or Main Interface */}
+                {showWishlist ? (
+                    <div style={{ width: '100%', padding: '1rem' }}>
+                        {/* Simple "Back" button in Wishlist view */}
+                        <button 
+                            onClick={() => setShowWishlist(false)}
+                            style={{
+                                background: 'var(--primary-color)',
+                                color: 'white',
+                                border: 'none',
+                                padding: '10px 16px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                marginBottom: '20px'
+                            }}
+                        >
+                            ← Back to Main
+                        </button>
+                        <WishlistManager onBack={() => setShowWishlist(false)} />
+                    </div>
+                ) : (
+                    <main className="social-main-content">
+                        <div className="search-section-card">
+                            <div className="search-header">
+                                <h2>
+                                    {selectedMode === 'seller' 
+                                    ? '🔍 Find Customers for Your Products' 
+                                    : '🔍 Find Products to Buy'}
+                                </h2>
+                                <p className="search-instruction">
+                                    {selectedMode === 'seller'
+                                    ? 'Enter a product name to find customers interested in buying it'
+                                    : 'Enter a product name to find sellers offering it'}
+                                </p>
+                            </div>
+                            
+                            <div className="search-input-group">
+                                <div className="search-input-wrapper">
+                                    <input 
+                                        type="text" 
+                                        placeholder={
+                                            selectedMode === 'seller' 
+                                            ? "E.g., Weighted Blanket, iPhone 13, Gaming Chair..." 
+                                            : "E.g., Headphones, Laptop, Furniture..."
+                                        }
+                                        value={productSearch}
+                                        onChange={(e) => {
+                                            const value = e.target.value
+                                            .replace(/[<>"'`&;\\]/g, '')
+                                            .substring(0, 100);
+                                            setProductSearch(value);
+                                            setError(null);
+                                        }}
+                                        onKeyPress={handleKeyPress}
+                                        className="search-input-large"
+                                        disabled={searchLoading}
+                                    />
+                                    <div className="search-examples">
+                                        <span>Examples: </span>
+                                        {selectedMode === 'seller' 
+                                            ? 'Weighted Blanket, Headphones, Laptop'
+                                            : 'Shoes, Phone, Furniture'}
+                                    </div>
+                                </div>
+                            
+                                <button 
+                                    onClick={handleSearch} 
+                                    disabled={searchLoading || !productSearch.trim()}
+                                    className="search-button-large"
+                                >
+                                    {searchLoading ? (
                                     <>
                                         <span className="search-spinner"></span>
                                         Searching...
                                     </>
-                                ) : (
+                                    ) : (
                                     <>
                                         <span className="search-icon">
-                                            {selectedMode === 'seller' ? '👥' : '🔎'}
+                                        {selectedMode === 'seller' ? '👥' : '🔎'}
                                         </span>
-                                        {selectedMode === 'seller' ? 'Find Prospects' : 'Find Products'}
+                                        {selectedMode === 'seller' ? 'Find Customers' : 'Find Products'}
                                     </>
-                                )}
-                            </button>
+                                    )}
+                                </button>
+                            </div>
                         </div>
-                    </div>
 
-                    {error && (
-                        <div className="error-alert">
-                            <span className="error-icon">⚠️</span>
-                            <span>{error}</span>
-                        </div>
-                    )}
-                    
-                    <div className="results-section">
-                        {selectedMode === 'seller' ? (
-                            <div className="seller-results-card">
-                                <div className="results-header">
-                                    <h3>📈 Marketing Prospects</h3>
-                                    <div className="results-stats">
-                                        <span className="stat-item">
-                                            <strong>Your Location:</strong> {profileData?.location}
-                                        </span>
-                                        <span className="stat-item">
-                                            <strong>Prospects Found:</strong> {prospects.length}
-                                            {prospects.length > 0 && (
-                                                <span className="same-location-count">
-                                                    ({prospects.filter(p => p.isSameLocation).length} in your area)
-                                                </span>
-                                            )}
-                                        </span>
+                        {error && (
+                            <div className="error-alert">
+                                <span className="error-icon">⚠️</span>
+                                <span>{error}</span>
+                            </div>
+                        )}
+                        
+                        {selectedMode === 'buyer' && productsFetchLoading && allProducts.length === 0 && (
+                            <div className="loading-indicator">
+                                <p>Loading your marketing data...</p>
+                            </div>
+                        )}
+                        
+                        <div className="results-section">
+                            {selectedMode === 'seller' ? (
+                                <div className="seller-results-card">
+                                    <div className="results-header">
+                                        <h3>📈 Marketing Prospects</h3>
+                                        <div className="results-stats">
+                                            <span className="stat-item">
+                                                <strong>Your Location:</strong> {profileData?.location}
+                                            </span>
+                                            <span className="stat-item">
+                                                <strong>Prospects Found:</strong> {prospects.length}
+                                                {prospects.length > 0 && (
+                                                    <span className="same-location-count">
+                                                        ({prospects.filter(p => p.isSameLocation).length} in your area)
+                                                    </span>
+                                                )}
+                                            </span>
+                                        </div>
                                     </div>
-                                </div>
-                                
-                                {prospects.length === 0 ? (
-                                    <div className="empty-results">
-                                        <div className="empty-icon">🔍</div>
-                                        <h4>
-                                            {productSearch.trim() && !loading 
-                                                ? `No prospects found for "${productSearch}"`
-                                                : 'No prospects yet'}
-                                        </h4>
-                                        
-                                        {productSearch.trim() && !loading ? (
-                                            <>
-                                                <p>No customers have "{productSearch}" in their interests yet.</p>
-                                                
-                                                <div className="empty-tips">
-                                                    <p><strong>Try searching for:</strong></p>
-                                                    <ul>
-                                                        <li>"laptop" - Found in existing interests</li>
-                                                        <li>"fruits" - Found in existing interests</li>
-                                                        <li>Other common products</li>
-                                                    </ul>
+                                    
+                                    {prospects.length === 0 ? (
+                                        <div className="empty-results">
+                                            <div className="empty-icon">🔍</div>
+                                            <h4>
+                                                {productSearch.trim() && !loading 
+                                                    ? `No prospects found for "${productSearch}"`
+                                                    : 'No prospects yet'}
+                                            </h4>
+                                            
+                                            {productSearch.trim() && !loading ? (
+                                                <>
+                                                    <p>No customers have "{productSearch}" in their interests yet.</p>
                                                     
-                                                    <p className="debug-info">
-                                                        <small>
-                                                            💡 <strong>Note:</strong> The system is working correctly. 
-                                                            You need customers who have added "{productSearch}" to their interests.
-                                                        </small>
-                                                    </p>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <p>Enter a product above to find customers interested in buying it.</p>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="prospects-grid">
-                                        {prospects.map((p, index) => (
-                                            <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
-                                                <div className="prospect-card-header">
-                                                    <div className="prospect-avatar">
-                                                        {p.email.charAt(0).toUpperCase()}
+                                                    <div className="empty-tips">
+                                                        <p><strong>Try searching for:</strong></p>
+                                                        <ul>
+                                                            <li>"laptop" - Found in existing interests</li>
+                                                            <li>"fruits" - Found in existing interests</li>
+                                                            <li>Other common products</li>
+                                                        </ul>
                                                     </div>
-                                                    <div className="prospect-identity">
-                                                        <h4>Potential Customer</h4>
-                                                        <p className="prospect-email">{p.email}</p>
-                                                        {p.isSameLocation && (
-                                                            <div className="location-match-badge">
-                                                                <span className="match-icon">📍</span>
-                                                                <span className="match-text">Same Location</span>
+                                                </>
+                                            ) : (
+                                                <p>Enter a product above to find customers interested in buying it.</p>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="prospects-grid">
+                                            {prospects.map((p, index) => (
+                                                <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
+                                                    <div className="prospect-card-header">
+                                                        <div className="prospect-avatar">
+                                                            {p.email.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <div className="prospect-identity">
+                                                            <h4>Potential Customer</h4>
+                                                            <p className="prospect-email">{p.email}</p>
+                                                            {p.isSameLocation && (
+                                                                <div className="location-match-badge">
+                                                                    <span className="match-icon">📍</span>
+                                                                    <span className="match-text">Same Location</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="prospect-details">
+                                                        <div className="detail-item">
+                                                            <span className="detail-label">📍 Location:</span>
+                                                            <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
+                                                                {p.location}
+                                                                {p.isSameLocation && " (Your Area)"}
+                                                            </span>
+                                                        </div>
+                                                        <div className="detail-item phone-detail">
+                                                            <span className="detail-label">📞 Phone:</span>
+                                                            <span className="detail-value">{p.phone_number || 'N/A'}</span>
+                                                        </div>
+                                                        <div className="detail-item">
+                                                            <span className="detail-label">🎯 Interested in:</span>
+                                                            <span className="detail-value highlight">{p.interest}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="prospect-actions">
+                                                        {p.isSameLocation ? (
+                                                            <button className="connect-button priority">
+                                                                <span className="priority-icon">🔥</span>
+                                                                Priority Connection
+                                                            </button>
+                                                        ) : (
+                                                            <div>
+                                                                <button 
+                                                                    onClick={() => handleContact(p.id, p.phone_number, p.interest, 'seller', {
+                                                                        id: null,   
+                                                                        name: p.interest,
+                                                                        image_url: null
+                                                                    })}
+                                                                    style={mainButtonStyle('#25D366')}
+                                                                >
+                                                                    💬 WhatsApp Customer
+                                                                </button>
+
+                                                                <button 
+                                                                    onClick={() => handleShareToStatus(p)}
+                                                                    style={mainButtonStyle('#128C7E')}
+                                                                >
+                                                                    📢 Post to Status
+                                                                </button>
+
+                                                                <div style={{ display: 'flex', gap: '10px' }}>
+                                                                    <button 
+                                                                        onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
+                                                                        style={smallButtonStyle('#3182ce')}
+                                                                    >
+                                                                        📞 Call
+                                                                    </button>
+                                                                    
+                                                                    <button 
+                                                                        onClick={() => {
+                                                                            const smsMessage = `Hi, I saw you're interested in ${p.interest}. I have this available for sale. Are you interested?`;
+                                                                            window.open(`sms:${p.phone_number}?body=${encodeURIComponent(smsMessage)}`, '_self');
+                                                                        }}
+                                                                        style={smallButtonStyle('#f6ad55')}
+                                                                    >
+                                                                        ✉️ SMS
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </div>
                                                 </div>
-                                                <div className="prospect-details">
-                                                    <div className="detail-item">
-                                                        <span className="detail-label">📍 Location:</span>
-                                                        <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
-                                                            {p.location}
-                                                            {p.isSameLocation && " (Your Area)"}
-                                                        </span>
-                                                    </div>
-                                                    <div className="detail-item phone-detail">
-                                                        <span className="detail-label">📞 Phone:</span>
-                                                        <span className="detail-value">{p.phone_number || 'N/A'}</span>
-                                                    </div>
-                                                    <div className="detail-item">
-                                                        <span className="detail-label">🎯 Interested in:</span>
-                                                        <span className="detail-value highlight">{p.interest}</span>
-                                                    </div>
-                                                </div>
-                                                <div className="prospect-actions">
-                                                    {p.isSameLocation ? (
-                                                        <button className="connect-button priority">
-                                                            <span className="priority-icon">🔥</span>
-                                                            Priority Connection
-                                                        </button>
-                                                    ) : (
-                                                        <button className="connect-button">
-                                                            Connect with Customer
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="buyer-results-card">
-                                <div className="results-header">
-                                    <h3>🛒 Available Products</h3>
-                                    <div className="results-stats">
-                                        <span className="stat-item">
-                                            <strong>Your Location:</strong> {profileData?.location}
-                                        </span>
-                                        <span className="stat-item">
-                                            <strong>Products Found:</strong> {productsFound.length}
-                                        </span>
-                                    </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
-                                
-                                {productsFound.length === 0 ? (
-                                    <div className="empty-results">
-                                        <div className="empty-icon">🛒</div>
-                                        <h4>No products found</h4>
-                                        <p>
-                                            {productSearch.trim() && !loading
-                                                ? `No sellers found for "${productSearch}". Try a different product name.`
-                                                : 'Enter a product above to find sellers offering it.'}
-                                        </p>
-                                        <div className="empty-tips">
-                                            <p><strong>Tips for better results:</strong></p>
-                                            <ul>
-                                                <li>Try broader product categories</li>
-                                                <li>Check spelling of product names</li>
-                                                <li>Consider related products</li>
-                                            </ul>
+                            ) : (
+                                <div className="buyer-results-card">
+                                    <div className="results-header">
+                                        <h3>🛒 Available Products</h3>
+                                        <div className="results-stats">
+                                            <span className="stat-item">
+                                                <strong>Your Location:</strong> {profileData?.location}
+                                            </span>
+                                            <span className="stat-item">
+                                                <strong>Products Found:</strong> {productsFound.length}
+                                            </span>
+                                            <span className="stat-item">
+                                                <button 
+                                                    onClick={() => fetchProducts()} 
+                                                    className="refresh-data-button"
+                                                    disabled={productsFetchLoading}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        background: 'var(--primary-color)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: 'var(--border-radius-sm)',
+                                                        cursor: productsFetchLoading ? 'not-allowed' : 'pointer',
+                                                        fontSize: '0.9rem'
+                                                    }}
+                                                >
+                                                    {productsFetchLoading ? 'Refreshing...' : '🔄 Refresh All Products'}
+                                                </button>
+                                            </span>
                                         </div>
                                     </div>
-                                ) : (
-                                    <div className="products-grid">
-                                        {productsFound.map((p, index) => (
-                                            <div key={p.id || index} className={`product-card ${index === 0 ? 'best-deal' : ''}`}>
-                                                {index === 0 && (
-                                                    <div className="best-deal-badge">🔥 Best Deal</div>
-                                                )}
-                                                <div className="product-card-header">
-                                                    <h4 className="product-name">{p.name}</h4>
-                                                    <div className="product-price">
-                                                        ${p.price}
-                                                    </div>
-                                                </div>
-                                                <div className="product-card-body">
-                                                    {p.description && (
-                                                        <p className="product-description">{p.description}</p>
-                                                    )}
-                                                    <div className="product-location">
-                                                        <span className="location-icon">📍</span>
-                                                        {p.location}
-                                                    </div>
-                                                    <div className="product-phone">
-                                                        <span className="phone-icon">📞</span>
-                                                        <strong>Seller Phone:</strong> {p.phone_number || 'N/A'}
-                                                    </div>
-                                                </div>
-                                                <div className="product-card-footer">
-                                                    <button className="contact-seller-button">
-                                                        Contact Seller
-                                                    </button>
-                                                </div>
+                                    
+                                    {productsFound.length === 0 ? (
+                                        <div className="empty-results">
+                                            <div className="empty-icon">🛒</div>
+                                            <h4>No products found</h4>
+                                            <p>
+                                                {productSearch.trim() && !loading
+                                                    ? `No sellers found for "${productSearch}". Try a different product name.`
+                                                    : 'Enter a product above to find sellers offering it.'}
+                                            </p>
+                                            <div className="empty-tips">
+                                                <p><strong>Tips for better results:</strong></p>
+                                                <ul>
+                                                    <li>Try broader product categories</li>
+                                                    <li>Check spelling of product names</li>
+                                                    <li>Consider related products</li>
+                                                </ul>
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                        </div>
+                                    ) : (
+                                        <div className="products-grid">
+                                            {productsFound.map((p, index) => (
+                                                <div key={p.id || index} className={`product-card ${index === 0 ? 'best-deal' : ''}`}>
+                                                    {index === 0 && (
+                                                        <div className="best-deal-badge">🔥 Best Deal</div>
+                                                    )}
+                                                   
+                                                    <div className="product-card-header">
+                                                        <h4 className="product-name">{p.name}</h4>
+                                                        <div className="product-price">
+                                                            ${p.price}
+                                                        </div>
+                                                    </div>
+                                                    <div className="product-card-body">
+                                                        {p.description && (
+                                                            <div className="product-description">
+                                                                <SafeHTML 
+                                                                    htmlContent={p.description} 
+                                                                    className="product-description-text"
+                                                                    allowLinks={true}      
+                                                                    allowImages={true}
+                                                                />
+                                                            </div>
+                                                        )}
+                                                        
+                                                        {p.image_url ? (
+                                                            <img 
+                                                                src={p.image_url} 
+                                                                alt={p.name}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setZoomedImage(p.image_url);
+                                                                }}
+                                                                
+                                                                style={{ 
+                                                                    width: '70px', 
+                                                                    height: '70px', 
+                                                                    borderRadius: '10px', 
+                                                                    objectFit: 'cover', 
+                                                                    cursor: 'zoom-in',
+                                                                    marginTop: '10px',
+                                                                    border: '2px solid #333'
+                                                                }} 
+                                                            />
+                                                        ) : (
+                                                            <div style={{
+                                                                width: '70px',
+                                                                height: '70px',
+                                                                borderRadius: '10px',
+                                                                backgroundColor: '#333',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                marginTop: '10px',
+                                                            }}>
+                                                                <span style={{ fontSize: '11px', color: '#888' }}>No Image</span>
+                                                            </div>
+                                                        )}
+                                                        
+                                                        <div className="product-location">
+                                                            <span className="location-icon">📍</span>
+                                                            {p.location}
+                                                        </div>
+                                                        <div className="product-phone">
+                                                            <span className="phone-icon">📞</span>
+                                                            <strong>Seller Phone:</strong> {p.phone_number || 'N/A'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="product-card-footer" style={{ 
+                                                        display: 'flex', 
+                                                        flexDirection: 'column', 
+                                                        gap: '10px', 
+                                                        marginTop: '15px',
+                                                        padding: '10px'
+                                                    }}>
+                                                        <button 
+                                                            onClick={() => handleContact(p.seller_id, p.phone_number, p.name, 'buyer', p)}
+                                                            style={mainButtonStyle('#25D366')}
+                                                        >
+                                                            💬 WhatsApp Seller
+                                                        </button>   
+
+                                                        <button 
+                                                            onClick={() => handleShareToStatus(p)}
+                                                            style={mainButtonStyle('#128C7E')}
+                                                        >
+                                                            📢 Post to Status
+                                                        </button>
+
+                                                        <div style={{ display: 'flex', gap: '10px' }}>
+                                                            <button 
+                                                                onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
+                                                                style={smallButtonStyle('#3182ce')}
+                                                            >
+                                                                📞 Call
+                                                            </button>
+                                                            
+                                                            <button 
+                                                                onClick={() => {
+                                                                    const smsMessage = `Hi, I saw your ${p.name}. Is it available?`;
+                                                                    window.open(`sms:${p.phone_number}?body=${encodeURIComponent(smsMessage)}`, '_self');
+                                                                }}
+                                                                style={smallButtonStyle('#f6ad55')}
+                                                            >
+                                                                ✉️ SMS
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <div style={{ 
+                                                gridColumn: '1 / -1', 
+                                                display: 'flex', 
+                                                justifyContent: 'center', 
+                                                marginTop: '20px' 
+                                            }}>
+                                                {hasMore && productsFound.length >= ITEMS_PER_PAGE && (
+                                                    <button 
+                                                        className="load-more-button"
+                                                        onClick={loadMoreProducts}
+                                                        disabled={loading}
+                                                        style={{
+                                                            padding: '10px 20px',
+                                                            backgroundColor: '#667eea',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '6px',
+                                                            cursor: loading ? 'not-allowed' : 'pointer'
+                                                        }}
+                                                    >
+                                                        {loading ? 'Loading...' : 'Load More Products'}
+                                                    </button>
+                                                )}
+
+                                                {!hasMore && productsFound.length > 0 && (
+                                                    <p className="end-message">You've seen all current products!</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </main>
+                )}
+                
+                <footer className="app-footer">
+                    <div className="footer-content">
+                        <Link to="/help" className="help-link">Need Help?</Link>
+                        <span className="footer-text">© 2025 Straun Marketing</span>
                     </div>
-                </main>
+                </footer>
+
+                {showSettings && (
+                    <div className="settings-modal-overlay">
+                        <div className="settings-modal">
+                            <UserSettings user={user} />
+                            <button onClick={() => setShowSettings(false)}>Close</button>
+                        </div>
+                    </div>
+                )}
+
+                {zoomedImage && (
+                <div 
+                    onClick={() => setZoomedImage(null)} 
+                    style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    background: 'rgba(0,0,0,0.95)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    cursor: 'pointer'
+                    }}
+                >
+                    <img 
+                    src={zoomedImage} 
+                    alt="Zoomed product"
+                    style={{ 
+                        maxWidth: '90%', 
+                        maxHeight: '70%', 
+                        borderRadius: '15px',
+                        objectFit: 'contain',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
+                    }} 
+                    onClick={(e) => e.stopPropagation()}
+                    />
+                    <p style={{ 
+                    position: 'absolute',
+                    bottom: '40px',
+                    color: 'white',
+                    fontSize: '14px',
+                    background: 'rgba(0,0,0,0.7)',
+                    padding: '8px 16px',
+                    borderRadius: '20px'
+                    }}>
+                    Click anywhere to close
+                    </p>
+                </div>
+                )}
             </div>
-</div>
+        </div>
     );
 }
 
