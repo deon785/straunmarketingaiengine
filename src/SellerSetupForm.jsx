@@ -31,8 +31,8 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       .from('products')
       .insert([
         { 
-          name: productDetails.name, // FIXED: Changed from 'name' to 'productDetails.name'
-          price: productDetails.price, // FIXED: Changed from 'price' to 'productDetails.price'
+          name: productDetails.name,
+          price: productDetails.price,
           image_url: imageUrl,
           seller_id: user.id 
         }
@@ -56,22 +56,18 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
   };
   
   const handleDeletePhoto = async () => {
-    // 1. Extract the file name from the URL
-    // URL looks like: .../product-images/0.12345.jpg
     const fileName = imageUrl.split('/').pop();
 
-    // 2. Remove from Supabase Storage (Cleanup)
     const { error } = await supabase.storage
       .from('product-images')
       .remove([fileName]);
 
     if (!error) {
-      setImageUrl(''); // Clear the state so the uploader shows again
+      setImageUrl('');
     } else {
       alert("Error removing file from storage");
     }
   };
-
 
   const fetchProducts = async () => {
     setFetchingProducts(true);
@@ -152,8 +148,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         setError('Failed to load user session.');
       } finally {
        setUserLoading(false);
-    }
-      
+      }
     };
     
     getUser();
@@ -207,6 +202,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
     if (!productDetails.location.trim()) return 'Location is required';
     if (!productDetails.phone_number.trim()) return 'Phone number is required';
     if (!productDetails.description.trim()) return 'Product description is required';
+    if (!imageUrl.trim()) return 'Product image is required. Please upload an image.';
     return null;
   };
 
@@ -216,6 +212,16 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
     const validationError = validateForm();
     if (validationError) {
       setError(validationError);
+      
+      // Scroll to image section if image is missing
+      if (validationError.includes('image')) {
+        setTimeout(() => {
+          document.querySelector('.image-upload-section')?.scrollIntoView({ 
+            behavior: 'smooth' 
+          });
+        }, 100);
+      }
+      
       return;
     }
     
@@ -279,7 +285,6 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         phone_number: finalSanitizedData.phone_number,
         created_at: new Date().toISOString(),
         status: 'active',
-        // ADDED: Include image_url in the product data
         image_url: imageUrl
       };
 
@@ -320,7 +325,6 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         product_listed: finalSanitizedData.name,
         price: finalSanitizedData.price,
         description: finalSanitizedData.description,
-        // ADDED: Pass image_url to notification
         image_url: imageUrl
       });
 
@@ -377,16 +381,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
   }
 
   return (
-    <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-2xl mx-auto my-8 font-sans">
-      <style>{`
-        input:invalid, textarea:invalid {
-          border-color: #f87171;
-        }
-        
-        input:valid, textarea:valid {
-          border-color: #4ade80;
-        }
-      `}</style>
+    <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-2xl mx-auto my-8 font-sans safe-top no-cut">
 
       <h3 className="text-3xl font-bold mb-4 text-purple-400">
         Complete Seller Setup (List Product)
@@ -418,43 +413,6 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       )}
 
       <form onSubmit={handleSubmit}>
-        <ImageUploader onUploadSuccess={(url) => setImageUrl(url)} />
-
-        {imageUrl && (
-          <div style={{ position: 'relative', display: 'inline-block', marginBottom: '15px' }}>
-            <img 
-              src={imageUrl} 
-              alt="Product preview" 
-              style={{ 
-                width: '120px', 
-                height: '120px', 
-                borderRadius: '12px', 
-                objectFit: 'cover',
-                marginBottom: '5px'
-              }} 
-            />
-            <button 
-              onClick={handleDeletePhoto}
-              style={{
-                position: 'absolute',
-                top: '-10px',
-                right: '-10px',
-                background: '#ff4d4d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '50%',
-                width: '30px',
-                height: '30px',
-                cursor: 'pointer',
-                fontWeight: 'bold'
-              }}
-            >
-              ✕
-            </button>
-            <p style={{ color: '#888', fontSize: '12px', textAlign: 'center' }}>Tap ✕ to change</p>
-          </div>
-        )}
-        
         <div className="form-group">
           <label htmlFor="name">Product Name *</label>
           <input
@@ -552,21 +510,64 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
           </small>
         </div>
 
+        {/* ADDED: Image Upload Section */}
+        <div className="my-8 border-t border-gray-700 pt-6 image-upload-section">
+          <h4 className="text-xl font-bold mb-4 text-blue-400 text-center">
+            📷 UPLOAD PRODUCT IMAGE (REQUIRED)
+          </h4>
+          
+          {!imageUrl && (
+            <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded-lg">
+              <p className="text-red-300 text-sm">
+                ⚠️ <strong>Required:</strong> You must upload a product image to continue.
+              </p>
+            </div>
+          )}
+          
+          <div className="bg-blue-900/20 border-2 border-dashed border-blue-500 rounded-xl p-4 text-center">
+            <ImageUploader onUploadSuccess={(url) => setImageUrl(url)} />
+            
+            {imageUrl && (
+              <div className="mt-4">
+                <div className="relative inline-block">
+                  <img 
+                    src={imageUrl} 
+                    alt="Product preview" 
+                    className="w-32 h-32 rounded-xl object-cover mx-auto"
+                  />
+                  <button 
+                    onClick={handleDeletePhoto}
+                    className="absolute top-[-10px] right-[-10px] bg-red-600 text-white border-none rounded-full w-8 h-8 cursor-pointer font-bold flex items-center justify-center"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <p className="text-green-400 text-sm mt-2">
+                  ✓ Image uploaded successfully
+                </p>
+                <p className="text-gray-400 text-sm mt-1">
+                  Click ✕ to remove and upload a different image
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         <button
           type="submit"
-          disabled={submitting || userLoading}
+          disabled={submitting || userLoading || !imageUrl}
           style={{
             width: '100%',
             padding: '16px',
-            background: (submitting || userLoading)  
+            background: (submitting || userLoading || !imageUrl)  
               ? '#374151'
               : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            color: 'white', 
+            color: (submitting || userLoading || !imageUrl) ? '#9CA3AF' : 'white',
             border: 'none',
             borderRadius: '8px',
             fontSize: '18px',
             fontWeight: '700',
-            cursor: (submitting || userLoading)? 'not-allowed' : 'pointer',
+            cursor: (submitting || userLoading || !imageUrl) ? 'not-allowed' : 'pointer',
             transition: 'all 0.3s ease',
             opacity: submitting || userLoading ? 0.7 : 1,
             display: 'flex',
@@ -578,7 +579,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
             letterSpacing: '0.5px'
           }}
         >
-          {submitting ?  (
+          {submitting ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg 
                 style={{ 
@@ -596,6 +597,8 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
               </svg>
               Processing...
             </div>
+          ) : !imageUrl ? (
+            'Upload Image to Continue'
           ) : (
             'Complete Setup & List Product'
           )}
@@ -610,22 +613,31 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
           <li>Your location and phone number will be saved to your profile</li>
           <li>You can update your listings anytime</li>
           <li>Ensure all information is accurate before submitting</li>
+          <li><strong>Product image is required</strong> and will be auto-compressed</li>
         </ul>
       </div>
-        <button
-              type="button"
-              onClick={handleReset}
-              disabled={submitting || userLoading}
-              className="w-full py-3 mt-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
-              style={{
-                  cursor: submitting || userLoading ? 'not-allowed' : 'pointer',
-                  opacity: submitting || userLoading ? 0.7 : 1,
-              }}
+      
+      <button
+        type="button"
+        onClick={handleReset}
+        disabled={submitting || userLoading}
+        className="w-full py-4 mt-4 rounded-lg text-white font-bold text-lg transition-all duration-300"
+        style={{
+              width: '100%',
+              padding: '16px',
+              background: submitting || userLoading 
+                  ? '#374151'
+                  : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+              cursor: submitting || userLoading ? 'not-allowed' : 'pointer',
+              opacity: submitting || userLoading ? 0.7 : 1,
+              boxShadow: '0 4px 15px rgba(43, 235, 117, 0.3)',
+              letterSpacing: '0.5px'
+          }}
       >
-              Reset Form
-        </button>
+          Reset Form
+      </button>
     </div>
   );
 };
 
-export default SellerSetupForm;
+export default SellerSetupForm

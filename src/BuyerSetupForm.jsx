@@ -666,19 +666,26 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                         </ul>
                     </div>
 
-                    {/* Reset Form Button - Below Complete Setup */}
-                        <button
-                            type="button"
-                            onClick={handleReset}
-                            disabled={isLoading || isSubmitting || userLoading}
-                            className="w-full py-3 mt-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
-                            style={{
-                                cursor: isLoading || isSubmitting || userLoading ? 'not-allowed' : 'pointer',
-                                opacity: isLoading || isSubmitting || userLoading ? 0.7 : 1,
-                            }}
-                        >
-                            Reset Form
-                        </button>
+                {/* Reset Form Button - Below Complete Setup */}
+                    <button
+                        type="button"
+                        onClick={handleReset}
+                        disabled={isLoading || isSubmitting || userLoading}
+                        className="w-full py-4 mt-4 rounded-lg text-white font-bold text-lg transition-all duration-300"
+                        style={{
+                            width: '100%',
+                            padding: '16px',
+                            background: isLoading || isSubmitting || userLoading 
+                                ? '#374151'
+                                : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                            cursor: isLoading || isSubmitting || userLoading ? 'not-allowed' : 'pointer',
+                            opacity: isLoading || isSubmitting || userLoading ? 0.7 : 1,
+                            boxShadow: '0 4px 15px rgba(59, 130, 246, 0.3)',
+                            letterSpacing: '0.5px'
+                        }}
+                    >
+                        Reset Form
+                    </button>
                 </div>
 
             </div>

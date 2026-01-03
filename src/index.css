@@ -11,22 +11,14 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  
+  --header-height: 4.375rem; /* 70px = 4.375rem */
+  --safe-area-top: env(safe-area-inset-top, 0px);
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
+/* CRITICAL: Remove body padding-top completely */
 body {
   margin: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   min-width: 320px;
   min-height: 100vh;
   background-color: #242424; /* Dark background */
@@ -36,47 +28,163 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.87); /* Default light text for dark mode */
+  color: rgba(255, 255, 255, 0.87);
+  
+  /* REMOVED: padding-top: calc(var(--header-height) + var(--safe-area-top)); */
+  padding-top: 0 !important; /* Ensure no top padding */
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+:not(.social-media-page) header,
+:not(.social-media-page) nav,
+:not(.social-media-page) .navbar,
+:not(.social-media-page) .app-header,
+:not(.social-media-page) .top-navigation,
+:not(.social-media-page) .top-bar,
+:not(.social-media-page) .site-header,
+:not(.social-media-page) .social-header
+:not(.social-media-page) .main-header {
+  display: none !important;
+  height: 0 !important;
+  visibility: hidden !important;
+  position: absolute !important;
+  opacity: 0 !important;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+/* Show navigation ONLY on social media pages */
+.social-media-page header,
+.social-media-page nav,
+.social-media-page .navbar,
+.social-media-page .app-header,
+.social-media-page .top-navigation,
+.social-media-page .top-bar,
+.social-media-page .site-header,
+.social-media-page .main-header {
+  display: flex !important;
+  height: auto !important;
+  visibility: visible !important;
+  position: relative !important;
+  opacity: 1 !important;
 }
 
-@media (prefers-color-scheme: light) {
+.social-media-page .page-wrapper {
+  padding-top: 0 !important; /* We'll handle spacing in App.css */
+}
+
+/* First image content container - start at top */
+.signup-page main,
+.signup-page .form-container {
+  padding-top: 0 !important; /* Changed from padding-bottom */
+  padding-bottom: 1rem !important;
+}
+
+/* Specific spacing for the first image content */
+.signup-page .max-w-2xl,
+.signup-page .max-w-xl {
+  margin-top: 0 !important;
+  padding-top: 0 !important; /* Add this */
+  padding: 1.5rem !important;
+  min-height: 100vh; /* Changed from calc(100vh - var(--header-height) - 2rem) */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Remove top spacing for mode selection page */
+.mode-selection-page main,
+.mode-selection-page .form-container,
+.mode-selection-page .page-container {
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* Center the content vertically without header */
+.mode-selection-page .auth-container {
+  min-height: 100vh;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* Remove any header spacing if there's a hidden header */
+.mode-selection-page .app-header,
+.mode-selection-page .top-navigation {
+  display: none !important;
+  height: 0 !important;
+}
+
+/* ============ REMOVE UNNECESSARY SPACING ============ */
+
+/* Main content area - no top padding needed */
+main {
+  padding: 0 1rem 2rem 1rem; /* Top padding removed */
+  max-width: 1280px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* All form containers - remove top spacing */
+.form-container, 
+.max-w-2xl, 
+.max-w-xl,
+.page-container {
+  margin-top: 0 !important; /* Changed from 1rem */
+  padding-top: 0 !important; /* Changed from 1rem */
+  scroll-margin-top: 0; /* Changed from calc(var(--header-height) + 1rem) */
+}
+
+/* Remove utility classes for spacing */
+.safe-top {
+  margin-top: 0 !important; /* Changed from calc(var(--header-height) + 1rem) */
+}
+
+.page-start {
+  padding-top: 0 !important; /* Changed from calc(var(--header-height) + 2rem) */
+}
+
+.no-cut {
+  scroll-margin-top: 0; /* Changed from var(--header-height) */
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure content starts at top */
+*:first-child {
+  scroll-margin-top: 0; /* Changed from var(--header-height) */
+}
+
+/* Fix for mobile screens */
+@media (max-width: 768px) {
   :root {
-    color: #213547;
-    background-color: #ffffff; /* Light background for light mode */
+    --header-height: 0rem; /* Keep at 0 */
   }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+  
   body {
-    background-color: #ffffff; /* Light background for body in light mode */
-    color: #213547; /* Dark text for light mode */
+    padding-top: 0 !important; /* Removed calc(var(--header-height) + var(--safe-area-top) + 0.5rem) */
+  }
+  
+  .signup-page main,
+  .signup-page .form-container {
+    padding-top: 0 !important; /* Changed from calc(3.5rem + 0.5rem) */
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+  }
+  
+  .signup-page .max-w-2xl,
+  .signup-page .max-w-xl {
+    padding: 1rem !important;
+    padding-top: 0 !important; /* Add this */
   }
 }
 
+/* Very small screens */
+@media (max-width: 480px) {
+  .signup-page main,
+  .signup-page .form-container {
+    padding-top: 0 !important; /* Changed from calc(3rem + 0.25rem) */
+  }
+  
+  .signup-page .max-w-2xl {
+    padding: 0.75rem !important;
+    padding-top: 0 !important; /* Add this */
+  }
+}

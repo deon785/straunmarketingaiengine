@@ -17,6 +17,10 @@ Sentry.init({
     Sentry.replayIntegration(),
   ],
   tracesSampleRate: 1.0,
+   replaysSessionSampleRate: 0.1, // Sample 10% of sessions
+  // OR for error-only replays:
+  replaysOnErrorSampleRate: 1.0, // 100% of sessions with errors
+  
 });
 
 // 2. Define the root element

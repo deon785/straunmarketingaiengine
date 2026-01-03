@@ -1,63 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Auth from './signup';
-
 import SocialAIMarketingEngine from './SocialAIMarketingEngine';
 import PrivacyPolicy from './PrivacyPolicy';
-
+import Terms from './Terms.jsx';
 import './App.css';
 import { supabase } from './lib/supabase';
-import ErrorBoundary from './ErrorBoundary.jsx';
-
 import CookieBanner from './CookieBanner.jsx';
 import * as Sentry from "@sentry/react";
-
-import { useLocation } from "react-router-dom";
 import ReactGA from "react-ga4";
 import { toast, Toaster } from 'react-hot-toast';
 import HelpCenter from './HelpCenter.jsx';
 import AdminDashboard from './AdminDashboard.jsx';
-
 import NotificationsList from './NotificationsList';
 import WishlistButton from './WishlistButton.jsx';
+import React, { useState, useEffect } from 'react';
 
+// Import AuthContext from separate file
+import { AuthProvider, useAuth } from './AuthContext.jsx';
 
-export const NotificationWatcher = () => {
-  useEffect(() => {
-    const listen = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+// Import other utilities
+import { userMonitor } from './userBehaviorMonitor.js';
 
-      const channel = supabase
-        .channel('schema-db-changes')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-          (payload) => {
-              const audio = new Audio('https://cdn.pixabay.com/audio/2025/01/24/audio_9e338872f2.mp3'); // Path to your sound file
-              audio.play().catch(() => console.log("Sound will play after next user tap."));
-            toast.success(payload.new.message, {
-              icon: '🔔',
-              style: {
-                  borderRadius: '8px',
-                  background: '#333',
-                  color: '#000000ff',
-              },
-            
-            });
-          setUnreadCount(prev => prev + 1);  
-          }
-        )
-        .subscribe();
-
-      return () => supabase.removeChannel(channel);
-    };
-    listen();
-  }, []);
-
-  return <Toaster position="top-right" />;
-};
-
+// AnalyticsTracker component
 const AnalyticsTracker = () => {
   const location = useLocation();
 
@@ -66,6 +30,47 @@ const AnalyticsTracker = () => {
   }, [location]);
 
   return null;
+};
+
+const NotificationWatcher = () => {
+  const { user } = useAuth();
+  
+  useEffect(() => {
+    if (!user) return;
+    
+    // Track notification access
+    if (userMonitor) {
+      userMonitor.logAction(user.id, 'notifications_view');
+    }
+    
+    const listen = async () => {
+      const channel = supabase
+        .channel('schema-db-changes')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const audio = new Audio('https://cdn.pixabay.com/audio/2025/01/24/audio_9e338872f2.mp3');
+            audio.play().catch(() => console.log("Sound will play after next user tap."));
+            toast.success(payload.new.message, {
+              icon: '🔔',
+              style: {
+                borderRadius: '8px',
+                background: '#333',
+                color: '#000000ff',
+              },
+            });
+          }
+        )
+        .subscribe();
+
+      return () => supabase.removeChannel(channel);
+    };
+    
+    listen();
+  }, [user]);
+
+  return <Toaster position="top-right" />;
 };
 
 const OfflineBanner = () => {
@@ -88,14 +93,14 @@ const OfflineBanner = () => {
 
   return (
     <div style={{
-      backgroundColor: '#b91c1c', // Deep red
+      backgroundColor: '#b91c1c',
       color: 'white',
       padding: '10px',
       textAlign: 'center',
       position: 'fixed',
-      top: 0,
+      top: '4rem', // Start below the fixed header
       width: '100%',
-      zIndex: 9999,
+      zIndex: 999,
       fontSize: '14px',
       fontWeight: 'bold'
     }}>
@@ -104,62 +109,53 @@ const OfflineBanner = () => {
   );
 };
 
+// ============ ProtectedRoute ============
+const ProtectedRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) return <div>Loading...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  
+  return children;
+};
+
+// ============ AdminRoute ============
 const AdminRoute = ({ children }) => {
+  const { user, loading } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [adminLoading, setAdminLoading] = useState(true);
 
   useEffect(() => {
     const checkAdmin = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-        if (data?.role === 'admin') setIsAdmin(true);
+      if (!user) {
+        setAdminLoading(false);
+        return;
       }
-      setLoading(false);
+      
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      
+      if (data?.role === 'admin') setIsAdmin(true);
+      setAdminLoading(false);
     };
+    
     checkAdmin();
-  }, []);
+  }, [user]);
 
-  if (loading) return <div>Checking Permissions...</div>;
-  return isAdmin ? children : <Navigate to="/app" replace />;
-};
-
-// FIXED ProtectedRoute with proper state management
-const ProtectedRoute = ({ children }) => {
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Check current session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  if (loading) return <div>Loading...</div>; // Prevent redirecting while checking auth
-
-  if (!session) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (loading || adminLoading) return <div>Checking Permissions...</div>;
+  if (!user) return <Navigate to="/" replace />;
+  if (!isAdmin) return <Navigate to="/app" replace />;
+  
   return children;
 };
-// ============ ADD FEEDBACK BUTTON COMPONENT HERE ============
+
 const FeedbackButton = () => {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
+  const { user } = useAuth();
 
   const handleSendFeedback = async () => {
     if (!navigator.onLine) {
@@ -172,21 +168,17 @@ const FeedbackButton = () => {
         .from('feedback')
         .insert({ 
           feedback_text: feedbackText,
+          user_id: user?.id || null
         });
 
-      if (error) {
-        console.error('Error submitting feedback:', error.message);
-        alert('Sorry, there was an error submitting feedback.');
-        return;
-      }
-
+      if (error) throw error;
+      
       alert('Thank you! Your feedback has been saved!');
       setFeedbackText('');
       setShowFeedback(false);
-
     } catch (err) {
-      console.error('Unexpected error:', err);
-      alert('An unexpected error occurred.');
+      console.error('Error submitting feedback:', err);
+      alert('Sorry, there was an error submitting feedback.');
     }
   };
 
@@ -292,83 +284,105 @@ const FeedbackButton = () => {
     </>
   );
 };
-// ============ END FEEDBACK BUTTON COMPONENT ============
 
-const unlockAudio = () => {
-    const audio = new Audio('https://cdn.pixabay.com/audio/2025/01/24/audio_9e338872f2.mp3');
-    audio.muted = true; // Play it muted once to "wake up" the browser audio engine
-    audio.play().then(() => {
-        audio.pause();
-        audio.muted = false;
-        console.log("Audio unlocked for notifications!");
-    });
-};
-// Main App function - CORRECTED
-function App() {
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  const getUnreadCount = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { count, error } = await supabase
-          .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('status', 'unread');
-
-      if (!error) setUnreadCount(count || 0);
-
-    useEffect(() => {
-        getUnreadCount();
-    }, []);
-  };
+// Simple Header Component
+const AppHeader = () => {
+  const { user } = useAuth();
   
+  return (
+    <header className="app-header">
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        height: '100%',
+        padding: '0 1rem',
+        color: 'white'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <span style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>
+            Your App Name
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {user ? (
+            <>
+              <span style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                Hi, {user.email?.split('@')[0] || 'User'}
+              </span>
+            </>
+          ) : (
+            <span>Welcome!</span>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+};
+
+// ============ MAIN APP ============
+function App() {
+  // Initialize Sentry or other services
+  useEffect(() => {
+    console.log('App initialized');
+  }, []);
+
   return (
     <Sentry.ErrorBoundary
       fallback={<p>Something went wrong. We've been notified!</p>}
-      showDialog // ✅ This adds the "User Feedback" popup on crash
+      showDialog
     >
-      <Router>
-        <AnalyticsTracker />
-        
-        <div className="app">
-          <OfflineBanner />
-          <Routes>
-            {/* 1. Public Route: Login/Signup */}
-            <Route path="/" element={<Auth />} />
-
-            {/* 2. Public Route: Legal (GDPR Requirement) */}
-            <Route path="/privacy" element={<PrivacyPolicy />} />
-
-            <Route path="/wishlist" element={<WishlistButton />} />
-
-            {/* 4. Public Route: Help Center */}
-            <Route path="/help" element={<HelpCenter />} />
-
-            {/* 3. Protected Route: Main App Engine */}
-            <Route path="/app" element={
-              <ProtectedRoute>
-                <SocialAIMarketingEngine />
-              </ProtectedRoute>
-            } />
+      <AuthProvider>
+        <Router>
+          <AnalyticsTracker />
+          <NotificationWatcher />
+          
+          {/* Fixed Header */}
+          <AppHeader />
+          
+          <div className="app">
+            <OfflineBanner />
             
-            <Route path="/admin" element={
-              <AdminRoute>
-                <AdminDashboard />
-              </AdminRoute>
-            } />
+            {/* Main Content Area with proper spacing */}
+            <main>
+              <Routes>
+                {/* Public Routes */}
+                <Route path="/" element={<Auth />} />
+                <Route path="/privacy" element={<PrivacyPolicy />} />
+                <Route path="/terms" element={<Terms />} />
+                <Route path="/help" element={<HelpCenter />} />
+                <Route path="/wishlist" element={<WishlistButton />} />
+                
+                {/* Protected Routes */}
+                <Route path="/app" element={
+                  <ProtectedRoute>
+                    <SocialAIMarketingEngine />
+                  </ProtectedRoute>
+                } />
+                
+                <Route path="/admin" element={
+                  <AdminRoute>
+                    <AdminDashboard />
+                  </AdminRoute>
+                } />
+                
+                <Route path="/notifications" element={
+                  <ProtectedRoute>
+                    <NotificationsList />
+                  </ProtectedRoute>
+                } />
+                
+                {/* Catch-all */}
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </main>
             
-            <Route path="/notifications" element={<NotificationsList />} />
-
-            {/* 5. Catch-all: Redirect unknown paths to home */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-
-          <CookieBanner /> 
-          <FeedbackButton />
-        </div>
-      </Router>
+            <CookieBanner /> 
+            <FeedbackButton />
+          </div>
+        </Router>
+      </AuthProvider>
     </Sentry.ErrorBoundary>
   );
 }

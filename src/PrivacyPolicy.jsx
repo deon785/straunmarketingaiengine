@@ -1,45 +1,158 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+
 const PrivacyPolicy = () => {
-  // We store the HTML in a constant. 
   const navigate = useNavigate();
-  // Note: Using backticks `` allows for multi-line strings.
+  const scrollRef = useRef(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+
+  // Monitor scroll position to show/hide the "Scroll to Top" button
+  const handleScroll = (e) => {
+    const position = e.target.scrollTop;
+    setShowScrollBtn(position > 300);
+  };
+
+  const scrollToTop = () => {
+    scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const termlyHTML = `
     <style>
       [data-custom-class='body'], [data-custom-class='body'] * { background: transparent !important; }
-      [data-custom-class='title'], [data-custom-class='title'] * { font-family: Arial !important; font-size: 26px !important; color: #000000 !important; }
-      [data-custom-class='subtitle'], [data-custom-class='subtitle'] * { font-family: Arial !important; color: #595959 !important; font-size: 14px !important; }
-      [data-custom-class='heading_1'], [data-custom-class='heading_1'] * { font-family: Arial !important; font-size: 19px !important; color: #000000 !important; }
-      [data-custom-class='heading_2'], [data-custom-class='heading_2'] * { font-family: Arial !important; font-size: 17px !important; color: #000000 !important; }
-      [data-custom-class='body_text'], [data-custom-class='body_text'] * { color: #595959 !important; font-size: 14px !important; font-family: Arial !important; }
-      [data-custom-class='link'], [data-custom-class='link'] * { color: #3030F1 !important; font-size: 14px !important; font-family: Arial !important; word-break: break-word !important; }
+      [data-custom-class='title'], [data-custom-class='title'] * { font-family: Arial !important; font-size: 26px !important; color: #000000 !important; text-align: center; font-weight: bold; }
+      [data-custom-class='body_text'], [data-custom-class='body_text'] * { color: #595959 !important; font-size: 14px !important; line-height: 1.6 !important; font-family: Arial !important; }
+      .policy-section-title { color: #000; font-size: 18px; font-weight: bold; margin-top: 20px; display: block; }
+      .policy-sub-title { font-weight: bold; color: #333; margin-top: 15px; display: block; }
     </style>
-    
-    <span style="display: block;margin: 0 auto 3.125rem;width: 11.125rem;height: 2.375rem;background: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNzgiIGhlaWdodD0iMzgiIHZpZXdCb3g9IjAgMCAxNzggMzgiPgogICAgPGcgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj4KICAgICAgICA8cGF0aCBmaWxsPSIjRDFEMUQxIiBkPSJNNC4yODMgMjQuMTA3Yy0uNzA1IDAtMS4yNTgtLjI1Ni0xLjY2LS43NjhoLS4wODVjLjA1Ny41MDIuMDg2Ljc5Mi4wODYuODd2Mi40MzRILjk4NXYtOC42NDhoMS4zMzJsLjIzMS43NzloLjA3NmMuMzgzLS41OTQuOTUtLjg5MiAxLjcwMi0uODkyLjcxIDAgMS4yNjQuMjc0IDEuNjY1LjgyMi40MDEuNTQ4LjYwMiAxLjMwOS42MDIgMi4yODMgMCAuNjQtLjA5NCAxLjE5OC0uMjgyIDEuNjctLjE4OC40NzMtLjQ1Ni44MzMtLjgwMyAxLjA4LS4zNDcuMjQ3LS43NTYuMzctMS4yMjUuMzd6TTMuOCAxOS4xOTNjLS40MDUgMC0uNy4xMjQtLjg4Ni4zNzMtLjE4Ny4yNDktLjI4My42Ni0uMjkgMS4yMzN2LjE3N2MwIC42NDUuMDk1IDEuMTA3LjI4NyAxLjM4Ni4xOTIuMjguNDk1LjQxOS45MS40MTkuNzM0IDAgMS4xMDEtLjYwNSAxLjEwMS0xLjgxNiAwLS41OS0uMDktMS4wMzQtLjI3LTEuMzI5LS4xODItLjI5NS0uNDY1LS40NDMtLjg12LjgxNHExLjg2IDEuODYgMCAwIDEgMS4wMzQtLjMwOXptNC4wMjkgMS4xNjZjLS4zNDcgMC0uNjIuMTEtLjgxNy4zMy0uMTk3LjIyLS4zMS41MzMtLjMzOC45MzdoMi4yOTljLS4wMDctLjQwNC0uMTEzLS43MTctLjMxNy0uOTM3LS4yMDQtLjIyLS40OC0uMzMtLjgyNy0uMzN6bS4yMyA1LjA2Yy0uOTY2IDAtMS43MjItLjI2Ny0yLjI2Ni0uOC0uNTQ0LS41MzQtLjgxNi0xLjI5LS44MTYtMi4yNjcgMC0xLjAwNy4yNTEtMS43ODUuNzU0LTIuMzM0LjUwNC0uNTUgMS4yLS44MjUgMi4wODctLjgyNS44NDkgMCAxLjUxLjI0MiAxLjk4Mi43MjUuNDczLjQ4NC43MDkgMS4xNTIuNzA5IDIuMDA0di43OTVoLTMuODczYy4wMTguNDY1LjE1Ni44MjkuNDE0IDEuMDkuMjU4LjI2MS42Mi4zOTIgMS4wODUuMzkyLjM2MiAwIC43MDQtLjAzNyAxLjAyNi0uMTEzYTUuMTMzIDUuMTMzIDAgMCAwIDEuMDEtLjM2djEuMjY4Yy0uMjg3LjE0My0uNTkzLjI1LS45MTkuMzJhNS43OSA1Ljc5IDAgMCAxLTEuMTkyLjEwNHptNS44MDMgMGMtLjcwNiAwLTEuMjYtLjI3NS0xLjY2My0uODIyLS40MDMtLjU0OC0uNjA0LTEuMzA3LS42MDQtMi4yNzggMC0uOTg0LjIwNS0xLjc1Mi42MTUtMi4zMDEuNDEtLjU1Ljk3NS0uODI1IDEuMTc2LTEuNTkyVjI0aC0yLjI0di00Ljg5NmMwLS42OTMtLjE3Ni0xLjIyNC0uNTI4LTEuNTkyLS4zNTItLjM2OC0uODMyLS41NTItMS40NC0uNTUycy0xLjA5LjE4NC0xLjQ0OC41NTJjLS4zNTcuMzY4LS41MzYuODk5LS41MzYgMS41OTJWMjRoLTIuMjU2di04Ljg2NGgyLjI1NnpNMTY0LjkzNiAyNFYxMi4xNmgyLjI1NlYyNGgtMi4yNTZ6bTcuMDQtLjE2bC0zLjQ3Mi04LjcwNGgyLjUyOGwyLjI1NiA2LjMwNCAyLjM4NC02LjMwNGgyLjM1MmwtNS41MzYgMTMuMDU2aC0yLjM1MmwxLjg0LTQuMzUyeiIvPgogICAgPC9nPgo8L3N2Zz4=) center no-repeat;"></span>
-
     <div data-custom-class="body">
-      <div><strong><span style="font-size: 26px;"><span data-custom-class="title"><h1>PRIVACY POLICY</h1></span></span></strong></div>
-      <div><span style="color: rgb(127, 127, 127);"><strong><span style="font-size: 15px;"><span data-custom-class="subtitle">Last updated December 17, 2025</span></span></strong></span></div>
-      <br />
-      <div style="line-height: 1.5;">
-        <span data-custom-class="body_text">This Privacy Notice for Straun Marketing AI Engine describes how and why we might access, collect, store, use, and/or share your personal information...</span>
+      <div data-custom-class="title">PRIVACY POLICY</div>
+      <p data-custom-class="body_text"><strong>Last updated December 17, 2025</strong></p>
+      
+      <div data-custom-class="body_text">
+        <p>This Privacy Notice for Straun Marketing AI Engine ('<strong>we</strong>', '<strong>us</strong>', or '<strong>our</strong>'), describes how and why we might access, collect, store, use, and/or share ('<strong>process</strong>') your personal information when you use our services ('<strong>Services</strong>').</p>
+
+        <div class="policy-section-title">TABLE OF CONTENTS</div>
+        <ol>
+          <li>WHAT INFORMATION DO WE COLLECT?</li>
+          <li>HOW DO WE PROCESS YOUR INFORMATION?</li>
+          <li>WHEN AND WITH WHOM DO WE SHARE YOUR PERSONAL INFORMATION?</li>
+          <li>DO WE USE COOKIES AND OTHER TRACKING TECHNOLOGIES?</li>
+          <li>HOW LONG DO WE KEEP YOUR INFORMATION?</li>
+          <li>HOW DO WE KEEP YOUR INFORMATION SAFE?</li>
+          <li>DO WE COLLECT INFORMATION FROM MINORS?</li>
+          <li>WHAT ARE YOUR PRIVACY RIGHTS?</li>
+          <li>CONTROLS FOR DO-NOT-TRACK FEATURES?</li>
+          <li>DO OTHER REGIONS HAVE SPECIFIC PRIVACY RIGHTS?</li>
+          <li>DO WE MAKE UPDATES TO THIS NOTICE?</li>
+          <li>HOW CAN YOU CONTACT US ABOUT THIS NOTICE?</li>
+          <li>HOW CAN YOU REVIEW, UPDATE, OR DELETE THE DATA WE COLLECT FROM YOU?</li>
+        </ol>
+
+        <div class="policy-section-title">1. WHAT INFORMATION DO WE COLLECT?</div>
+        <p>We collect personal information that you voluntarily provide to us when you register on the Services, such as phone numbers, email addresses, usernames, and passwords.</p>
+
+        <div class="policy-section-title">2. HOW DO WE PROCESS YOUR INFORMATION?</div>
+        <p>We process your information to provide, improve, and administer our Services, communicate with you, for security and fraud prevention, and to comply with law.</p>
+
+        <div class="policy-section-title">3. WHEN AND WITH WHOM DO WE SHARE YOUR PERSONAL INFORMATION?</div>
+        <p>We may share your data with third-party vendors like Supabase (for database/auth) and Vercel (for hosting) who perform services for us.</p>
+
+        <div class="policy-section-title">4. DO WE USE COOKIES AND OTHER TRACKING TECHNOLOGIES?</div>
+        <p><em><strong>In Short:</strong> We may use cookies and other tracking technologies to collect and store your information.</em></p>
+        <p>We may use cookies and similar tracking technologies (like web beacons and pixels) to access or store information. Specific information about how we use such technologies and how you can refuse certain cookies is set out in our Cookie Notice.</p>
+
+        <div class="policy-section-title">5. HOW LONG DO WE KEEP YOUR INFORMATION?</div>
+        <p><em><strong>In Short:</strong> We keep your information for as long as necessary to fulfil the purposes outlined in this Privacy Notice unless otherwise required by law.</em></p>
+        <p>We will only keep your personal information for as long as it is necessary for the purposes set out in this Privacy Notice, unless a longer retention period is required or permitted by law (such as tax, accounting, or other legal requirements). No purpose in this notice will require us keeping your personal information for longer than the period of time in which users have an account with us.</p>
+
+        <div class="policy-section-title">6. HOW DO WE KEEP YOUR INFORMATION SAFE?</div>
+        <p><em><strong>In Short:</strong> We aim to protect your personal information through a system of organisational and technical security measures.</em></p>
+        <p>We have implemented appropriate and reasonable technical and organisational security measures designed to protect the security of any personal information we process. However, despite our safeguards and efforts to secure your information, no electronic transmission over the Internet or information storage technology can be guaranteed to be 100% secure.</p>
+
+        <div class="policy-section-title">7. DO WE COLLECT INFORMATION FROM MINORS?</div>
+        <p><em><strong>In Short:</strong> We do not knowingly collect data from or market to children under 18 years of age.</em></p>
+        <p>We do not knowingly solicit data from or market to children under 18 years of age. By using the Services, you represent that you are at least 18 or that you are the parent or guardian of such a minor and consent to such minor dependent’s use of the Services.</p>
+
+        <div class="policy-section-title">8. WHAT ARE YOUR PRIVACY RIGHTS?</div>
+        <p><em><strong>In Short:</strong> You may review, change, or terminate your account at any time.</em></p>
+        <p>If you are located in the EEA or UK and you believe we are unlawfully processing your personal information, you also have the right to complain to your Member State data protection authority. You can find their contact details here: <a href="https://ec.europa.eu/justice/data-protection/bodies/authorities/index_en.htm" style="color: #3030F1;">https://ec.europa.eu/justice/data-protection/bodies/authorities/index_en.htm</a></p>
+        <p><strong>Withdrawing your consent:</strong> If we are relying on your consent to process your personal information, you have the right to withdraw your consent at any time. You can withdraw your consent at any time by contacting us using the contact details provided in the section 'HOW CAN YOU CONTACT US ABOUT THIS NOTICE?' below.</p>
+
+        <div class="policy-section-title">11. DO WE MAKE UPDATES TO THIS NOTICE?</div>
+        <p><em><strong>In Short:</strong> Yes, we will update this notice as necessary to stay compliant with relevant laws.</em></p>
+        <p>We may update this Privacy Notice from time to time. The updated version will be indicated by an updated 'Revised' date and the updated version will be effective as soon as it is accessible.</p>
+
+        <div class="policy-section-title">12. HOW CAN YOU CONTACT US ABOUT THIS NOTICE?</div>
+        <p>If you have questions or comments about this notice, you may email us at <strong>deonmahachi8@gmail.com</strong>.</p>
+
+        <div class="policy-section-title">13. HOW CAN YOU REVIEW, UPDATE, OR DELETE THE DATA WE COLLECT FROM YOU?</div>
+        <p>Based on the applicable laws of your country, you may have the right to request access to the personal information we collect from you, change that information, or delete it. To request to review, update, or delete your personal information, please fill out a <span style="color: #3030F1; text-decoration: underline;">data subject access request</span>.</p>
       </div>
-      </div>
+    </div>
   `;
 
   return (
-    <div className="privacy-container" style={{ padding: '20px', maxWidth: '1000px', margin: '0 auto' }}>
-      <button 
-        onClick={() => navigate(-1)} 
-        style={{ marginBottom: '20px', cursor: 'pointer', padding: '8px 16px' }}
-      >
-        ← Back to App
-      </button>
-      
-      <div className="privacy-page">
-        {/* This is the line that actually renders the HTML string */}
-        <div dangerouslySetInnerHTML={{ __html: termlyHTML }} />
+    <div style={{ 
+      padding: '10px', 
+      maxWidth: '800px', 
+      margin: '0 auto', 
+      height: '100vh', 
+      display: 'flex', 
+      flexDirection: 'column',
+      backgroundColor: '#fff' 
+    }}>
+      {/* Navigation Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+        <button 
+          onClick={() => navigate(-1)} 
+          style={{ cursor: 'pointer', padding: '8px 16px', borderRadius: '4px', border: '1px solid #ccc' }}
+        >
+          ← Back
+        </button>
+        <h2 style={{ fontSize: '1.2rem', margin: 0 }}>Privacy Policy</h2>
       </div>
+
+      {/* Scrollable Content Area */}
+      <div 
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{ 
+          flex: 1, 
+          overflowY: 'auto', 
+          WebkitOverflowScrolling: 'touch', 
+          border: '1px solid #f0f0f0',
+          padding: '20px',
+          marginTop: '10px',
+          borderRadius: '8px'
+        }}
+      >
+        <div 
+          style={{ wordBreak: 'break-word' }} 
+          dangerouslySetInnerHTML={{ __html: termlyHTML }} 
+        />
+      </div>
+
+      {/* Floating Scroll to Top Button */}
+      {showScrollBtn && (
+        <button 
+          onClick={scrollToTop}
+          style={{
+            position: 'fixed',
+            bottom: '30px',
+            right: '30px',
+            backgroundColor: '#000',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+          }}
+        >
+          ↑
+        </button>
+      )}
     </div>
   );
 };

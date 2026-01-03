@@ -5,9 +5,9 @@ import {
   faHeart,
   faChevronDown,
   faChevronUp,
-  faBars
+  faBars,
+  faTimes
 } from '@fortawesome/free-solid-svg-icons';
-
 
 const TopNavigationBar = ({ 
   user, 
@@ -18,72 +18,44 @@ const TopNavigationBar = ({
   onSignOut,
   onSettingsClick,
   isCollapsed = false,
-  onToggleCollapse 
+  onToggleCollapse,
+  isHidden,
+  appName = "Straun Marketing AI Engine" // ADD: optional prop for app name
 }) => {
   const [isVisible, setIsVisible] = useState(true);
-  const [lastScrollY, setLastScrollY] = useState(0);
   const navRef = useRef(null);
 
-  // Auto-hide on scroll logic
-  useEffect(() => {
-      let ticking = false;
-      let scrollTimeout;
-      
-      const handleScroll = () => {
-          if (!ticking) {
-              window.requestAnimationFrame(() => {
-                  const currentScrollY = window.scrollY;
-                  
-                  // Clear any existing timeout
-                  clearTimeout(scrollTimeout);
-                  
-                  // Always show when at the top
-                  if (currentScrollY < 50) {
-                      setIsVisible(true);
-                      setLastScrollY(currentScrollY);
-                      ticking = false;
-                      return;
-                  }
-                  
-                  // Show immediately when scrolling up
-                  if (currentScrollY < lastScrollY) {
-                      setIsVisible(true);
-                  }
-                  // Hide with delay when scrolling down
-                  else if (currentScrollY > lastScrollY) {
-                      scrollTimeout = setTimeout(() => {
-                          if (currentScrollY > 100) { // Only hide if scrolled enough
-                              setIsVisible(false);
-                          }
-                      }, 100); // 100ms delay
-                  }
-                  
-                  setLastScrollY(currentScrollY);
-                  ticking = false;
-              });
-              ticking = true;
-          }
-      };
-
-      window.addEventListener('scroll', handleScroll, { passive: true });
-      
-      return () => {
-          window.removeEventListener('scroll', handleScroll);
-          clearTimeout(scrollTimeout);
-      };
-  }, [lastScrollY]);
-
+  // COLLAPSED VIEW (Menu Only)
   if (isCollapsed || !isVisible) {
     return (
       <div 
         className={`collapsed-nav ${isCollapsed ? 'collapsed-nav' : ''}`} 
         ref={navRef}
+        style={{
+          transform: isCollapsed ? 'translateY(0)' : 'translateY(-100%)',
+          opacity: isCollapsed ? 1 : 0,
+          pointerEvents: isCollapsed ? 'auto' : 'none'
+        }}
       >
         <button 
           onClick={onToggleCollapse}
-          className="expand-nav-button"
+          className="menu-toggle-button"
           title="Show Full Navigation"
-          onMouseEnter={() => setIsVisible(true)} // Show on hover
+          onMouseEnter={() => setIsVisible(true)}
+          style={{
+            background: 'rgba(255, 255, 255, 0.3)',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
+            color: 'white',
+            padding: '8px 16px',
+            borderRadius: '20px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backdropFilter: 'blur(10px)',
+            fontWeight: '600'
+          }}
         >
           <FontAwesomeIcon icon={faBars} />
           <span className="button-text">
@@ -102,40 +74,25 @@ const TopNavigationBar = ({
             📍 {profileData?.location?.split(',')[0] || 'No location'}
           </span>
         </div>
-        
-        <div className="collapsed-actions">
-          <button 
-            onClick={onToggleCollapse}
-            className="show-full-button"
-            title="Show Full Navigation"
-          >
-            <FontAwesomeIcon icon={faChevronDown} />
-          </button>
-        </div>
       </div>
     );
   }
 
+  // FULL NAVBAR VIEW
   return (
     <header 
       className={`social-header ${isCollapsed ? 'collapsed-nav' : ''}`}
       style={{
-        transform: isVisible ? 'translateY(0)' : 'translateY(-100%)'
+        transform: 'translateY(0)',
+        opacity: 1
       }}
       ref={navRef}
-      onMouseLeave={() => {
-        // Auto-hide after delay when mouse leaves (optional)
-        if (window.scrollY > 100) {
-          setTimeout(() => setIsVisible(false), 1000);
-        }
-      }}
     >
       <div className="header-content">
         <div className="header-top-row">
+          {/* CHANGED: Replace dynamic text with app name */}
           <h1 className="social-title">
-            {selectedMode === 'seller' 
-              ? 'Find Customers for Your Products' 
-              : 'Find Products to Buy'}
+            {appName} {/* Now showing just the app name */}
             <span className="user-mode">
               {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
             </span>
@@ -151,19 +108,33 @@ const TopNavigationBar = ({
               />
               <span className="wishlist-badge"></span>
             </Link>
-            
+
             <button 
-              onClick={() => setIsVisible(false)}
-              className="hide-nav-button"
-              title="Hide Navigation"
+              onClick={() => {
+                setIsVisible(false);
+                if (onToggleCollapse) onToggleCollapse();
+              }}
+              className="close-nav-button"
+              title="Collapse Navigation"
+              style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: 'white',
+                padding: '6px 12px',
+                borderRadius: '20px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                marginLeft: '10px'
+              }}
             >
-              <FontAwesomeIcon icon={faChevronUp} />
+              <FontAwesomeIcon icon={faTimes} />
               <span className="button-text">
                 Hide
               </span>
             </button>
-
-            
           </div>
         </div>
         

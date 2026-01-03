@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import './App.css';
@@ -13,8 +13,77 @@ import TopNavigationBar from './TopNavigationBar';
 import { Link } from 'react-router-dom';
 
 import ReactGA from "react-ga4";
-import WishlistButton from './WishlistButton.jsx';
 import WishlistManager from './WishlistManager.jsx';
+import { useAuth } from './AuthContext.jsx';
+import { SmartRateLimiter } from './smartRateLimiter.js';
+import ReportButton from './ReportButton.jsx';
+
+class UserBehaviorAnalyzer {
+  constructor() {
+    this.actions = new Map();
+    this.sessions = new Map();
+  }
+
+  recordUserAction(userId, actionType, metadata = {}) {
+    console.log(`📊 User Action: ${userId} - ${actionType}`, metadata);
+    
+    // Store for rate limiting analysis
+    const key = `${userId}_${actionType}`;
+    const actions = this.actions.get(key) || [];
+    actions.push({
+      timestamp: Date.now(),
+      metadata,
+      actionType
+    });
+    this.actions.set(key, actions);
+    
+    // Send to analytics (optional)
+    if (typeof ReactGA !== 'undefined') {
+      ReactGA.event({
+        category: 'UserBehavior',
+        action: actionType,
+        label: userId,
+        value: Object.keys(metadata).length
+      });
+    }
+    
+    return { isSuspicious: false, score: 0 }; // Basic implementation
+  }
+
+  getUserBehavior(userId, actionType) {
+    const key = `${userId}_${actionType}`;
+    return this.actions.get(key) || [];
+  }
+
+  // Simple suspicious behavior detection
+  detectSuspiciousBehavior(userId, actionType, threshold = 10) {
+    const actions = this.getUserBehavior(userId, actionType);
+    const lastMinute = actions.filter(a => 
+      Date.now() - a.timestamp < 60000
+    );
+    
+    return {
+      isSuspicious: lastMinute.length > threshold,
+      score: lastMinute.length,
+      reason: lastMinute.length > threshold ? 
+        `Too many ${actionType} actions (${lastMinute.length} in last minute)` : 
+        null
+    };
+  }
+}
+
+let smartLimiterInstance;
+let behaviorAnalyzerInstance;
+
+const initializeRateLimiter = () => {
+  if (!behaviorAnalyzerInstance) {
+    behaviorAnalyzerInstance = new UserBehaviorAnalyzer();
+  }
+  if (!smartLimiterInstance) {
+    smartLimiterInstance = new SmartRateLimiter(behaviorAnalyzerInstance);
+  }
+  return { smartLimiterInstance, behaviorAnalyzerInstance };
+};
 
 // Style for the big green buttons
 const mainButtonStyle = (color) => ({
@@ -97,10 +166,19 @@ const sanitizeProductName = (name) => {
         .substring(0, 200);
 };
 
-// Helper function for word variations
+// Helper function for word variations - FIXED
 function getWordVariations(word) {
+    // ADD MORE COMPREHENSIVE CHECKS
+    if (!word || typeof word !== 'string') {
+        console.warn('getWordVariations received invalid input:', word, typeof word);
+        return [];
+    }
+    
     const sanitizedWord = sanitizeInput(word.toLowerCase(), 50);
-    if (!sanitizedWord) return [];
+    
+    if (!sanitizedWord || sanitizedWord.trim() === '') {
+        return [];
+    }
     
     const variations = new Set();
     
@@ -126,11 +204,12 @@ function getWordVariations(word) {
 
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
-    
-    // --- AUTH STATE ---
-    const [user, setUser] = useState(null);
-    const [authLoading, setAuthLoading] = useState(true);
-    
+    const { user, loading: authLoading } = useAuth();
+
+    useEffect(() => {
+        initializeRateLimiter();
+    }, []);
+
     // --- SIMPLIFIED MODE & PROFILE STATE ---
     const [selectedMode, setSelectedMode] = useState(null);
     const [isProfileComplete, setIsProfileComplete] = useState(false);
@@ -148,8 +227,7 @@ function SocialAIMarketingEngine() {
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
     const [profileLoading, setProfileLoading] = useState(false);
-    const [items, setItems] = useState([]);
-
+    
     const [showSettings, setShowSettings] = useState(false);
     
     // Add these to your state declarations
@@ -159,8 +237,6 @@ function SocialAIMarketingEngine() {
     const [productsFetchLoading, setProductsFetchLoading] = useState(false);
 
     const [signOutLoading, setSignOutLoading] = useState(false);
-    const [openingWhatsApp, setOpeningWhatsApp] = useState(false);
-    const [calling, setCalling] = useState(false);
 
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -171,11 +247,25 @@ function SocialAIMarketingEngine() {
     const [isVisible, setIsVisible] = useState(false);
     const [showWishlist, setShowWishlist] = useState(false);
    
+    const [openingWhatsApp, setOpeningWhatsApp] = useState(false); 
+    const [calling, setCalling] = useState(false); 
+    const [items, setItems] = useState([]);
+
+    const [searchCache, setSearchCache] = useState({});
+
     const [currentPage, setCurrentPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const ITEMS_PER_PAGE = 6;
 
-    // FIXED: Added missing closing brace and fixed variable reference
+    const [isNavbarHidden, setIsNavbarHidden] = useState(false);
+    const [isReportButtonFloating, setIsReportButtonFloating] = useState(true);
+ 
+    const [limits, setLimits] = useState({});
+
+    useEffect(() => {
+        initializeRateLimiter();
+    }, []);
+
     const loadMoreProducts = async () => {
         setLoading(true);
         try {
@@ -205,29 +295,63 @@ function SocialAIMarketingEngine() {
             setLoading(false);
         }
     };
+   
+   const fetchNotifications = useCallback(async () => {
+        if (!user || !user.id) {
+            console.log('No user for notifications fetch');
+            return;
+        }
 
-    const scrollToTop = () => {
-        window.scrollTo({
-            top: 0,
-            behavior: 'smooth'
-        });
-    };
+        try {
+            const { data, error } = await supabase
+                .from('notifications')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(50); // Limit to prevent large data loads
 
-    const fetchNotifications = useCallback(async () => {
-        if (!user) return;
-        
-        const { data, error } = await supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
-        
-        if (!error && data) {
-            setNotifications(data);
-            const unread = data.filter(n => !n.read).length;
+            if (error) {
+                console.error('Error fetching notifications:', error);
+                return;
+            }
+
+            if (!data) {
+                setNotifications([]);
+                setUnreadCount(0);
+                return;
+            }
+
+            // Update state
+            setNotifications(data || []);
+            
+            // Calculate unread count
+            const unread = (data || []).filter(n => !n.read).length;
             setUnreadCount(unread);
+
+        } catch (error) {
+            console.error('Unexpected error fetching notifications:', error);
+            // Don't crash the app - just log the error
         }
     }, [user]);
+
+    const playNotificationSound = () => {
+        const soundUrl = 'https://cdn.pixabay.com/download/audio/2023/11/07/audio_f558d7e0d3.mp3';
+        const audio = new Audio(soundUrl);
+        audio.volume = 0.3;
+             audio.play().catch(e => console.log('Audio play failed:', e));
+
+    // Fallback to browser beep
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = ctx.createOscillator();
+            oscillator.connect(ctx.destination);
+            oscillator.frequency.value = 800;
+            oscillator.start();
+            oscillator.stop(ctx.currentTime + 0.1);
+        } catch (beepErr) {
+        console.log('Browser beep also failed');
+        }
+    };
 
     const markAsRead = async (notificationId) => {
         await supabase
@@ -248,6 +372,35 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---  
     const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
+     
+        if (!smartLimiterInstance) {
+            // Only initialize if not already done
+            initializeRateLimiter();
+        }
+        
+        // Behavior check
+        if (!user) {
+            alert('Please log in to contact');
+            return;
+        }
+        
+        // Check rate limit using the smart rate limiter instance
+        let check;
+        try {
+            check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
+                targetId: targetUserId,
+                type: type,
+                product: product?.name
+            });
+            
+            if (!check.allowed) {
+                alert(`Contact blocked: ${check.reason}`);
+                return;
+            }
+        } catch (error) {
+            console.error('Rate limit check error:', error);
+            // Continue anyway if rate limiter fails
+        }
         setOpeningWhatsApp(true);
 
         if (!validatePhoneNumber(targetPhoneNumber)) {
@@ -257,55 +410,70 @@ function SocialAIMarketingEngine() {
         }
 
         try {
-            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            if (behaviorAnalyzerInstance) {
+                behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+                    targetId: targetUserId,
+                    contactType: type,
+                    productName: product?.name
+                });
+            }
 
+            // ===== ORIGINAL CONTACT LOGIC =====
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
             const { data: profile } = await supabase
-                .from('profiles')
-                .select('phone_number')
-                .eq('id', currentUser?.id)
-                .single();
+            .from('profiles')
+            .select('phone_number')
+            .eq('id', currentUser?.id)
+            .single();
 
             await supabase.from('notifications').insert([
-                { 
-                    user_id: targetUserId,
-                    sender_id: currentUser?.id,
-                    product_id: product?.id,
-                    buyer_phone: profile?.phone_number || 'No phone provided',
-                    product_image: product?.image_url,
-                    message: type === 'seller'
-                        ? `📢 New buyer interested in ${targetName}!` 
-                        : `👋 Seller is reaching out about ${targetName}!`,
-                    link_type: type,    
-                    status: 'unread'
-                }
+            { 
+                user_id: targetUserId,
+                sender_id: currentUser?.id,
+                product_id: product?.id,
+                buyer_phone: profile?.phone_number || 'No phone provided',
+                product_image: product?.image_url,
+                message: type === 'seller'
+                ? `📢 New buyer interested in ${targetName}!` 
+                : `👋 Seller is reaching out about ${targetName}!`,
+                link_type: type,    
+                status: 'unread'
+            }
             ]);
 
             if (!targetPhoneNumber) {
-                alert('Phone number not available');
-                return;
+            alert('Phone number not available');
+            setOpeningWhatsApp(false);
+            return;
             }
             
             const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
             const finalNumber = cleanNumber.startsWith('263') 
-                ? cleanNumber 
-                : `263${cleanNumber.replace(/^0/, '')}`;
+            ? cleanNumber 
+            : `263${cleanNumber.replace(/^0/, '')}`;
             
             const message = encodeURIComponent(
-                type === 'seller' 
-                    ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
-                    : `Hi! I'm interested in your ${targetName}. Is it still available?`
+            type === 'seller' 
+                ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
+                : `Hi! I'm interested in your ${targetName}. Is it still available?`
             );
             
             const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
             window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
                 
             if (typeof ReactGA !== 'undefined') {
-                ReactGA.event({
-                    category: 'Conversion',
-                    action: 'WhatsApp Contact Clicked',
-                    label: type
-                });
+            ReactGA.event({
+                category: 'Conversion',
+                action: 'WhatsApp Contact Clicked',
+                label: type
+            });
             }
+            
+            setLimits(prev => ({
+                ...prev,
+                CONTACT: check || { remaining: 4, total: 5 } // Default if check not available
+            }));
+
         } catch (error) {
             console.error('Error in handleContact:', error);
             alert('Failed to initiate WhatsApp contact. Please try again.');
@@ -352,13 +520,14 @@ function SocialAIMarketingEngine() {
     };
 
     // Fetch products with seller info
-    const fetchProducts = useCallback(async () => {
+    const fetchProducts = useCallback(async (searchTerm = '') => {
         setProductsFetchLoading(true);
         setError(null);
         try {
             const { data: products, error: productsError } = await supabase
                 .from('products')
                 .select('*')
+                .ilike('name', `%${searchTerm}%`)
                 .order('created_at', { ascending: false });
 
             if (productsError) {
@@ -372,7 +541,7 @@ function SocialAIMarketingEngine() {
             }
 
             const sellerIds = [...new Set(products.map(p => p.seller_id).filter(id => id))];
-            
+
             let sellersMap = {};
             if (sellerIds.length > 0) {
                 const { data: sellers, error: sellersError } = await supabase
@@ -392,7 +561,7 @@ function SocialAIMarketingEngine() {
                 ...product,
                 seller: sellersMap[product.seller_id] || null
             }));
-            
+
             setItems(productsWithSellers);
             setAllProducts(productsWithSellers);
             
@@ -402,12 +571,215 @@ function SocialAIMarketingEngine() {
         } finally {
             setProductsFetchLoading(false);
         }
-    }, []);
+    }, [user]);
+
+   // --- SAVE TO WISHLIST FUNCTION ---
+    const saveToWishlist = async (item, itemType = 'product') => {
+    // Behavior check
+    if (!user) {
+        alert('Please log in to save items to wishlist');
+        return;
+    }
+
+    if (!smartLimiterInstance) {
+        initializeRateLimiter();
+    }
+    
+    // Check rate limit
+    let check;
+    try {
+        check = await smartLimiterInstance.checkAndUpdate(user.id, 'SAVE_WISHLIST', {
+        itemType: itemType,
+        itemName: item.name
+        });
+        
+        if (!check.allowed) {
+        alert(`Save blocked: ${check.reason}`);
+        return;
+        }
+    } catch (error) {
+        console.error('Rate limit check error:', error);
+        // Continue anyway if rate limiter fails
+    }
+
+    try {
+        // Check if item is already in wishlist
+        const { data: existing } = await supabase
+        .from('saved_items')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('item_type', itemType)
+        .eq(itemType === 'product' ? 'product_id' : 'prospect_id', 
+            itemType === 'product' ? item.id : item.id)
+        .single();
+
+        if (existing) {
+        alert('✅ This item is already in your wishlist!');
+        return;
+        }
+
+        // Save to wishlist
+        const savedData = {
+        user_id: user.id,
+        item_type: itemType,
+        created_at: new Date().toISOString()
+        };
+
+        if (itemType === 'product') {
+        savedData.product_id = item.id;
+        savedData.product_name = item.name;
+        savedData.product_price = item.price;
+        savedData.product_image = item.image_url;
+        savedData.seller_location = item.location;
+        savedData.seller_phone = item.phone_number;
+        } else {
+        savedData.prospect_id = item.id;
+        savedData.prospect_email = item.email;
+        savedData.prospect_location = item.location;
+        savedData.prospect_phone = item.phone_number;
+        savedData.interested_in = item.interest;
+        }
+
+        // Save to database
+        const { error } = await supabase
+        .from('saved_items')
+        .insert([savedData]);
+
+        if (error) throw error;
+
+        // REMOVE the part that shows WishlistManager interface
+        // Just show a simple message instead
+        
+        if (itemType === 'product') {
+        try {
+            const followUpDate = new Date();
+            followUpDate.setDate(followUpDate.getDate() + 2);
+            
+            await supabase.from('follow_ups').insert([{
+            product_id: item.id,
+            user_id: user.id,
+            scheduled_for: followUpDate.toISOString(),
+            step_number: 1,
+            status: 'pending'
+            }]);
+            
+            // CHANGED: Simple message without opening interface
+            alert('✅ Saved to wishlist! Reminder set for 2 days from now.\n\nClick "My Wishlist" button to view all saved items.');
+        } catch (followUpError) {
+            console.log('Follow-up scheduling skipped');
+            // CHANGED: Simple message
+            alert('✅ Saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+        }
+        } else {
+        // CHANGED: Simple message for prospects too
+        alert('✅ Prospect saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+        }
+        
+        // Track with Google Analytics
+        if (typeof ReactGA !== 'undefined') {
+        ReactGA.event({
+            category: 'Wishlist',
+            action: 'Item Added',
+            label: itemType
+        });
+        }
+        
+        // Track user behavior
+        if (behaviorAnalyzerInstance) {
+        behaviorAnalyzerInstance.recordUserAction(user.id, 'save_to_wishlist', {
+            itemType: itemType,
+            itemName: item.name
+        });
+        }
+        
+    } catch (error) {
+        console.error('Error saving to wishlist:', error);
+        alert('Failed to save to wishlist. Please try again.');
+    }
+    };
+ 
+    // --- CHECK FOR MATCHES FUNCTION ---
+    const checkForMatches = async (userId, searchTerm = '', productData = null) => {
+        try {
+            const { data: currentUser } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .single();
+
+            if (!currentUser) return;
+
+            if (currentUser.is_buyer && searchTerm) {
+                // Buyer searched - notify matching sellers
+                const { data: matchingProducts } = await supabase
+                    .from('products')
+                    .select('seller_id, name')
+                    .ilike('name', `%${searchTerm}%`)
+                    .neq('seller_id', userId);
+
+                if (matchingProducts && matchingProducts.length > 0) {
+                    const uniqueSellers = [...new Set(matchingProducts.map(p => p.seller_id))];
+                    
+                    uniqueSellers.forEach(async (sellerId) => {
+                        await supabase.from('notifications').insert([{
+                            user_id: sellerId,
+                            sender_id: userId,
+                            message: `🔍 Buyer searched for "${searchTerm}" and may be interested in your products!`,
+                            link_type: 'search_match',
+                            status: 'unread'
+                        }]);
+                    });
+                }
+            }
+
+            if (currentUser.is_seller && productData) {
+                // Seller listed product - notify matching buyers
+                const { data: allBuyers } = await supabase
+                    .from('profiles')
+                    .select('user_id, interests')
+                    .eq('is_buyer', true)
+                    .neq('user_id', userId)
+                    .eq('is_active', true);
+
+                if (allBuyers && allBuyers.length > 0) {
+                    const productNameLower = productData.name ? productData.name.toLowerCase() : '';
+                    
+                    allBuyers.forEach(async (buyer) => {
+                        try {
+                            const buyerInterests = Array.isArray(buyer.interests) 
+                                ? buyer.interests 
+                                : JSON.parse(buyer.interests || '[]');
+                            
+                            const hasMatch = buyerInterests.some(interest => 
+                                interest && interest.toLowerCase().includes(productNameLower) ||
+                                productNameLower.includes(interest ? interest.toLowerCase() : '')
+                            );
+
+                            if (hasMatch) {
+                                await supabase.from('notifications').insert([{
+                                    user_id: buyer.user_id,
+                                    sender_id: userId,
+                                    product_id: productData.id,
+                                    message: `🎯 New match! Seller listed "${productData.name}" that matches your interests!`,
+                                    link_type: 'product_match',
+                                    status: 'unread'
+                                }]);
+                            }
+                        } catch (e) {
+                            console.log('Error checking match:', e);
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error checking matches:', error);
+        }
+    };
 
     // Fetch user profile
-    const fetchProfile = useCallback(async () => {
+    const fetchProfile = useCallback(async () => {  
         if (!user) return;
-        
+
         try {
             const { data, error } = await supabase
                 .from('profiles')
@@ -421,28 +793,145 @@ function SocialAIMarketingEngine() {
             }
             
             setProfileData(data);
+            return data;  // ✅ Just return profile
         } catch (err) {
-            console.error("❌ Error in fetchProfile:", err);
+            console.error("❌ Error in fetchProfile:", err);    
         }
-    }, [user]);
+    }, [user]); 
+
+    // Add toast notification function
+    const showToastNotification = useCallback((message) => {
+        // Create toast container if it doesn't exist
+        let toastContainer = document.getElementById('toast-container');
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.id = 'toast-container';
+            toastContainer.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 99999;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-width: 350px;
+            `;
+            document.body.appendChild(toastContainer);
+        }
+
+        // Create toast element
+        const toastId = `toast-${Date.now()}`;
+        const toast = document.createElement('div');
+        toast.id = toastId;
+        toast.className = 'notification-toast';
+        toast.innerHTML = `
+            <div class="toast-content" style="
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 16px;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                animation: slideIn 0.3s ease-out;
+            ">
+                <span class="toast-icon" style="font-size: 18px;">🔔</span>
+                <span class="toast-message" style="flex: 1; font-size: 14px; line-height: 1.4;">
+                    ${message.replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                </span>
+                <button class="toast-close" style="
+                    background: none;
+                    border: none;
+                    color: white;
+                    font-size: 20px;
+                    cursor: pointer;
+                    padding: 0;
+                    line-height: 1;
+                ">×</button>
+            </div>
+        `;
+
+        // Add CSS animation
+        if (!document.querySelector('#toast-animation')) {
+            const style = document.createElement('style');
+            style.id = 'toast-animation';
+            style.textContent = `
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+                @keyframes fadeOut {
+                    from { opacity: 1; }
+                    to { opacity: 0; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Add to container
+        toastContainer.appendChild(toast);
+
+        // Auto remove after 5 seconds
+        const autoRemoveTimer = setTimeout(() => {
+            const toastEl = document.getElementById(toastId);
+            if (toastEl) {
+                toastEl.style.animation = 'fadeOut 0.3s ease-out forwards';
+                setTimeout(() => {
+                    if (toastEl.parentNode) {
+                        toastEl.parentNode.removeChild(toastEl);
+                    }
+                }, 300);
+            }
+        }, 5000);
+
+        // Close button functionality
+        const closeBtn = toast.querySelector('.toast-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                clearTimeout(autoRemoveTimer);
+                toast.style.animation = 'fadeOut 0.3s ease-out forwards';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            });
+        }
+
+        // Remove toast on click (optional)
+        toast.addEventListener('click', (e) => {
+            if (e.target !== closeBtn) {
+                // Navigate to notifications if clicked
+                setShowNotifications(true);
+                clearTimeout(autoRemoveTimer);
+                toast.style.animation = 'fadeOut 0.3s ease-out forwards';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }
+        });
+
+        // Clean up function for component unmount
+        return () => {
+            clearTimeout(autoRemoveTimer);
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
+            }
+        };
+    }, []);
 
     // Combined useEffect for initial data load
     useEffect(() => {
-        if (user) {
+        if (user && !profileData) { 
             setInitialDataLoading(true);
-            Promise.all([fetchProducts(), fetchProfile()])
-                .finally(() => setInitialDataLoading(false));
+            fetchProfile().finally(() => {
+                setInitialDataLoading(false);
+            });
         }
-    }, [user, fetchProducts, fetchProfile]);
-
-    useEffect(() => {
-        const toggleVisibility = () => {
-            setIsVisible(window.pageYOffset > 300);
-        };
-
-        window.addEventListener('scroll', toggleVisibility);
-        return () => window.removeEventListener('scroll', toggleVisibility);
-    }, []);
+    }, [user, fetchProfile]);  
 
     useEffect(() => {
         if (user) {
@@ -460,80 +949,135 @@ function SocialAIMarketingEngine() {
 
     // Listen for real-time notifications
     useEffect(() => {
-        if (!user) return;
-
-        const notificationSubscription = supabase
-            .channel('notifications-channel')
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'notifications',
-                    filter: `user_id=eq.${user.id}`
-                },
-                (payload) => {
-                    alert(`📢 ${payload.new.message}`);
-                    fetchNotifications();
-                }
-            )
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(notificationSubscription);
-        };
-    }, [user, fetchNotifications]);
-
-    // Fetch products when buyer mode is activated
-    useEffect(() => {
-        if (user && isProfileComplete && selectedMode === 'buyer') {
-            fetchProducts();
+        if (!user || !user.id) {
+            console.log('No user found for notification subscription');
+            return;
         }
-    }, [user, isProfileComplete, selectedMode, fetchProducts]);
 
-    // --- AUTHENTICATION EFFECT ---
-    useEffect(() => {
-        const checkAuth = async () => {
+        let notificationSubscription;
+        let reconnectTimeout;
+        let retryCount = 0;
+        const MAX_RETRIES = 5;
+        const BASE_RETRY_DELAY = 1000; // 1 second
+
+        const connectToNotifications = async () => {
             try {
-                const { data: { session }, error } = await supabase.auth.getSession();
-                
-                if (error) {
-                    console.error('Auth session error:', error);
-                    navigate('/');
-                    return;
+                // Clean up any existing subscription
+                if (notificationSubscription) {
+                    supabase.removeChannel(notificationSubscription);
                 }
-                
-                if (!session) {
-                    navigate('/');
-                    return;
-                }
-                
-                setUser(session?.user || null);
-                
-                const { data: { subscription } } = supabase.auth.onAuthStateChange(
-                    async (event, session) => {
-                        setUser(session?.user || null);
-                        if (event === 'SIGNED_OUT') {
-                            navigate('/');
+
+                notificationSubscription = supabase
+                    .channel(`notifications-${user.id}`)
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: 'INSERT',
+                            schema: 'public',
+                            table: 'notifications',
+                            filter: `user_id=eq.${user.id}`
+                        },
+                        async (payload) => {
+                            try {
+                                // Validate payload
+                                if (!payload.new || !payload.new.message) {
+                                    console.warn('Received invalid notification payload:', payload);
+                                    return;
+                                }
+
+                                // Play sound
+                                playNotificationSound();
+
+                                // Show toast notification
+                                showToastNotification(payload.new.message);
+
+                                // Fetch updated notifications
+                                await fetchNotifications();
+
+                                // Log successful notification
+                                console.log('New notification received:', {
+                                    id: payload.new.id,
+                                    type: payload.new.link_type,
+                                    message: payload.new.message.substring(0, 100) // Truncate for logs
+                                });
+
+                            } catch (error) {
+                                console.error('Error processing notification:', error);
+                                // Don't crash the app - just log the error
+                            }
                         }
-                    }
-                );
-                
-                return () => {
-                    if (subscription?.unsubscribe) {
-                        subscription.unsubscribe();
-                    }
-                };
-            } catch (err) {
-                console.error('Auth check error:', err);
-                navigate('/');
-            } finally {
-                setAuthLoading(false);
+                    )
+                    .on('system', { event: 'disconnect' }, () => {
+                        console.log('Notification channel disconnected, attempting reconnect...');
+                        scheduleReconnect();
+                    })
+                    .on('system', { event: 'reconnect' }, () => {
+                        console.log('Notification channel reconnected');
+                        retryCount = 0; // Reset retry count on successful reconnect
+                    })
+                    .subscribe((status, error) => {
+                        if (status === 'SUBSCRIBED') {
+                            console.log('✅ Successfully subscribed to notifications channel');
+                            retryCount = 0; // Reset retry count
+                        }
+                        
+                        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                            console.error('❌ Notification channel error:', error);
+                            scheduleReconnect();
+                        }
+                    });
+
+            } catch (error) {
+                console.error('Error setting up notification subscription:', error);
+                scheduleReconnect();
             }
         };
-        
-        checkAuth();
-    }, [navigate]);
+
+        const scheduleReconnect = () => {
+            if (retryCount >= MAX_RETRIES) {
+                console.error('Max retry attempts reached for notification subscription');
+                
+                // Show user-friendly error
+                showToastNotification('🔕 Connection to notifications lost. Please refresh the page.');
+                return;
+            }
+
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            const delay = BASE_RETRY_DELAY * Math.pow(2, retryCount);
+            retryCount++;
+
+            console.log(`Scheduling reconnection attempt ${retryCount} in ${delay}ms`);
+
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+
+            reconnectTimeout = setTimeout(() => {
+                console.log(`Attempting reconnect ${retryCount}/${MAX_RETRIES}...`);
+                connectToNotifications();
+            }, delay);
+        };
+
+        // Initial connection
+        connectToNotifications();
+
+        // Cleanup function
+        return () => {
+            console.log('Cleaning up notification subscription');
+            
+            // Clear any pending reconnect timeout
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+            
+            // Remove channel subscription
+            if (notificationSubscription) {
+                supabase.removeChannel(notificationSubscription).catch(error => {
+                    console.warn('Error removing notification channel:', error);
+                });
+            }
+        };
+    }, [user, fetchNotifications]);
 
     // --- CHECK EXISTING PROFILE DATA ---
     useEffect(() => {
@@ -570,6 +1114,195 @@ function SocialAIMarketingEngine() {
             checkExistingProfile();
         }
     }, [user]);
+
+    useEffect(() => {
+        const cacheKeys = Object.keys(searchCache);
+        if (cacheKeys.length > 10) { // Keep only last 20 searches
+            const oldestKey = cacheKeys[0];
+            setSearchCache(prev => {
+                const newCache = { ...prev };
+                delete newCache[oldestKey];
+                return newCache;
+            });
+        }
+    }, [searchCache]);
+
+    // 🔔 REAL-TIME MATCH DETECTION: Listen for new products and notify matching buyers
+    useEffect(() => {
+        if (!user || !isProfileComplete || selectedMode !== 'buyer') return;
+
+        const productMatchChannel = supabase
+            .channel('real-time-product-matches')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'products',
+                    filter: `seller_id=neq.${user.id}` // Not user's own products
+                },
+                async (payload) => {
+                    try {
+                        const newProduct = payload.new;
+                        if (!newProduct || !newProduct.name) {
+                            console.warn('Invalid product data:', newProduct);
+                            return;
+                        }
+                        
+                        // Get current user's interests
+                        const { data: currentProfile } = await supabase
+                            .from('profiles')
+                            .select('interests')
+                            .eq('user_id', user.id)
+                            .single();
+                        
+                        if (!currentProfile?.interests) return;
+                        
+                        let userInterests = [];
+                        if (Array.isArray(currentProfile.interests)) {
+                            userInterests = currentProfile.interests;
+                        } else if (typeof currentProfile.interests === 'string') {
+                            try {
+                                userInterests = JSON.parse(currentProfile.interests);
+                            } catch (e) {
+                                userInterests = [currentProfile.interests];
+                            }
+                        }
+                        
+                        const productNameLower = newProduct.name ? newProduct.name.toLowerCase() : '';
+                        
+                        // Check for match
+                        const hasMatch = userInterests.some(interest => {
+                            if (!interest) return false;
+                            const interestLower = interest.toLowerCase();
+                            return interestLower.includes(productNameLower) || 
+                                productNameLower.includes(interestLower) ||
+                                getWordVariations(productNameLower || '').some(variation =>
+                                    interestLower.includes(variation)
+                                );
+                        });
+                        
+                        if (hasMatch) {
+                            // Send notification
+                            await supabase.from('notifications').insert([{
+                                user_id: user.id,
+                                sender_id: newProduct.seller_id,
+                                product_id: newProduct.id,
+                                product_image: newProduct.image_url,
+                                message: `🚀 NEW MATCH! "${newProduct.name}" was just listed ($${newProduct.price || '0'})!`,
+                                link_type: 'real_time_product_match',
+                                status: 'unread',
+                                created_at: new Date().toISOString()
+                            }]);
+                            
+                            // Optional: Show popup alert
+                            if (showNotifications) {
+                                alert(`🚀 New Product Match!\n\n"${newProduct.name}" ($${newProduct.price || '0'})\n\nThis product matches your interests!`);
+                            }
+                            
+                            // Refresh notifications
+                            fetchNotifications();
+                        }
+                    } catch (error) {
+                        console.error('Error in real-time match detection:', error);
+                    }
+                }
+            )
+            .subscribe();
+
+        // 🔔 REAL-TIME: Also listen for new buyers (for sellers)
+        const buyerMatchChannel = supabase
+            .channel('real-time-buyer-matches')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'profiles',
+                    filter: `is_buyer=eq.true AND user_id=neq.${user.id}`
+                },
+                async (payload) => {
+                    if (selectedMode !== 'seller') return;
+                    
+                    try {
+                        const newBuyer = payload.new;
+                        
+                        // Get seller's products
+                        const { data: sellerProducts } = await supabase
+                            .from('products')
+                            .select('name')
+                            .eq('seller_id', user.id);
+                        
+                        if (!sellerProducts || sellerProducts.length === 0) return;
+                        
+                        // Check if buyer has interests
+                        if (!newBuyer.interests) return;
+                        
+                        let buyerInterests = [];
+                        if (Array.isArray(newBuyer.interests)) {
+                            buyerInterests = newBuyer.interests;
+                        } else if (typeof newBuyer.interests === 'string') {
+                            try {
+                                buyerInterests = JSON.parse(newBuyer.interests);
+                            } catch (e) {
+                                buyerInterests = [newBuyer.interests];
+                            }
+                        }
+                        
+                        // Check for any product matches
+                        let matchFound = false;
+                        let matchedProduct = '';
+                        
+                        for (const product of sellerProducts) {
+                            if (!product || !product.name) {
+                                console.warn('Invalid product data in match detection:', product);
+                                continue;
+                            }
+
+                            const productNameLower = product.name ? product.name.toLowerCase() : '';
+                            
+                            const hasMatch = buyerInterests.some(interest => {
+                                if (!interest) return false;
+                                const interestLower = interest.toLowerCase();
+                                return interestLower.includes(productNameLower) || 
+                                    productNameLower.includes(interestLower) ||
+                                    getWordVariations(productNameLower || '').some(variation =>
+                                        interestLower.includes(variation)
+                                    );
+                            });
+                            
+                            if (hasMatch) {
+                                matchFound = true;
+                                matchedProduct = product.name;
+                                break;
+                            }
+                        }
+                        
+                        if (matchFound) {
+                            await supabase.from('notifications').insert([{
+                                user_id: user.id,
+                                sender_id: newBuyer.user_id,
+                                message: `🎯 New potential customer! "${newBuyer.username}" is interested in products like "${matchedProduct}"`,
+                                link_type: 'real_time_buyer_match',
+                                status: 'unread',
+                                created_at: new Date().toISOString()
+                            }]);
+                            
+                            // Refresh notifications
+                            fetchNotifications();
+                        }
+                    } catch (error) {
+                        console.error('Error in buyer match detection:', error);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(productMatchChannel);
+            supabase.removeChannel(buyerMatchChannel);
+        };
+    }, [user, isProfileComplete, selectedMode, fetchNotifications, showNotifications]);
 
     // --- ENSURE BASIC PROFILE EXISTS ---
     useEffect(() => {
@@ -616,6 +1349,13 @@ function SocialAIMarketingEngine() {
         }
     }, [user, profileData]);
 
+    const [previousSearchState, setPreviousSearchState] = useState({
+        productSearch: '',
+        prospects: [],
+        productsFound: [],
+        searchLoading: false
+    });
+
     // --- HANDLE MODE SELECTION ---
     const handleModeSelect = (mode) => {
         setSelectedMode(mode);
@@ -629,6 +1369,7 @@ function SocialAIMarketingEngine() {
         setIsNavCollapsed(false);
         setCurrentPage(0);
         setHasMore(true);
+        setSearchCache({});
     };
 
     // --- HANDLE SWITCH MODE ---
@@ -643,11 +1384,37 @@ function SocialAIMarketingEngine() {
         setAllProducts([]);
         setCurrentPage(0);
         setHasMore(true);
+        setSearchCache({});
     };
 
     // --- HANDLE PROFILE COMPLETION ---
     const handleProfileComplete = async (details) => {
+        if (!user) return;
+    
+            setProfileUpdateLoading(true);
+
         try {
+            
+            // Rate limit check for profile setup
+            if (selectedMode === 'seller') {
+                let check;
+                try {
+                    check = await smartLimiterInstance.checkAndUpdate(user.id, 'PROFILE_SETUP', {
+                        mode: 'seller',
+                        product: details.product_listed
+                    });
+                    
+                    if (!check.allowed) {
+                        setError(`⚠️ ${check.reason}`);
+                        setProfileUpdateLoading(false);
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Rate limit check error:', error);
+                    // Continue anyway
+                }
+            }
+ 
             if (!user) {
                 throw new Error('No user authenticated');
             }
@@ -786,34 +1553,107 @@ function SocialAIMarketingEngine() {
                     description: sanitizedDescription, 
                     created_at: new Date().toISOString()
                 };
-                
-                const { error: productError } = await supabase
+
+                const { data: savedProduct, error: productError } = await supabase
                     .from('products')
-                    .insert([productInsert]);
+                    .insert([productInsert])
+                    .select()
+                    .single();
 
                 if (productError) {
                     console.error("❌ Error saving product:", productError);
+                } else {
+                    console.log("✅ Product saved, checking for buyer matches...");
+                    
+                    // 🔔 REAL-TIME MATCH NOTIFICATION: Notify matching buyers
+                    try {
+                        const { data: allBuyers } = await supabase
+                            .from('profiles')
+                            .select('user_id, interests, username')
+                            .eq('is_buyer', true)
+                            .neq('user_id', user.id)
+                            .eq('is_active', true);
+
+                        if (allBuyers && allBuyers.length > 0) {
+                            const productNameLower = sanitizedProduct ? sanitizedProduct.toLowerCase() : '';
+                            let matchCount = 0;
+                            
+                            for (const buyer of allBuyers) {
+                                try {
+                                    let buyerInterests = [];
+                                    if (buyer.interests) {
+                                        if (Array.isArray(buyer.interests)) {
+                                            buyerInterests = buyer.interests;
+                                        } else if (typeof buyer.interests === 'string') {
+                                            try {
+                                                buyerInterests = JSON.parse(buyer.interests);
+                                            } catch (e) {
+                                                buyerInterests = [buyer.interests];
+                                            }
+                                        }
+                                    }
+
+                                    const hasMatch = buyerInterests.some(interest => {
+                                        if (!interest) return false;
+                                        const interestLower = interest.toLowerCase();
+                                        return interestLower.includes(productNameLower) || 
+                                            productNameLower.includes(interestLower) ||
+                                            getWordVariations(productNameLower || '').some(variation =>
+                                                interestLower.includes(variation)
+                                            );
+                                    });
+
+                                    if (hasMatch) {
+                                        matchCount++;
+                                        await supabase.from('notifications').insert([{
+                                            user_id: buyer.user_id,
+                                            sender_id: user.id,
+                                            product_id: savedProduct.id,
+                                            product_image: null,
+                                            message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
+                                            link_type: 'product_match',
+                                            status: 'unread',
+                                            created_at: new Date().toISOString()
+                                        }]);
+                                    }
+                                } catch (e) {
+                                    console.log('Error checking match for buyer:', e);
+                                }
+                            }
+                            
+                            if (matchCount > 0) {
+                                console.log(`✅ Notified ${matchCount} buyers about new product match`);
+                            }
+                        }
+                    } catch (matchError) {
+                        console.error('Error in match notification:', matchError);
+                    }
                 }
             }
 
+
             setProfileData(savedProfileData);
             setIsProfileComplete(true);
-            
-            if (isBuyerMode) {
-                fetchProducts();
+
+              // Track user behavior
+            if (behaviorAnalyzerInstance) {
+                behaviorAnalyzerInstance.recordUserAction(user.id, 'profile_complete', {
+                    mode: selectedMode,
+                    productListed: details.product_listed
+                });
             }
+            
 
         } catch (error) {
             console.error('❌ Error in handleProfileComplete:', error);
             setError(error.message || 'Failed to save profile. Please try again.');
             setIsProfileComplete(false);
-            throw error;
         } finally {
             setProfileUpdateLoading(false);
         }
     };
 
-    // --- HANDLE SEARCH ---
+    // --- SIMPLIFIED SEARCH FUNCTION (LIKE PREVIOUS VERSION) ---
     const handleSearch = async () => {
         setSearchLoading(true);
         setError(null);
@@ -830,10 +1670,13 @@ function SocialAIMarketingEngine() {
                 return;
             }
             
+            // Clear previous results
             if (selectedMode === 'seller') {
-                await findProspects();
+                setProductsFound([]);
+                await findProspects(sanitizedSearch);
             } else {
-                await findProducts();
+                setProspects([]);
+                await findProducts(sanitizedSearch);
             }
         } catch (error) {
             setError(error.message || 'Search failed');
@@ -843,18 +1686,36 @@ function SocialAIMarketingEngine() {
     };
 
     // --- FIND PRODUCTS (BUYER MODE) ---
-    const findProducts = async () => {
+    const findProducts = useCallback(async (searchTerm) => {
+        console.log('🔍 Starting findProducts with search:', searchTerm);
+        
+        if (!user) {
+            setError('Please log in to search');
+            return;
+        }
+
+        const cacheKey = searchTerm.toLowerCase().trim();
+        if (searchCache[cacheKey]) {
+            console.log('Cache hit for:', cacheKey);
+            setProductsFound(searchCache[cacheKey]);
+            return;
+        }
+
+        // Continue with search if allowed
         setSearchLoading(true);
         setError(null);
         
         try {
-            const sanitizedSearch = sanitizeProductName(productSearch);
+            const sanitizedSearch = sanitizeProductName(searchTerm);
             
             if (!sanitizedSearch || sanitizedSearch.length < 2) {
                 setError('Please enter a product name with at least two characters.');
                 return;
             }
 
+            console.log('📋 Fetching products from database...');
+            
+            // FIXED: Use proper Supabase query syntax - SIMPLIFIED LIKE PREVIOUS VERSION
             const { data: products, error: fetchError } = await supabase
                 .from('products')
                 .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
@@ -862,41 +1723,98 @@ function SocialAIMarketingEngine() {
                 .order('price', { ascending: true });
 
             if (fetchError) {
-                console.error('Error fetching products:', fetchError);
-                setError('Failed to fetch products. Please try again.');
+                console.error('❌ Error fetching products:', fetchError);
+                setError(`Failed to fetch products: ${fetchError.message}`);
                 return;
             }
 
-            setProductsFound(products || []);
+            const productsData = products || [];
+            console.log(`✅ Found ${productsData.length} products for: "${sanitizedSearch}"`);
+            
+            if (productsData.length === 0) {
+                console.log('⚠️ No products found in database');
+            } else {
+                console.log('📊 Sample product:', productsData[0]);
+            }
+            
+            // Save to cache
+            setSearchCache(prev => ({
+                ...prev,
+                [cacheKey]: productsData
+            }));
 
-            await supabase.from('searches').insert([
-                { 
-                    buyer_id: user.id, 
-                    seller_id: null,
-                    product_name: sanitizedSearch,
-                    search_type: 'product',
-                    prospects_found: 0,
-                    created_at: new Date().toISOString()
+            // Update products found state
+            setProductsFound(productsData);
+
+            // 🔔 REAL-TIME MATCH NOTIFICATION: Notify sellers about the search
+            if (productsData && productsData.length > 0 && selectedMode === 'buyer') {
+                try {
+                    const uniqueSellerIds = [...new Set(productsData
+                        .filter(p => p.seller_id && p.seller_id !== user.id)
+                        .map(p => p.seller_id)
+                    )];
+                    
+                    if (uniqueSellerIds.length > 0) {
+                        for (const sellerId of uniqueSellerIds) {
+                            await supabase.from('notifications').insert([{
+                                user_id: sellerId,
+                                sender_id: user.id,
+                                message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
+                                link_type: 'search_match',
+                                status: 'unread',
+                                created_at: new Date().toISOString()
+                            }]);
+                        }
+                    }
+                } catch (notificationError) {
+                    console.error('Error notifying sellers:', notificationError);
                 }
-            ]);
+            }
+
+            // Log the search
+            try {
+                await supabase.from('searches').insert([
+                    { 
+                        buyer_id: user.id, 
+                        seller_id: null,
+                        product_name: sanitizedSearch,
+                        search_type: 'product',
+                        prospects_found: productsData.length,
+                        created_at: new Date().toISOString()
+                    }
+                ]);
+            } catch (logError) {
+                console.error('Error logging search:', logError);
+            }
         } catch (err) {
-            console.error('Find products error:', err);
+            console.error('❌ Find products error:', err);
             setError('An unexpected error occurred. Please try again.');
         } finally {
             setSearchLoading(false);
         }
-    };
+    }, [user, searchCache, selectedMode]);  
 
-    // --- FIND PROSPECTS (SELLER MODE) ---
-    const findProspects = async () => {
+        // --- FIND PROSPECTS (SELLER MODE) ---
+    const findProspects = useCallback(async (searchTerm) => {
+        console.log('🔍 Starting findProspects with search:', searchTerm);
+        
+        const cacheKey = `prospect_${searchTerm ? searchTerm.toLowerCase().trim() : 'empty'}`;
+        
+        // Check cache first
+        if (searchCache[cacheKey]) {
+            console.log('Cache hit for prospects:', cacheKey);
+            setProspects(searchCache[cacheKey]);
+            return;
+        }
+
         setSearchLoading(true);
         setError(null);
         setProspects([]);
         
         try {
-            const searchTerm = sanitizeProductName(productSearch);
+            const sanitizedSearch = sanitizeProductName(searchTerm);
             
-            if (!searchTerm || searchTerm.length < 2) {
+            if (!sanitizedSearch || sanitizedSearch.length < 2) {
                 setError('Please enter a product name with at least two characters.');
                 return;
             }
@@ -908,6 +1826,9 @@ function SocialAIMarketingEngine() {
                 return;
             }
 
+            console.log('📋 Fetching buyers from database...');
+            
+            // SIMPLIFIED LIKE PREVIOUS VERSION
             const { data: allBuyers, error: prospectsError } = await supabase
                 .from('profiles')
                 .select('user_id, username, location, interests, phone_number')
@@ -920,17 +1841,21 @@ function SocialAIMarketingEngine() {
                 throw prospectsError;
             }
 
+            console.log(`📊 Found ${allBuyers?.length || 0} total buyers`);
+
             if (!allBuyers || allBuyers.length === 0) {
                 setProspects([]);
                 return;
             }
 
-            const searchTermLower = searchTerm.toLowerCase();
+            const searchTermLower = sanitizedSearch ? sanitizedSearch.toLowerCase() : ''; 
             const searchWords = searchTermLower
                 .split(/[\s,]+/)
-                .filter(w => w.length >= 2)
+                .filter(w => w && w.length >= 2)
                 .map(word => word.replace(/[^a-z0-9]/g, ''))
                 .filter(Boolean);
+            
+            console.log('🔎 Search words:', searchWords);
             
             const matchingProspects = allBuyers.filter(buyer => {
                 if (!buyer.interests) return false;
@@ -950,32 +1875,35 @@ function SocialAIMarketingEngine() {
                     interestsArray = interestsArray
                         .filter(i => i != null)
                         .map(i => sanitizeInput(i.toString().trim(), 50))
-                        .filter(i => i.length > 0);
+                        .filter(i => i && i.length > 0);
                 } catch (e) {
                     return false;
                 }
 
+                // If no interests after sanitization, return false
+                if (interestsArray.length === 0) return false;
+
                 const hasMatch = interestsArray.some(interest => {
+                    if (!interest) return false;
+                    
+                    const interestLower = interest.toLowerCase();
+                    
+                    // Check for word matches
                     const wordMatch = searchWords.some(word => {
-                        if (interest.includes(word)) return true;
-                        
-                        if (word.endsWith('s') && interest.includes(word.slice(0, -1))) return true;
-                        if (!word.endsWith('s') && interest.includes(word + 's')) return true;
-                        
-                        const variations = getWordVariations(word);
-                        return variations.some(variation => interest.includes(variation));
+                        if (!word) return false;
+                        return interestLower.includes(word);
                     });
 
-                    const fullTermMatch = 
-                        interest.includes(searchTermLower) ||
-                        (searchTermLower.endsWith('s') && interest.includes(searchTermLower.slice(0, -1))) ||
-                        (!searchTermLower.endsWith('s') && interest.includes(searchTermLower + 's'));
+                    // Check for full term match
+                    const fullTermMatch = interestLower.includes(searchTermLower);
 
                     return wordMatch || fullTermMatch;
                 });
 
                 return hasMatch;
             });
+
+            console.log(`✅ Found ${matchingProspects.length} matching prospects`);
 
             const sortedProspects = [...matchingProspects].sort((a, b) => {
                 const sellerLocLower = sellerLocation.toLowerCase();
@@ -1010,8 +1938,15 @@ function SocialAIMarketingEngine() {
                 };
             });
             
+            // Save to cache
+            setSearchCache(prev => ({
+                ...prev,
+                [cacheKey]: formattedProspects
+            }));
+            
             setProspects(formattedProspects);
 
+            // Log the search
             if (formattedProspects.length > 0) {
                 try {
                     await supabase
@@ -1035,7 +1970,7 @@ function SocialAIMarketingEngine() {
         } finally {
             setSearchLoading(false);
         }
-    };
+    }, [user, profileData, searchCache]);
 
     const handleSignOut = async () => {
         try {
@@ -1043,7 +1978,6 @@ function SocialAIMarketingEngine() {
             const { error } = await supabase.auth.signOut();
             if (error) throw error;
             
-            setUser(null);
             setSelectedMode(null);
             setIsProfileComplete(false);
             setProfileData(null);
@@ -1053,6 +1987,7 @@ function SocialAIMarketingEngine() {
             setAllProducts([]);
             setCurrentPage(0);
             setHasMore(true);
+            setSearchCache({});
             
             navigate('/');
         } catch (error) {
@@ -1064,8 +1999,8 @@ function SocialAIMarketingEngine() {
     };
 
     const handleKeyPress = (e) => {
-        if (e.key === 'Enter' && productSearch.trim()) {
-            handleSearch();
+        if (e.key === 'Enter') {
+            handleSearch(); // CHANGED from handleManualSearch to handleSearch
         }
     };
 
@@ -1079,19 +2014,10 @@ function SocialAIMarketingEngine() {
         );
     }
 
-    if (initialDataLoading && !isProfileComplete && selectedMode) {
+    if (!authLoading && !user) {
         return (
             <div className="loading-container">
-                <div className="loading-spinner"></div>
-                <p>Loading your data...</p>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return (
-            <div className="loading-container">
-                <p>Redirecting to login...</p>
+                <p>Please sign in to access this page😮‍💨</p>
             </div>
         );
     }
@@ -1103,11 +2029,13 @@ function SocialAIMarketingEngine() {
                             profileData?.is_buyer ? 'buyer' : null;
         
         return (
+          <div className="mode-selection-page">
             <div className="app-container">
                 <div className="mode-selection-screen">
+                    
                     <div className="mode-selection-header">
+
                         <h1 className="mode-selection-title">Welcome to Straun Marketing AI Engine</h1>
-                        <p className="user-welcome">Welcome, <strong>{user.email}</strong>!</p>
                         <p className="mode-selection-subtitle">
                             {existingMode 
                                 ? `You were previously using ${existingMode === 'seller' ? 'Seller' : 'Buyer'} mode. Choose how you want to continue:`
@@ -1186,6 +2114,7 @@ function SocialAIMarketingEngine() {
                     </div>
                 </div>
             </div>
+         </div>
         );
     }
 
@@ -1256,79 +2185,67 @@ function SocialAIMarketingEngine() {
 
     // --- MAIN INTERFACE ---
     return (
-        <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : 'nav-expanded'}`}>
+      <div className="social-media-page">   
+       <div className="page-wrapper">
+        <header className={`social-header ${isNavCollapsed ? 'collapsed-nav' : ''} ${isNavbarHidden ? 'hidden' : ''}`}>
+        {/* Top Navigation */}
+        <TopNavigationBar 
+            user={user}
+            selectedMode={selectedMode}
+            profileData={profileData}
+            signOutLoading={signOutLoading}
+            onSwitchMode={handleSwitchMode}
+            onSignOut={handleSignOut}
+            onSettingsClick={() => setShowSettings(true)}
+            onToggleCollapse={toggleNavCollapse}
+            isCollapsed={isNavCollapsed}
+            isHidden={isNavbarHidden}
+            appName="Straun Marketing Engine" 
+        />
+        </header>
+        <div className="navbar-spacer"></div>
+             
+        <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : ''} ${isNavbarHidden ? 'has-hidden-nav' : ''}`}>
             <div className="app-container">
-                <TopNavigationBar 
-                    user={user}
-                    selectedMode={selectedMode}
-                    profileData={profileData}
-                    signOutLoading={signOutLoading}
-                    onSwitchMode={handleSwitchMode}
-                    onSignOut={handleSignOut}
-                    onSettingsClick={() => setShowSettings(true)}
-                    onToggleCollapse={toggleNavCollapse}
-                    isCollapsed={isNavCollapsed}
-                />
-                
                 {/* Floating "Saved Searches" Button - Only shown when NOT in wishlist view */}
                 {!showWishlist && (
                     <button
-                        onClick={() => setShowWishlist(true)}
-                        style={{
-                            position: 'fixed',
-                            bottom: '80px',
-                            right: '20px',
-                            backgroundColor: '#7209b7',
-                            color: 'white',
-                            border: 'none',
-                            padding: '12px 16px',
-                            borderRadius: '50px',
-                            fontWeight: 'bold',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                            zIndex: 1000,
-                            transition: 'all 0.3s ease',
+                        onClick={() => {
+                        setPreviousSearchState({
+                            productSearch: productSearch,
+                            prospects: prospects,
+                            productsFound: productsFound,
+                            searchLoading: searchLoading
+                        });
+                        setShowWishlist(true);
                         }}
-                        title="View Saved Searches"
-                    >
-                        <span style={{ fontSize: '18px' }}>📋</span>
-                        Saved Searches
-                    </button>
-                )}
-                
-                {/* Scroll to Top Button */}
-                <button
-                    onClick={scrollToTop}
-                    style={{
+                        style={{
                         position: 'fixed',
-                        bottom: '20px',
+                        bottom: '80px',
                         right: '20px',
-                        backgroundColor: '#667eea',
+                        backgroundColor: '#7209b7',
                         color: 'white',
-                        width: '50px',
-                        height: '50px',
-                        borderRadius: '50%',
                         border: 'none',
+                        padding: '12px 16px',
+                        borderRadius: '50px',
+                        fontWeight: 'bold',
+                        fontSize: '14px',
                         cursor: 'pointer',
-                        fontSize: '20px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                        zIndex: 1000,
-                        opacity: isVisible ? 1 : 0,
-                        visibility: isVisible ? 'visible' : 'hidden',
-                        transition: 'all 0.3s ease',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
-                    }}
-                    title="Scroll to top"
-                >
-                    ↑
-                </button>
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                        zIndex: 1000,
+                        transition: 'all 0.3s ease',
+                        }}
+                        title="View your saved items"
+                    >
+                        <span style={{ fontSize: '18px' }}>📋</span>
+                        View My Wishlist  🧾
+                    </button>
+
+                )}
 
                 {/* Notifications */}
                 <div className="notification-container">
@@ -1390,247 +2307,343 @@ function SocialAIMarketingEngine() {
                         </div>
                     )}
                 </div>
-
-                {/* Wishlist View or Main Interface */}
-                {showWishlist ? (
-                    <div style={{ width: '100%', padding: '1rem' }}>
-                        {/* Simple "Back" button in Wishlist view */}
-                        <button 
-                            onClick={() => setShowWishlist(false)}
-                            style={{
-                                background: 'var(--primary-color)',
-                                color: 'white',
-                                border: 'none',
-                                padding: '10px 16px',
-                                borderRadius: '6px',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                marginBottom: '20px'
-                            }}
-                        >
-                            ← Back to Main
-                        </button>
-                        <WishlistManager onBack={() => setShowWishlist(false)} />
-                    </div>
-                ) : (
-                    <main className="social-main-content">
-                        <div className="search-section-card">
-                            <div className="search-header">
-                                <h2>
-                                    {selectedMode === 'seller' 
-                                    ? '🔍 Find Customers for Your Products' 
-                                    : '🔍 Find Products to Buy'}
-                                </h2>
-                                <p className="search-instruction">
-                                    {selectedMode === 'seller'
-                                    ? 'Enter a product name to find customers interested in buying it'
-                                    : 'Enter a product name to find sellers offering it'}
-                                </p>
+  
+                <main className="social-main-content">
+                    <div className="search-section-card">
+                        <div className="search-header">
+                            <h2>
+                                {selectedMode === 'seller' 
+                                ? '🔍 Find Customers for Your Products' 
+                                : '🔍 Find Products to Buy'}
+                            </h2>
+                            <p className="search-instruction">
+                                {selectedMode === 'seller'
+                                ? 'Enter a product name to find customers interested in buying it'
+                                : 'Enter a product name to find sellers offering it'}
+                            </p>
+                        </div>
+                        
+                        <div className="search-input-group">
+                            <div className="search-input-wrapper">
+                                <input 
+                                    type="text" 
+                                    placeholder={
+                                        selectedMode === 'seller' 
+                                        ? "E.g., Blankets, iPhone 13, Headphones.." 
+                                        : "E.g., Headphones, Laptop, Furniture..."
+                                    }
+                                    value={productSearch}
+                                    onChange={(e) => {
+                                        const value = e.target.value
+                                        .replace(/[<>"'`&;\\]/g, '')
+                                        .substring(0, 100);
+                                        setProductSearch(value);
+                                        setError(null);
+                                    }}
+                                    onKeyPress={handleKeyPress}
+                                    className="search-input-large"
+                                    disabled={searchLoading}
+                                />
+                                
                             </div>
-                            
-                            <div className="search-input-group">
-                                <div className="search-input-wrapper">
-                                    <input 
-                                        type="text" 
-                                        placeholder={
-                                            selectedMode === 'seller' 
-                                            ? "E.g., Weighted Blanket, iPhone 13, Gaming Chair..." 
-                                            : "E.g., Headphones, Laptop, Furniture..."
-                                        }
-                                        value={productSearch}
-                                        onChange={(e) => {
-                                            const value = e.target.value
-                                            .replace(/[<>"'`&;\\]/g, '')
-                                            .substring(0, 100);
-                                            setProductSearch(value);
-                                            setError(null);
-                                        }}
-                                        onKeyPress={handleKeyPress}
-                                        className="search-input-large"
-                                        disabled={searchLoading}
-                                    />
-                                    <div className="search-examples">
-                                        <span>Examples: </span>
-                                        {selectedMode === 'seller' 
-                                            ? 'Weighted Blanket, Headphones, Laptop'
-                                            : 'Shoes, Phone, Furniture'}
+                        
+                            <button 
+                                onClick={handleSearch} 
+                                disabled={searchLoading || !productSearch.trim()}
+                                className="search-button-large"
+                            >
+                                {searchLoading ? (
+                                <>
+                                    <span className="search-spinner"></span>
+                                    Searching...🔍
+                                </>
+                                ) : (
+                                <>
+                                    <span className="search-icon">
+                                    {selectedMode === 'seller' ? '👥' : '🔎'}
+                                    </span>
+                                    {selectedMode === 'seller' ? 'Find Customers' : 'Find Products'}
+                                </>
+                                )}
+                            </button>
+
+                            <div className="search-results-count">
+                                <strong>
+                                    {selectedMode === 'seller' ? 'Prospects Found:' : 'Products Found:'} 
+                                </strong> 
+                                {selectedMode === 'seller' ? prospects.length : productsFound.length}
+                            </div>
+
+                        </div>
+                    </div>
+
+                    {error && (
+                        <div className="error-alert">
+                            <span className="error-icon">⚠️</span>
+                            <span>{error}</span>
+                        </div>
+                    )}
+                    
+                    {selectedMode === 'buyer' && productsFetchLoading && allProducts.length === 0 && (
+                        <div className="loading-indicator">
+                            <p>Loading your marketing data...</p>
+                        </div>
+                    )}
+                    
+                    <div className="separator"></div>
+
+                        {/* Wishlist View or Main Interface */}
+                    {showWishlist ? (
+                        <div style={{ width: '100%', padding: '1rem' }}>
+                            {/* Simple "Back" button in Wishlist view */}
+                            <button 
+                                onClick={() => {
+                                    setShowWishlist(false);
+                                    setTimeout(() => {
+                                    if (previousSearchState.productSearch !== undefined) {
+                                        setProductSearch(previousSearchState.productSearch);
+                                    }
+                                    if (previousSearchState.prospects !== undefined) {
+                                        setProspects(previousSearchState.prospects);
+                                    }
+                                    if (previousSearchState.productsFound !== undefined) {
+                                        setProductsFound(previousSearchState.productsFound);
+                                    }
+                                    if (previousSearchState.searchLoading !== undefined) {
+                                        setSearchLoading(previousSearchState.searchLoading);
+                                    }
+                                    }, 100);
+                                }}
+                                style={{
+                                    background: 'var(--primary-color)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '10px 16px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    marginBottom: '20px'
+                                }}
+                                >
+                                ← Back to Search  
+                            </button>
+                            <WishlistManager onBack={() => setShowWishlist(false)} />
+                        </div>
+                        
+                    ) : (
+                    
+                    <div className="results-section">
+                        {selectedMode === 'seller' ? (
+                            <div className="seller-results-card">
+                                <div className="results-header">
+                                    <h3>📈 Marketing Prospects</h3>
+                                    <div className="results-stats">
+                                        <span className="stat-item">
+                                            <strong>Your Location:</strong> {profileData?.location}
+                                        </span>
+                                        <span className="stat-item">
+                                            {prospects.length > 0 && (
+                                                <span className="same-location-count">
+                                                    ({prospects.filter(p => p.isSameLocation).length} in your area)
+                                                </span>
+                                            )}
+                                        </span>
                                     </div>
                                 </div>
-                            
-                                <button 
-                                    onClick={handleSearch} 
-                                    disabled={searchLoading || !productSearch.trim()}
-                                    className="search-button-large"
-                                >
-                                    {searchLoading ? (
-                                    <>
-                                        <span className="search-spinner"></span>
-                                        Searching...
-                                    </>
-                                    ) : (
-                                    <>
-                                        <span className="search-icon">
-                                        {selectedMode === 'seller' ? '👥' : '🔎'}
-                                        </span>
-                                        {selectedMode === 'seller' ? 'Find Customers' : 'Find Products'}
-                                    </>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-
-                        {error && (
-                            <div className="error-alert">
-                                <span className="error-icon">⚠️</span>
-                                <span>{error}</span>
-                            </div>
-                        )}
-                        
-                        {selectedMode === 'buyer' && productsFetchLoading && allProducts.length === 0 && (
-                            <div className="loading-indicator">
-                                <p>Loading your marketing data...</p>
-                            </div>
-                        )}
-                        
-                        <div className="results-section">
-                            {selectedMode === 'seller' ? (
-                                <div className="seller-results-card">
-                                    <div className="results-header">
-                                        <h3>📈 Marketing Prospects</h3>
-                                        <div className="results-stats">
-                                            <span className="stat-item">
-                                                <strong>Your Location:</strong> {profileData?.location}
-                                            </span>
-                                            <span className="stat-item">
-                                                <strong>Prospects Found:</strong> {prospects.length}
-                                                {prospects.length > 0 && (
-                                                    <span className="same-location-count">
-                                                        ({prospects.filter(p => p.isSameLocation).length} in your area)
-                                                    </span>
-                                                )}
-                                            </span>
-                                        </div>
+                                
+                                {prospects.length === 0 ? (
+                                    <div className="empty-results">
+                                        <div className="empty-icon">🔍</div>
+                                        <h4>
+                                            {productSearch.trim() && !loading 
+                                                ? `No prospects found for "${productSearch}"`
+                                                : 'No prospects yet'}
+                                        </h4>
+                                        
+                                        {productSearch.trim() && !loading ? (
+                                            <>
+                                                <p>No customers have "{productSearch}" in their interests yet.</p>
+                                                
+                                                <div className="empty-tips">
+                                                    <p><strong>Try searching for:</strong></p>
+                                                    <ul>
+                                                        <li>"laptop" - Found in existing interests</li>
+                                                        <li>"fruits" - Found in existing interests</li>
+                                                        <li>Other common products</li>
+                                                    </ul>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <p>Enter a product above to find customers interested in buying it.</p>
+                                        )}
                                     </div>
-                                    
-                                    {prospects.length === 0 ? (
-                                        <div className="empty-results">
-                                            <div className="empty-icon">🔍</div>
-                                            <h4>
-                                                {productSearch.trim() && !loading 
-                                                    ? `No prospects found for "${productSearch}"`
-                                                    : 'No prospects yet'}
-                                            </h4>
-                                            
-                                            {productSearch.trim() && !loading ? (
-                                                <>
-                                                    <p>No customers have "{productSearch}" in their interests yet.</p>
-                                                    
-                                                    <div className="empty-tips">
-                                                        <p><strong>Try searching for:</strong></p>
-                                                        <ul>
-                                                            <li>"laptop" - Found in existing interests</li>
-                                                            <li>"fruits" - Found in existing interests</li>
-                                                            <li>Other common products</li>
-                                                        </ul>
+                                ) : (
+                                    <div className="prospects-grid">
+                                        {prospects.map((p, index) => (
+                                            <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
+                                                <div className="prospect-card-header">
+                                                    <div className="prospect-avatar">
+                                                        {p.email ? p.email.charAt(0).toUpperCase() : '?'}
                                                     </div>
-                                                </>
-                                            ) : (
-                                                <p>Enter a product above to find customers interested in buying it.</p>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="prospects-grid">
-                                            {prospects.map((p, index) => (
-                                                <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
-                                                    <div className="prospect-card-header">
-                                                        <div className="prospect-avatar">
-                                                            {p.email.charAt(0).toUpperCase()}
-                                                        </div>
-                                                        <div className="prospect-identity">
-                                                            <h4>Potential Customer</h4>
-                                                            <p className="prospect-email">{p.email}</p>
-                                                            {p.isSameLocation && (
-                                                                <div className="location-match-badge">
-                                                                    <span className="match-icon">📍</span>
-                                                                    <span className="match-text">Same Location</span>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <div className="prospect-details">
-                                                        <div className="detail-item">
-                                                            <span className="detail-label">📍 Location:</span>
-                                                            <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
-                                                                {p.location}
-                                                                {p.isSameLocation && " (Your Area)"}
-                                                            </span>
-                                                        </div>
-                                                        <div className="detail-item phone-detail">
-                                                            <span className="detail-label">📞 Phone:</span>
-                                                            <span className="detail-value">{p.phone_number || 'N/A'}</span>
-                                                        </div>
-                                                        <div className="detail-item">
-                                                            <span className="detail-label">🎯 Interested in:</span>
-                                                            <span className="detail-value highlight">{p.interest}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="prospect-actions">
-                                                        {p.isSameLocation ? (
-                                                            <button className="connect-button priority">
-                                                                <span className="priority-icon">🔥</span>
-                                                                Priority Connection
-                                                            </button>
-                                                        ) : (
-                                                            <div>
-                                                                <button 
-                                                                    onClick={() => handleContact(p.id, p.phone_number, p.interest, 'seller', {
-                                                                        id: null,   
-                                                                        name: p.interest,
-                                                                        image_url: null
-                                                                    })}
-                                                                    style={mainButtonStyle('#25D366')}
-                                                                >
-                                                                    💬 WhatsApp Customer
-                                                                </button>
-
-                                                                <button 
-                                                                    onClick={() => handleShareToStatus(p)}
-                                                                    style={mainButtonStyle('#128C7E')}
-                                                                >
-                                                                    📢 Post to Status
-                                                                </button>
-
-                                                                <div style={{ display: 'flex', gap: '10px' }}>
-                                                                    <button 
-                                                                        onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
-                                                                        style={smallButtonStyle('#3182ce')}
-                                                                    >
-                                                                        📞 Call
-                                                                    </button>
-                                                                    
-                                                                    <button 
-                                                                        onClick={() => {
-                                                                            const smsMessage = `Hi, I saw you're interested in ${p.interest}. I have this available for sale. Are you interested?`;
-                                                                            window.open(`sms:${p.phone_number}?body=${encodeURIComponent(smsMessage)}`, '_self');
-                                                                        }}
-                                                                        style={smallButtonStyle('#f6ad55')}
-                                                                    >
-                                                                        ✉️ SMS
-                                                                    </button>
-                                                                </div>
+                                                    <div className="prospect-identity">
+                                                        <h4>Potential Customer</h4>
+                                                        <p className="prospect-email">{p.email || 'No email'}</p>
+                                                        {p.isSameLocation && (
+                                                            <div className="location-match-badge">
+                                                                <span className="match-icon">📍</span>
+                                                                <span className="match-text">Same Location</span>
                                                             </div>
                                                         )}
                                                     </div>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="buyer-results-card">
+                                                <div className="prospect-details">
+                                                    <div className="detail-item">
+                                                        <span className="detail-label">📍 Location:</span>
+                                                        <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
+                                                            {p.location || 'Not specified'}
+                                                            {p.isSameLocation && " (Your Area)"}
+                                                        </span>
+                                                    </div>
+                                                    <div className="detail-item phone-detail">
+                                                        <span className="detail-label">📞 Phone:</span>
+                                                        <span className="detail-value">{p.phone_number || 'N/A'}</span>
+                                                    </div>
+                                                    <div className="detail-item">
+                                                        <span className="detail-label">🎯 Interested in:</span>
+                                                        <span className="detail-value highlight">{p.interest || 'Not specified'}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="prospect-actions" style={{ 
+                                                    display: 'flex', 
+                                                    flexDirection: 'column', 
+                                                    gap: '10px', // Add gap between buttons
+                                                    marginTop: '15px'
+                                                }}>    
+                                                    {p.isSameLocation ? (
+                                                        <button className="connect-button priority">
+                                                            <span className="priority-icon">🔥</span>
+                                                            Priority Connection
+                                                        </button>
+                                                    ) : (
+                                                        <div>
+                                                            <button 
+                                                                onClick={() => saveToWishlist(p, 'prospect')}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    backgroundColor: '#9c27b0',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    padding: '10px',
+                                                                    borderRadius: '8px',
+                                                                    fontWeight: 'bold',
+                                                                    fontSize: '14px',
+                                                                    cursor: 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '8px',
+                                                                    marginBottom: '5px'
+                                                                }}
+                                                                title="Save this product to your wishlist"
+                                                            >
+                                                                💾 Save Prospect
+                                                            </button>
+
+                                                            <button 
+                                                                onClick={() => handleContact(p.id, p.phone_number, p.interest, 'seller', {
+                                                                    id: null,   
+                                                                    name: p.interest,
+                                                                    image_url: null
+                                                                })}
+                                                                disabled={limits?.CONTACT?.remaining === 0}
+                                                                title={limits?.CONTACT?.remaining === 0 ? 
+                                                                    `Contact limit reached. ${limits.CONTACT.reset_in ? `Resets in ${limits.CONTACT.reset_in} seconds` : 'Try again later'}` : 
+                                                                    ''}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    backgroundColor: '#25D366', // WhatsApp green
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    padding: '12px',
+                                                                    borderRadius: '8px',
+                                                                    fontWeight: 'bold',
+                                                                    fontSize: '14px',
+                                                                    cursor: limits?.CONTACT?.remaining === 0 ? 'not-allowed' : 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '8px',
+                                                                    marginBottom: '10px',
+                                                                    boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)',
+                                                                    transition: 'all 0.2s ease'
+                                                                }}
+                                                                onMouseEnter={(e) => {
+                                                                    if (limits?.CONTACT?.remaining !== 0) {
+                                                                        e.currentTarget.style.backgroundColor = '#128C7E';
+                                                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                                                    }
+                                                                }}
+                                                                onMouseLeave={(e) => {
+                                                                    if (limits?.CONTACT?.remaining !== 0) {
+                                                                        e.currentTarget.style.backgroundColor = '#25D366';
+                                                                        e.currentTarget.style.transform = 'translateY(0)';
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <span style={{ fontSize: '16px' }}>💬</span>
+                                                                WhatsApp Customer
+                                                                {limits?.CONTACT && limits.CONTACT.remaining < 3 && (
+                                                                    <span style={{
+                                                                        fontSize: '11px',
+                                                                        marginLeft: '5px',
+                                                                        padding: '2px 6px',
+                                                                        backgroundColor: limits.CONTACT.remaining === 0 ? '#ff4444' : '#ffaa00',
+                                                                        borderRadius: '10px',
+                                                                        fontWeight: 'bold'
+                                                                    }}>
+                                                                        ({limits.CONTACT.remaining} left)
+                                                                    </span>
+                                                                )}
+                                                            </button>
+
+                                                            <button 
+                                                                onClick={() => handleShareToStatus(p)}
+                                                                style={mainButtonStyle('#128C7E')}
+                                                            >
+                                                                📢 Post to Status
+                                                            </button>
+
+                                                            <div style={{ display: 'flex', gap: '10px' }}>
+                                                                <button 
+                                                                    onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
+                                                                    style={smallButtonStyle('#3182ce')}
+                                                                >
+                                                                    📞 Call
+                                                                </button>
+                                                                
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const smsMessage = `Hi, I saw you're interested in ${p.interest}. I have this available for sale. Are you interested?`;
+                                                                        window.open(`sms:${p.phone_number}?body=${encodeURIComponent(smsMessage)}`, '_self');
+                                                                    }}
+                                                                    style={smallButtonStyle('#f6ad55')}
+                                                                >
+                                                                    ✉️ SMS
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="buyer-results-card">
                                     <div className="results-header">
                                         <h3>🛒 Available Products</h3>
                                         <div className="results-stats">
@@ -1688,9 +2701,9 @@ function SocialAIMarketingEngine() {
                                                     )}
                                                    
                                                     <div className="product-card-header">
-                                                        <h4 className="product-name">{p.name}</h4>
+                                                        <h4 className="product-name">{p.name || 'Unnamed Product'}</h4>
                                                         <div className="product-price">
-                                                            ${p.price}
+                                                            ${p.price || '0'}
                                                         </div>
                                                     </div>
                                                     <div className="product-card-body">
@@ -1741,7 +2754,7 @@ function SocialAIMarketingEngine() {
                                                         
                                                         <div className="product-location">
                                                             <span className="location-icon">📍</span>
-                                                            {p.location}
+                                                            {p.location || 'Location not specified'}
                                                         </div>
                                                         <div className="product-phone">
                                                             <span className="phone-icon">📞</span>
@@ -1756,11 +2769,80 @@ function SocialAIMarketingEngine() {
                                                         padding: '10px'
                                                     }}>
                                                         <button 
-                                                            onClick={() => handleContact(p.seller_id, p.phone_number, p.name, 'buyer', p)}
-                                                            style={mainButtonStyle('#25D366')}
+                                                            onClick={() => saveToWishlist(p, 'product')}
+                                                            style={{
+                                                                width: '100%',
+                                                                backgroundColor: '#9c27b0',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                padding: '10px',
+                                                                borderRadius: '8px',
+                                                                fontWeight: 'bold',
+                                                                fontSize: '14px',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '8px',
+                                                                marginBottom: '5px'
+                                                            }}
+                                                            title="Save this product to your wishlist"
                                                         >
-                                                            💬 WhatsApp Seller
-                                                        </button>   
+                                                            💖 Save to Wishlist
+                                                        </button>
+
+                                                        <button 
+                                                            onClick={() => handleContact(p.seller_id, p.phone_number, p.name, 'buyer', p)}
+                                                            disabled={limits?.CONTACT?.remaining === 0}
+                                                            title={limits?.CONTACT?.remaining === 0 ? 
+                                                                `Contact limit reached. ${limits.CONTACT.reset_in ? `Resets in ${limits.CONTACT.reset_in} seconds` : 'Try again later'}` : 
+                                                                ''}
+                                                            style={{
+                                                                width: '100%',
+                                                                backgroundColor: '#25D366', // WhatsApp green
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                padding: '12px',
+                                                                borderRadius: '8px',
+                                                                fontWeight: 'bold',
+                                                                fontSize: '14px',
+                                                                cursor: limits?.CONTACT?.remaining === 0 ? 'not-allowed' : 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '8px',
+                                                                marginBottom: '10px',
+                                                                boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)',
+                                                                transition: 'all 0.2s ease'
+                                                            }}
+                                                            onMouseEnter={(e) => {
+                                                                if (limits?.CONTACT?.remaining !== 0) {
+                                                                    e.currentTarget.style.backgroundColor = '#128C7E';
+                                                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                                                }
+                                                            }}
+                                                            onMouseLeave={(e) => {
+                                                                if (limits?.CONTACT?.remaining !== 0) {
+                                                                    e.currentTarget.style.backgroundColor = '#25D366';
+                                                                    e.currentTarget.style.transform = 'translateY(0)';
+                                                                }
+                                                            }}
+                                                        >
+                                                            <span style={{ fontSize: '16px' }}>💬</span>
+                                                            WhatsApp Seller
+                                                            {limits?.CONTACT && limits.CONTACT.remaining < 3 && (
+                                                                <span style={{
+                                                                    fontSize: '11px',
+                                                                    marginLeft: '5px',
+                                                                    padding: '2px 6px',
+                                                                    backgroundColor: limits.CONTACT.remaining === 0 ? '#ff4444' : '#ffaa00',
+                                                                    borderRadius: '10px',
+                                                                    fontWeight: 'bold'
+                                                                }}>
+                                                                    ({limits.CONTACT.remaining} left)
+                                                                </span>
+                                                            )}
+                                                        </button>
 
                                                         <button 
                                                             onClick={() => handleShareToStatus(p)}
@@ -1786,6 +2868,7 @@ function SocialAIMarketingEngine() {
                                                             >
                                                                 ✉️ SMS
                                                             </button>
+                                                              
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1823,15 +2906,66 @@ function SocialAIMarketingEngine() {
                                 </div>
                             )}
                         </div>
-                    </main>
-                )}
-                
-                <footer className="app-footer">
-                    <div className="footer-content">
-                        <Link to="/help" className="help-link">Need Help?</Link>
-                        <span className="footer-text">© 2025 Straun Marketing</span>
-                    </div>
-                </footer>
+                    )}
+                </main>
+                <div
+                    style={{
+                        position: 'fixed',
+                        bottom: '20px',
+                        right: '20px',
+                        zIndex: 1000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '10px'
+                    }}
+                >
+                    <ReportButton 
+                        targetUserId={user?.id}
+                        floating={isReportButtonFloating}
+                        style={{
+                            backgroundColor: '#ff3b30',
+                            color: 'white',
+                            border: 'none',
+                            padding: '12px 16px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            transition: 'all 0.3s ease',
+                        }}
+                    />
+                    <span style={{ 
+                        fontSize: '12px', 
+                        color: '#666', 
+                        background: 'rgba(255,255,255,0.9)', 
+                        padding: '4px 8px', 
+                        borderRadius: '4px' 
+                    }}>
+                        Report Issue
+                    </span>
+                </div>
+
+             <footer className="app-footer">
+            <div className="footer-content">
+                {/* CORRECT: Use Link from react-router-dom properly */}
+                <Link to="/terms" className="footer-link">
+                Terms of Service
+                </Link>
+                <Link to="/privacy" className="footer-link">  {/* ADD THIS */}
+                Privacy Policy
+                </Link>
+                <Link to="/help" className="footer-link">
+                Need Help?
+                </Link>
+                <span className="footer-text">© 2025 Straun Marketing</span>
+            </div>
+            </footer>
 
                 {showSettings && (
                     <div className="settings-modal-overlay">
@@ -1887,7 +3021,11 @@ function SocialAIMarketingEngine() {
                 )}
             </div>
         </div>
+      </div>
+     </div>
+     
     );
-}
+    
+};
 
 export default SocialAIMarketingEngine;
