@@ -260,6 +260,7 @@ function SocialAIMarketingEngine() {
     const [isNavbarHidden, setIsNavbarHidden] = useState(false);
     const [isReportButtonFloating, setIsReportButtonFloating] = useState(true);
  
+    const [isRestoringState, setIsRestoringState] = useState(false);
     const [limits, setLimits] = useState({});
 
     useEffect(() => {
@@ -801,6 +802,11 @@ function SocialAIMarketingEngine() {
 
     // Add toast notification function
     const showToastNotification = useCallback((message) => {
+         if (message.includes('connection to notifications lost') || 
+            message.includes('Connection lost')) {
+            console.log('Silencing connection error notification');
+            return;
+        }
         // Create toast container if it doesn't exist
         let toastContainer = document.getElementById('toast-container');
         if (!toastContainer) {
@@ -958,13 +964,13 @@ function SocialAIMarketingEngine() {
         let reconnectTimeout;
         let retryCount = 0;
         const MAX_RETRIES = 5;
-        const BASE_RETRY_DELAY = 1000; // 1 second
+        const BASE_RETRY_DELAY = 1000;
 
         const connectToNotifications = async () => {
             try {
                 // Clean up any existing subscription
                 if (notificationSubscription) {
-                    supabase.removeChannel(notificationSubscription);
+                    await supabase.removeChannel(notificationSubscription);
                 }
 
                 notificationSubscription = supabase
@@ -988,61 +994,64 @@ function SocialAIMarketingEngine() {
                                 // Play sound
                                 playNotificationSound();
 
-                                // Show toast notification
+                                // Show toast notification (silently, without error messages)
                                 showToastNotification(payload.new.message);
 
                                 // Fetch updated notifications
                                 await fetchNotifications();
 
-                                // Log successful notification
-                                console.log('New notification received:', {
-                                    id: payload.new.id,
-                                    type: payload.new.link_type,
-                                    message: payload.new.message.substring(0, 100) // Truncate for logs
-                                });
-
                             } catch (error) {
                                 console.error('Error processing notification:', error);
-                                // Don't crash the app - just log the error
                             }
                         }
                     )
                     .on('system', { event: 'disconnect' }, () => {
                         console.log('Notification channel disconnected, attempting reconnect...');
+                        // SILENT RECONNECT - Don't show error to user
                         scheduleReconnect();
                     })
                     .on('system', { event: 'reconnect' }, () => {
                         console.log('Notification channel reconnected');
-                        retryCount = 0; // Reset retry count on successful reconnect
+                        retryCount = 0;
                     })
                     .subscribe((status, error) => {
                         if (status === 'SUBSCRIBED') {
                             console.log('✅ Successfully subscribed to notifications channel');
-                            retryCount = 0; // Reset retry count
+                            retryCount = 0;
                         }
                         
                         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                            console.error('❌ Notification channel error:', error);
+                            console.log('Notification channel connection issue, will retry:', error?.message || error);
                             scheduleReconnect();
                         }
                     });
 
             } catch (error) {
-                console.error('Error setting up notification subscription:', error);
+                console.log('Error setting up notification subscription, will retry:', error);
                 scheduleReconnect();
             }
         };
 
         const scheduleReconnect = () => {
             if (retryCount >= MAX_RETRIES) {
-                console.error('Max retry attempts reached for notification subscription');
+                console.log('Max retry attempts reached for notification subscription. Will resume when page is active.');
                 
-                // Show user-friendly error
-                showToastNotification('🔕 Connection to notifications lost. Please refresh the page.');
+                // SILENT FAILURE - Don't show error to user
+                // Only try to reconnect when user becomes active again
+                const handleVisibilityChange = () => {
+                    if (!document.hidden) {
+                        console.log('Page became visible, attempting to reconnect notifications...');
+                        retryCount = 0;
+                        connectToNotifications();
+                        document.removeEventListener('visibilitychange', handleVisibilityChange);
+                    }
+                };
+                
+                document.addEventListener('visibilitychange', handleVisibilityChange);
                 return;
             }
 
-            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+            // Exponential backoff
             const delay = BASE_RETRY_DELAY * Math.pow(2, retryCount);
             retryCount++;
 
@@ -1061,9 +1070,23 @@ function SocialAIMarketingEngine() {
         // Initial connection
         connectToNotifications();
 
+        // Add visibility change listener for background reconnection
+        const handleVisibilityChange = () => {
+            if (!document.hidden && retryCount >= MAX_RETRIES) {
+                console.log('Page became visible, attempting to reconnect notifications...');
+                retryCount = 0;
+                connectToNotifications();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         // Cleanup function
         return () => {
             console.log('Cleaning up notification subscription');
+            
+            // Remove visibility change listener
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             
             // Clear any pending reconnect timeout
             if (reconnectTimeout) {
@@ -1073,11 +1096,11 @@ function SocialAIMarketingEngine() {
             // Remove channel subscription
             if (notificationSubscription) {
                 supabase.removeChannel(notificationSubscription).catch(error => {
-                    console.warn('Error removing notification channel:', error);
+                    console.log('Error removing notification channel:', error);
                 });
             }
         };
-    }, [user, fetchNotifications]);
+    }, [user, fetchNotifications, showToastNotification]);
 
     // --- CHECK EXISTING PROFILE DATA ---
     useEffect(() => {
