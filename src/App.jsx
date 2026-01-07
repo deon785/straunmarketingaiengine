@@ -21,6 +21,19 @@ import { AuthProvider, useAuth } from './AuthContext.jsx';
 import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
 
+const TestAdmin = () => {
+  console.log('TestAdmin loaded');
+  return (
+    <div style={{ padding: '40px' }}>
+      <h1>Test Admin - No Auth</h1>
+      <p>If you see this, routing works.</p>
+      <button onClick={() => window.location.href = '/admin-test'}>
+        Try Admin Dashboard
+      </button>
+    </div>
+  );
+};
+
 // AnalyticsTracker component
 const AnalyticsTracker = () => {
   const location = useLocation();
@@ -369,7 +382,12 @@ function App() {
                   } />
 
                   <Route path="/admin-test" element={<AdminDashboard />} />
-                  
+                  <Route path="/test-admin" element={<TestAdmin />} />
+
+                  <Route path="/admin-public" element={<AdminDashboard />} />
+                  <Route path="/admin-bare" element={<AdminDashboard />} />
+                  <Route path="/admin-direct" element={<AdminDashboard />} />
+                                    
                   <Route path="/notifications" element={
                     <ProtectedRoute>
                       <NotificationsList />
