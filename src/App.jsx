@@ -18,7 +18,7 @@ import React, { useState, useEffect } from 'react';
 // Import AuthContext from separate file
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 
-// Import other utilities
+import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
 
 // AnalyticsTracker component
@@ -335,52 +335,56 @@ function App() {
     >
       <AuthProvider>
         <Router>
-          <AnalyticsTracker />
-          <NotificationWatcher />
-          
-          {/* Fixed Header */}
-          <AppHeader />
-          
-          <div className="app">
-            <OfflineBanner />
+          <RefreshPersistenceWrapper>
+            <AnalyticsTracker />
+            <NotificationWatcher />
             
-            {/* Main Content Area with proper spacing */}
-            <main>
-              <Routes>
-                {/* Public Routes */}
-                <Route path="/" element={<Auth />} />
-                <Route path="/privacy" element={<PrivacyPolicy />} />
-                <Route path="/terms" element={<Terms />} />
-                <Route path="/help" element={<HelpCenter />} />
-                <Route path="/wishlist" element={<WishlistButton />} />
-                
-                {/* Protected Routes */}
-                <Route path="/app" element={
-                  <ProtectedRoute>
-                    <SocialAIMarketingEngine />
-                  </ProtectedRoute>
-                } />
-                
-                <Route path="/admin" element={
-                  <AdminRoute>
-                    <AdminDashboard />
-                  </AdminRoute>
-                } />
-                
-                <Route path="/notifications" element={
-                  <ProtectedRoute>
-                    <NotificationsList />
-                  </ProtectedRoute>
-                } />
-                
-                {/* Catch-all */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </main>
+            {/* Fixed Header */}
+            <AppHeader />
             
-            <CookieBanner /> 
-            <FeedbackButton />
-          </div>
+            <div className="app">
+              <OfflineBanner />
+              
+              {/* Main Content Area with proper spacing */}
+              <main>
+                <Routes>
+                  {/* Public Routes */}
+                  <Route path="/" element={<Auth />} />
+                  <Route path="/privacy" element={<PrivacyPolicy />} />
+                  <Route path="/terms" element={<Terms />} />
+                  <Route path="/help" element={<HelpCenter />} />
+                  <Route path="/wishlist" element={<WishlistButton />} />
+                  
+                  {/* Protected Routes */}
+                  <Route path="/app" element={
+                    <ProtectedRoute>
+                      <SocialAIMarketingEngine />
+                    </ProtectedRoute>
+                  } />
+                  
+                  <Route path="/admin" element={
+                    <AdminRoute>
+                      <AdminDashboard />
+                    </AdminRoute>
+                  } />
+
+                  <Route path="/admin-test" element={<AdminDashboard />} />
+                  
+                  <Route path="/notifications" element={
+                    <ProtectedRoute>
+                      <NotificationsList />
+                    </ProtectedRoute>
+                  } />
+                  
+                  {/* Catch-all */}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </main>
+              
+              <CookieBanner /> 
+              <FeedbackButton />
+            </div>
+          </RefreshPersistenceWrapper>
         </Router>
       </AuthProvider>
     </Sentry.ErrorBoundary>
