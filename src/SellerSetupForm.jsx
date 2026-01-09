@@ -56,17 +56,27 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
   };
   
   const handleDeletePhoto = async () => {
-    const fileName = imageUrl.split('/').pop();
+    if (!imageUrl) return;
+    
+    // If it's a Supabase storage URL, delete from storage
+    if (imageUrl.includes('supabase.co/storage')) {
+      const fileName = imageUrl.split('/').pop();
 
-    const { error } = await supabase.storage
-      .from('product-images')
-      .remove([fileName]);
+      const { error } = await supabase.storage
+        .from('product-images')
+        .remove([fileName]);
 
-    if (!error) {
-      setImageUrl('');
-    } else {
-      alert("Error removing file from storage");
+      if (error) {
+        console.error('Error removing file from storage:', error);
+        setError('Failed to remove image from storage. Please try again.');
+        return;
+      }
     }
+    
+    // Clear the image URL regardless
+    setImageUrl('');
+    setError(null);
+    
   };
 
   const fetchProducts = async () => {
@@ -202,8 +212,26 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
     if (!productDetails.location.trim()) return 'Location is required';
     if (!productDetails.phone_number.trim()) return 'Phone number is required';
     if (!productDetails.description.trim()) return 'Product description is required';
+    
+    // Enhanced image validation
     if (!imageUrl.trim()) return 'Product image is required. Please upload an image.';
+    
+    // Check if imageUrl is a valid URL
+    if (imageUrl.trim() && !isValidImageUrl(imageUrl)) {
+      return 'Invalid image URL. Please upload a valid image.';
+    }
+    
     return null;
+  };
+
+  // Add this helper function
+  const isValidImageUrl = (url) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -223,6 +251,21 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       }
       
       return;
+    }
+
+    // Additional validation: Check if image is accessible
+    if (imageUrl) {
+      try {
+        const img = new Image();
+        img.onerror = () => {
+          setError('The uploaded image cannot be accessed. Please upload a valid image.');
+          return;
+        };
+        img.src = imageUrl;
+      } catch (err) {
+        setError('Invalid image URL. Please upload a valid image.');
+        return;
+      }
     }
     
     if (!user) {
@@ -555,19 +598,19 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
 
         <button
           type="submit"
-          disabled={submitting || userLoading || !imageUrl}
+          disabled={submitting || userLoading || !imageUrl || validateForm() !== null}
           style={{
             width: '100%',
             padding: '16px',
-            background: (submitting || userLoading || !imageUrl)  
+            background: (submitting || userLoading || !imageUrl || validateForm() !== null)  
               ? '#374151'
               : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            color: (submitting || userLoading || !imageUrl) ? '#9CA3AF' : 'white',
+            color: (submitting || userLoading || !imageUrl || validateForm() !== null) ? '#9CA3AF' : 'white',
             border: 'none',
             borderRadius: '8px',
             fontSize: '18px',
             fontWeight: '700',
-            cursor: (submitting || userLoading || !imageUrl) ? 'not-allowed' : 'pointer',
+            cursor: (submitting || userLoading || !imageUrl || validateForm() !== null) ? 'not-allowed' : 'pointer',
             transition: 'all 0.3s ease',
             opacity: submitting || userLoading ? 0.7 : 1,
             display: 'flex',
@@ -597,8 +640,10 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
               </svg>
               Processing...
             </div>
-          ) : !imageUrl ? (
+            ) : !imageUrl ? (
             'Upload Image to Continue'
+          ) : validateForm() !== null ? (
+            'Please Complete All Fields'
           ) : (
             'Complete Setup & List Product'
           )}

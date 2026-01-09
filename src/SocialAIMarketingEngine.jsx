@@ -18,6 +18,9 @@ import { useAuth } from './AuthContext.jsx';
 import { SmartRateLimiter } from './smartRateLimiter.js';
 import ReportButton from './ReportButton.jsx';
 
+import { UserActivityTracker } from './userActivityTracker.js';
+import SimpleAdmin from './SimpleAdmin.jsx';
+
 class UserBehaviorAnalyzer {
   constructor() {
     this.actions = new Map();
@@ -201,7 +204,6 @@ function getWordVariations(word) {
     
     return Array.from(variations);
 }
-
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
     const { user, loading: authLoading } = useAuth();
@@ -244,7 +246,6 @@ function SocialAIMarketingEngine() {
     const [zoomedImage, setZoomedImage] = useState(null);
 
     const [isNavCollapsed, setIsNavCollapsed] = useState(false);
-    const [isVisible, setIsVisible] = useState(false);
     const [showWishlist, setShowWishlist] = useState(false);
    
     const [openingWhatsApp, setOpeningWhatsApp] = useState(false); 
@@ -259,13 +260,9 @@ function SocialAIMarketingEngine() {
 
     const [isNavbarHidden, setIsNavbarHidden] = useState(false);
     const [isReportButtonFloating, setIsReportButtonFloating] = useState(true);
+    const [isAdmin, setIsAdmin] = useState(false);
  
-    const [isRestoringState, setIsRestoringState] = useState(false);
     const [limits, setLimits] = useState({});
-
-    useEffect(() => {
-        initializeRateLimiter();
-    }, []);
 
     const loadMoreProducts = async () => {
         setLoading(true);
@@ -296,7 +293,7 @@ function SocialAIMarketingEngine() {
             setLoading(false);
         }
     };
-   
+
    const fetchNotifications = useCallback(async () => {
         if (!user || !user.id) {
             console.log('No user for notifications fetch');
@@ -442,6 +439,15 @@ function SocialAIMarketingEngine() {
             }
             ]);
 
+            await UserActivityTracker.trackContact(
+                user.id,
+                targetUserId,
+                product?.id,
+                'whatsapp',
+                true,
+                null
+            );
+
             if (!targetPhoneNumber) {
             alert('Phone number not available');
             setOpeningWhatsApp(false);
@@ -565,6 +571,10 @@ function SocialAIMarketingEngine() {
 
             setItems(productsWithSellers);
             setAllProducts(productsWithSellers);
+
+            if (selectedMode === 'buyer') {
+                setProductsFound(productsWithSellers);
+            }
             
         } catch (err) {
             console.error("❌ Error in fetchProducts:", err);
@@ -572,7 +582,7 @@ function SocialAIMarketingEngine() {
         } finally {
             setProductsFetchLoading(false);
         }
-    }, [user]);
+    }, [user , selectedMode]);
 
    // --- SAVE TO WISHLIST FUNCTION ---
     const saveToWishlist = async (item, itemType = 'product') => {
@@ -605,84 +615,87 @@ function SocialAIMarketingEngine() {
 
     try {
         // Check if item is already in wishlist
-        const { data: existing } = await supabase
-        .from('saved_items')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('item_type', itemType)
-        .eq(itemType === 'product' ? 'product_id' : 'prospect_id', 
-            itemType === 'product' ? item.id : item.id)
-        .single();
+            const { data: existing } = await supabase
+            .from('saved_items')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('item_type', itemType)
+            .eq(itemType === 'product' ? 'product_id' : 'prospect_id', 
+                itemType === 'product' ? item.id : item.id)
+            .single();
 
-        if (existing) {
-        alert('✅ This item is already in your wishlist!');
-        return;
-        }
+            if (existing) {
+            alert('✅ This item is already in your wishlist!');
+            return;
+            }
 
-        // Save to wishlist
-        const savedData = {
-        user_id: user.id,
-        item_type: itemType,
-        created_at: new Date().toISOString()
-        };
-
-        if (itemType === 'product') {
-        savedData.product_id = item.id;
-        savedData.product_name = item.name;
-        savedData.product_price = item.price;
-        savedData.product_image = item.image_url;
-        savedData.seller_location = item.location;
-        savedData.seller_phone = item.phone_number;
-        } else {
-        savedData.prospect_id = item.id;
-        savedData.prospect_email = item.email;
-        savedData.prospect_location = item.location;
-        savedData.prospect_phone = item.phone_number;
-        savedData.interested_in = item.interest;
-        }
-
-        // Save to database
-        const { error } = await supabase
-        .from('saved_items')
-        .insert([savedData]);
-
-        if (error) throw error;
-
-        // REMOVE the part that shows WishlistManager interface
-        // Just show a simple message instead
-        
-        if (itemType === 'product') {
-        try {
-            const followUpDate = new Date();
-            followUpDate.setDate(followUpDate.getDate() + 2);
-            
-            await supabase.from('follow_ups').insert([{
-            product_id: item.id,
+            // Save to wishlist
+            const savedData = {
             user_id: user.id,
-            scheduled_for: followUpDate.toISOString(),
-            step_number: 1,
-            status: 'pending'
-            }]);
+            item_type: itemType,
+            created_at: new Date().toISOString()
+            };
+
+            if (itemType === 'product') {
+            savedData.product_id = item.id;
+            savedData.product_name = item.name;
+            savedData.product_price = item.price;
+            savedData.product_image = item.image_url;
+            savedData.seller_location = item.location;
+            savedData.seller_phone = item.phone_number;
+            } else {
+            savedData.prospect_id = item.id;
+            savedData.prospect_email = item.email;
+            savedData.prospect_location = item.location;
+            savedData.prospect_phone = item.phone_number;
+            savedData.interested_in = item.interest;
+            }
+
+            // Save to database
+            const { error } = await supabase
+            .from('saved_items')
+            .insert([savedData]);
+
+            if (error) throw error;
             
-            // CHANGED: Simple message without opening interface
-            alert('✅ Saved to wishlist! Reminder set for 2 days from now.\n\nClick "My Wishlist" button to view all saved items.');
-        } catch (followUpError) {
-            console.log('Follow-up scheduling skipped');
-            // CHANGED: Simple message
-            alert('✅ Saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
-        }
-        } else {
-        // CHANGED: Simple message for prospects too
-        alert('✅ Prospect saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
-        }
-        
-        // Track with Google Analytics
-        if (typeof ReactGA !== 'undefined') {
-        ReactGA.event({
-            category: 'Wishlist',
-            action: 'Item Added',
-            label: itemType
-        });
+            if (itemType === 'product') {
+            try {
+                const followUpDate = new Date();
+                followUpDate.setDate(followUpDate.getDate() + 2);
+                
+                await supabase.from('follow_ups').insert([{
+                product_id: item.id,
+                user_id: user.id,
+                scheduled_for: followUpDate.toISOString(),
+                step_number: 1,
+                status: 'pending'
+                }]);
+
+                await UserActivityTracker.trackActivity(user.id, 'save_wishlist', {
+                    targetId: item.id,
+                    targetType: itemType,
+                    itemName: item.name
+                });
+                
+                // CHANGED: Simple message without opening interface
+                alert('✅ Saved to wishlist! Reminder set for 2 days from now.\n\nClick "My Wishlist" button to view all saved items.');
+            } catch (followUpError) {
+                console.log('Follow-up scheduling skipped');
+                // CHANGED: Simple message
+                alert('✅ Saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+            }
+            } else {
+            // CHANGED: Simple message for prospects too
+            alert('✅ Prospect saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+            }
+            
+            // Track with Google Analytics
+            if (typeof ReactGA !== 'undefined') {
+            ReactGA.event({
+                category: 'Wishlist',
+                action: 'Item Added',
+                label: itemType
+            });
         }
         
         // Track user behavior
@@ -953,6 +966,40 @@ function SocialAIMarketingEngine() {
         setIsNavCollapsed(!isNavCollapsed);
     };
 
+    useEffect(() => {
+    // Track initial page view
+    if (user && isProfileComplete) {
+        UserActivityTracker.trackActivity(user.id, 'page_view', {
+        page: selectedMode === 'seller' ? 'seller_dashboard' : 'buyer_marketplace'
+        });
+    }
+    }, [user, isProfileComplete, selectedMode]);
+
+    // Add this useEffect to check admin status
+    useEffect(() => {
+        const checkAdminStatus = async () => {
+            if (!user) return;
+            
+            try {
+                const { data: { user: authUser } } = await supabase.auth.getUser();
+                
+                // Check if email matches admin email
+                const isAdminUser = authUser?.email === 'deonmahachi8@gmail.com';
+                setIsAdmin(isAdminUser);
+                
+                if (isAdminUser) {
+                    console.log('✅ Admin user detected:', authUser.email);
+                }
+            } catch (error) {
+                console.error('Error checking admin status:', error);
+            }
+        };
+        
+        if (user) {
+            checkAdminStatus();
+        }
+    }, [user]);
+
     // Listen for real-time notifications
     useEffect(() => {
         if (!user || !user.id) {
@@ -1101,6 +1148,29 @@ function SocialAIMarketingEngine() {
             }
         };
     }, [user, fetchNotifications, showToastNotification]);
+
+    useEffect(() => {
+        if (showSettings) {
+            document.body.classList.add('modal-open');
+            // Prevent scrolling
+            document.body.style.overflow = 'hidden';
+            document.body.style.position = 'fixed';
+            document.body.style.width = '100%';
+        } else {
+            document.body.classList.remove('modal-open');
+            // Re-enable scrolling
+            document.body.style.overflow = '';
+            document.body.style.position = '';
+            document.body.style.width = '';
+        }
+        
+        return () => {
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.position = '';
+            document.body.style.width = '';
+        };
+    }, [showSettings]);
 
     // --- CHECK EXISTING PROFILE DATA ---
     useEffect(() => {
@@ -1371,7 +1441,7 @@ function SocialAIMarketingEngine() {
             ensureBasicProfile();
         }
     }, [user, profileData]);
-
+    
     const [previousSearchState, setPreviousSearchState] = useState({
         productSearch: '',
         prospects: [],
@@ -1393,6 +1463,15 @@ function SocialAIMarketingEngine() {
         setCurrentPage(0);
         setHasMore(true);
         setSearchCache({});
+    };
+
+    // Clear state when changing modes
+    const clearAndSetMode = (mode) => {
+        handleModeSelect(mode);
+    };
+
+    const clearAndSwitchMode = () => {
+        handleSwitchMode();
     };
 
     // --- HANDLE SWITCH MODE ---
@@ -1693,7 +1772,14 @@ function SocialAIMarketingEngine() {
                 return;
             }
             
-            // Clear previous results
+            if (user && isProfileComplete) {
+                await UserActivityTracker.trackActivity(user.id, 'search', {
+                searchTerm: sanitizedSearch,
+                mode: selectedMode,
+                resultsCount: selectedMode === 'seller' ? prospects.length : productsFound.length
+                });
+            }
+                        // Clear previous results
             if (selectedMode === 'seller') {
                 setProductsFound([]);
                 await findProspects(sanitizedSearch);
@@ -1998,6 +2084,7 @@ function SocialAIMarketingEngine() {
     const handleSignOut = async () => {
         try {
             setSignOutLoading(true);
+
             const { error } = await supabase.auth.signOut();
             if (error) throw error;
             
@@ -2045,6 +2132,11 @@ function SocialAIMarketingEngine() {
         );
     }
 
+    const isAdminRoute = window.location.pathname === '/admin';
+    if (isAdminRoute) {
+        return <SimpleAdmin />;
+    }
+
     // --- SHOW MODE SELECTION IF NO MODE SELECTED ---
     if (!selectedMode) {
         const hasProfileData = profileData?.location && profileData?.phone_number;
@@ -2077,7 +2169,7 @@ function SocialAIMarketingEngine() {
                                 List your products and find customers who are interested in what you're selling.
                             </p>
                             <button 
-                                onClick={() => handleModeSelect('seller')}
+                                onClick={() => clearAndSetMode('seller')}
                                 className="mode-card-button"
                             >
                                 {existingMode === 'seller' ? 'Continue as Seller' : 'Choose Seller Mode'}
@@ -2106,7 +2198,7 @@ function SocialAIMarketingEngine() {
                                 Find products you're looking for and connect with sellers in your area.
                             </p>
                             <button 
-                                onClick={() => handleModeSelect('buyer')}
+                                onClick={() => clearAndSetMode('buyer')}
                                 className="mode-card-button"
                             >
                                 {existingMode === 'buyer' ? 'Continue as Buyer' : 'Choose Buyer Mode'}
@@ -2165,8 +2257,9 @@ function SocialAIMarketingEngine() {
                             <span className="mode-badge">
                                 {selectedMode === 'seller' ? 'Seller Setup' : 'Buyer Setup'}
                             </span>
+                            
                             <button 
-                                onClick={handleSwitchMode}
+                                onClick={clearAndSwitchMode}
                                 className="change-mode-button"
                                 disabled={profileUpdateLoading} 
                             >
@@ -2208,7 +2301,22 @@ function SocialAIMarketingEngine() {
 
     // --- MAIN INTERFACE ---
     return (
-      <div className="social-media-page">   
+      <div className="social-media-page"> 
+
+        {showSettings && (
+            <div className="settings-modal-overlay">
+                <div className="settings-modal">
+                    <button 
+                        className="settings-modal-close"
+                        onClick={() => setShowSettings(false)}
+                    >
+                        ×
+                    </button>
+                    <UserSettings user={user} />
+                </div>
+            </div>
+        )}  
+
        <div className="page-wrapper">
         <header className={`social-header ${isNavCollapsed ? 'collapsed-nav' : ''} ${isNavbarHidden ? 'hidden' : ''}`}>
         {/* Top Navigation */}
@@ -2223,6 +2331,7 @@ function SocialAIMarketingEngine() {
             onToggleCollapse={toggleNavCollapse}
             isCollapsed={isNavCollapsed}
             isHidden={isNavbarHidden}
+            isAdmin={isAdmin}
             appName="Straun Marketing Engine" 
         />
         </header>
@@ -2678,7 +2787,11 @@ function SocialAIMarketingEngine() {
                                             </span>
                                             <span className="stat-item">
                                                 <button 
-                                                    onClick={() => fetchProducts()} 
+                                                    onClick={() => {
+                                                        setProductSearch('');  // Clear search
+                                                        fetchProducts();       // Fetch all products
+                                                    }} 
+                                                    
                                                     className="refresh-data-button"
                                                     disabled={productsFetchLoading}
                                                     style={{
@@ -2931,50 +3044,55 @@ function SocialAIMarketingEngine() {
                         </div>
                     )}
                 </main>
-                <div
-                    style={{
-                        position: 'fixed',
-                        bottom: '20px',
-                        right: '20px',
-                        zIndex: 1000,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '10px'
-                    }}
-                >
-                    <ReportButton 
-                        targetUserId={user?.id}
-                        floating={isReportButtonFloating}
-                        style={{
-                            backgroundColor: '#ff3b30',
-                            color: 'white',
-                            border: 'none',
-                            padding: '12px 16px',
-                            borderRadius: '50px',
-                            fontWeight: 'bold',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                            transition: 'all 0.3s ease',
-                        }}
-                    />
-                    <span style={{ 
-                        fontSize: '12px', 
-                        color: '#666', 
-                        background: 'rgba(255,255,255,0.9)', 
-                        padding: '4px 8px', 
-                        borderRadius: '4px' 
-                    }}>
-                        Report Issue
-                    </span>
-                </div>
 
-             <footer className="app-footer">
+                {/* Floating Actions Container */}
+                <div
+                style={{
+                    position: 'fixed',
+                    bottom: '20px',
+                    right: '20px',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '10px'
+                }}
+                >
+                
+                {/* Report Button */}
+                <ReportButton 
+                    targetUserId={user?.id}
+                    floating={isReportButtonFloating}
+                    style={{
+                    backgroundColor: '#ff3b30',
+                    color: 'white',
+                    border: 'none',
+                    padding: '12px 16px',
+                    borderRadius: '50px',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    transition: 'all 0.3s ease',
+                    }}
+                />
+                
+                {/* Label for Report Button */}
+                <span style={{ 
+                    fontSize: '12px', 
+                    color: '#666', 
+                    background: 'rgba(255,255,255,0.9)', 
+                    padding: '4px 8px', 
+                    borderRadius: '4px' 
+                }}>
+                    Report Issue
+                </span>
+                </div>
+            <footer className="app-footer">
             <div className="footer-content">
                 {/* CORRECT: Use Link from react-router-dom properly */}
                 <Link to="/terms" className="footer-link">
@@ -2990,16 +3108,7 @@ function SocialAIMarketingEngine() {
             </div>
             </footer>
 
-                {showSettings && (
-                    <div className="settings-modal-overlay">
-                        <div className="settings-modal">
-                            <UserSettings user={user} />
-                            <button onClick={() => setShowSettings(false)}>Close</button>
-                        </div>
-                    </div>
-                )}
-
-                {zoomedImage && (
+            {zoomedImage && (
                 <div 
                     onClick={() => setZoomedImage(null)} 
                     style={{

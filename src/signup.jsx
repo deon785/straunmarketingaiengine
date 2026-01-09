@@ -372,44 +372,55 @@ const Auth = () => {
 
   const handleForgotPassword = async () => {
     if (!email) {
-      setMessage({ text: 'Please enter your email to reset password', type: 'error' });
-      return;
+        setMessage({ text: 'Please enter your email to reset password', type: 'error' });
+        return;
     }
     
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      setMessage({ text: 'Please enter a valid email address', type: 'error' });
-      return;
+        setMessage({ text: 'Please enter a valid email address', type: 'error' });
+        return;
     }
     
     try {
-      setLoading(true);
-      
-      console.log('Sending password reset to:', email);
-      
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      
-      if (error) {
-        console.error('Password reset error:', error);
-        throw error;
-      }
-      
-      setMessage({ 
-        text: 'Password reset email sent! Check your inbox.', 
-        type: 'success' 
-      });
+        setLoading(true);
+        setMessage({ text: '', type: '' });
+        
+        console.log('Sending password reset to:', email);
+        
+        // IMPORTANT: Use the exact URL of your deployed app
+        const resetUrl = `${window.location.origin}/reset-password`;
+        console.log('Reset URL:', resetUrl);
+        
+        const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: resetUrl,
+        });
+        
+        if (error) {
+            console.error('Password reset error:', error);
+            throw error;
+        }
+        
+        console.log('Password reset email sent:', data);
+        
+        setMessage({ 
+            text: '📧 Password reset email sent! Check your inbox (and spam folder).', 
+            type: 'success' 
+        });
+        
+        // Clear email field
+        setEmail('');
+        
     } catch (error) {
-      console.error('Forgot password error:', error);
-      setMessage({ 
-        text: error.message || 'Failed to send reset email', 
-        type: 'error' 
-      });
+        console.error('Forgot password error:', error);
+        setMessage({ 
+            text: error.message || 'Failed to send reset email. Please try again.', 
+            type: 'error' 
+        });
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  };
+};
 
   const handleSubmit = (e) => {
     e.preventDefault();

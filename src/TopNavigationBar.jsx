@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom'; // ADD: useNavigate
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faHeart,
   faChevronDown,
   faChevronUp,
   faBars,
-  faTimes
+  faTimes,
+  faCrown // ADD: crown icon for admin
 } from '@fortawesome/free-solid-svg-icons';
 
 const TopNavigationBar = ({ 
@@ -19,11 +20,12 @@ const TopNavigationBar = ({
   onSettingsClick,
   isCollapsed = false,
   onToggleCollapse,
-  isHidden,
-  appName = "Straun Marketing AI Engine" // ADD: optional prop for app name
+  isAdmin, // This prop is already here
+  appName = "Straun Marketing AI Engine"
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const navRef = useRef(null);
+  const navigate = useNavigate(); // ADD: for navigation
 
   // COLLAPSED VIEW (Menu Only)
   if (isCollapsed || !isVisible) {
@@ -63,6 +65,41 @@ const TopNavigationBar = ({
           </span>
         </button>
         
+        {/* ADD: Admin button in collapsed view */}
+        {isAdmin && (
+          <button
+            onClick={() => navigate('/admin')}
+            className="admin-button-collapsed"
+            title="Admin Dashboard"
+            style={{
+              background: 'rgba(255, 255, 255, 0.2)', // Match nav background
+              border: '1px solid rgba(255, 255, 255, 0.3)', // Subtle border
+              color: 'white',
+              padding: '6px 12px', // Match other buttons
+              borderRadius: '20px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              marginRight: '10px',
+              backdropFilter: 'blur(10px)', // Glass effect
+              transition: 'all 0.3s ease'
+            }}
+           onMouseEnter={(e) => {
+            e.target.style.background = 'rgba(255, 255, 255, 0.4)'; // Slightly brighter
+            e.target.style.transform = 'scale(1.1)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = 'rgba(255, 255, 255, 0.3)'; // Back to original
+            e.target.style.transform = 'scale(1)';
+          }}
+          >
+            <FontAwesomeIcon icon={faCrown} size="sm" />
+          </button>
+        )}
+        
         <div className="collapsed-info">
           <span className="user-email-small">
             {user?.email?.split('@')[0] || 'User'}
@@ -99,6 +136,45 @@ const TopNavigationBar = ({
           </h1>
           
           <div className="header-actions">
+            {/* ADD: Admin button in full view - placed before wishlist */}
+            {isAdmin && (
+              <button
+                onClick={() => navigate('/admin')}
+                className="admin-button"
+                title="Admin Dashboard"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.3)',
+                  border: '1px solid rgba(255, 255, 255, 0.5)',
+                  color: 'white',
+                  backdropFilter: 'blur(10px)',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  marginRight: '10px',
+                  boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                  transition: 'all 0.3s ease',
+                  height: '36px'
+                }}
+             onMouseEnter={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.4)'; // Slightly brighter
+              e.target.style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.3)'; // Back to original
+              e.target.style.transform = 'scale(1)';
+            }}
+              >
+                <FontAwesomeIcon icon={faCrown} size="sm" />
+                <span className="admin-text">Admin</span>
+              </button>
+            )}
+            
             <Link to="/wishlist" title="My Wishlist" className="wishlist-link">
               <FontAwesomeIcon icon={faHeart} 
                 size="lg" 

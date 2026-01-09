@@ -13,7 +13,11 @@ import HelpCenter from './HelpCenter.jsx';
 import AdminDashboard from './AdminDashboard.jsx';
 import NotificationsList from './NotificationsList';
 import WishlistButton from './WishlistButton.jsx';
+
 import React, { useState, useEffect } from 'react';
+import SimpleAdmin from './SimpleAdmin';
+
+import ResetPassword from './ResetPassword.jsx';
 
 // Import AuthContext from separate file
 import { AuthProvider, useAuth } from './AuthContext.jsx';
@@ -367,6 +371,9 @@ function App() {
                   <Route path="/terms" element={<Terms />} />
                   <Route path="/help" element={<HelpCenter />} />
                   <Route path="/wishlist" element={<WishlistButton />} />
+
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/admin" element={<SimpleAdmin />} />
                   
                   {/* Protected Routes */}
                   <Route path="/app" element={
@@ -380,13 +387,6 @@ function App() {
                       <AdminDashboard />
                     </AdminRoute>
                   } />
-
-                  <Route path="/admin-test" element={<AdminDashboard />} />
-                  <Route path="/test-admin" element={<TestAdmin />} />
-
-                  <Route path="/admin-public" element={<AdminDashboard />} />
-                  <Route path="/admin-bare" element={<AdminDashboard />} />
-                  <Route path="/admin-direct" element={<AdminDashboard />} />
                                     
                   <Route path="/notifications" element={
                     <ProtectedRoute>

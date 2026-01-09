@@ -500,6 +500,10 @@ body.nav-collapsed {
     opacity: 0;
     pointer-events: none;
     position: fixed !important;
+    height: 50px !important;
+    max-height: 50px !important;
+    padding: 0.5rem 1rem !important;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
 }
 
 /* Collapsed state adjustments */
@@ -510,6 +514,14 @@ body.nav-collapsed {
     max-height: 50px !important;
     padding: 0.5rem 1rem;
     justify-content: flex-start !important;
+}
+
+/* When navbar is hidden OR collapsed, show ONLY the menu button */
+.social-header.hidden .header-content,
+.social-header.collapsed-nav .header-content {
+    justify-content: flex-start !important;
+    padding: 0 !important;
+    gap: 0 !important;
 }
 
 .social-header.collapsed .header-content {
@@ -596,15 +608,27 @@ body.nav-collapsed {
     overflow: hidden !important;
 }
 
-/* Menu button stays visible */
-.social-header.collapsed-nav .menu-section {
+/* Hide everything except menu-section when navbar is hidden/collapsed */
+.social-header.hidden .header-content > *:not(.menu-section),
+.social-header.collapsed-nav .header-content > *:not(.menu-section) {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Ensure menu-section is always visible and properly styled */
+.social-header .menu-section {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
     width: auto !important;
     height: auto !important;
     pointer-events: auto !important;
-    margin-right: auto !important; /* Push menu to left */
 }
 
 .social-header.collapsed-nav .menu-button {
@@ -621,6 +645,8 @@ body.nav-collapsed {
     font-size: 0.9rem !important;
     cursor: pointer !important;
     transition: all var(--transition-fast) !important;
+    pointer-events: auto !important;
+    margin-right: auto !important;
 }
 
 .social-header.collapsed-nav .menu-button:hover {
@@ -653,6 +679,39 @@ body.nav-collapsed {
 .social-header:not(.hidden) .switch-mode-button,
 .social-header:not(.hidden) .signout-button {
     pointer-events: auto;
+}
+
+.social-header.hidden .menu-button,
+.social-header.collapsed-nav .menu-button {
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    width: auto !important;
+    height: auto !important;
+    background: rgba(255, 255, 255, 0.2) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: var(--border-radius-sm) !important;
+    color: white !important;
+    padding: 8px 16px !important;
+    font-size: 1rem !important;
+    cursor: pointer !important;
+    transition: all var(--transition-fast) !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.social-header.hidden .menu-button:hover,
+.social-header.collapsed-nav .menu-button:hover {
+    background: rgba(255, 255, 255, 0.3) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* Menu button icon */
+.social-header.hidden .menu-button i,
+.social-header.hidden .menu-button svg,
+.social-header.collapsed-nav .menu-button i,
+.social-header.collapsed-nav .menu-button svg {
+    font-size: 1.3rem !important;
 }
 
 /* Ensure content doesn't jump during transitions */
@@ -921,6 +980,77 @@ body.nav-collapsed {
     white-space: nowrap;
 }
 
+/* ===== SETTINGS MODAL OVERRIDES ===== */
+.settings-modal-overlay {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    background-color: rgba(0, 0, 0, 0.7) !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: flex-start !important; /* Align to top */
+    padding-top: 20px !important;
+    overflow-y: auto !important;
+    backdrop-filter: blur(5px) !important;
+    animation: fadeIn 0.3s ease !important;
+}
+
+.settings-modal {
+    background: var(--card-bg) !important;
+    border-radius: var(--border-radius-lg) !important;
+    padding: 24px !important;
+    max-width: 600px !important;
+    width: 90% !important;
+    max-height: 85vh !important;
+    overflow-y: auto !important;
+    box-shadow: var(--shadow-xl) !important;
+    position: relative !important;
+    margin-top: 20px !important;
+    border: 1px solid var(--border-color) !important;
+    animation: slideDown 0.3s ease-out !important;
+}
+
+/* Ensure modal is on top of everything */
+.settings-modal-overlay,
+.settings-modal {
+    z-index: 9999 !important;
+}
+
+/* Prevent body scroll when modal is open */
+body.modal-open {
+    overflow: hidden !important;
+}
+
+/* Close button styles */
+.settings-modal-close {
+    position: absolute !important;
+    top: 10px !important;
+    right: 10px !important;
+    background: var(--danger-color) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 50% !important;
+    width: 30px !important;
+    height: 30px !important;
+    font-size: 18px !important;
+    cursor: pointer !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 10000 !important;
+    transition: all var(--transition-fast) !important;
+}
+
+/* Ensure UserSettings component inside modal has proper styling */
+.settings-modal .user-settings-container {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
 /* Buttons */
 .collapse-nav-button,
 .expand-nav-button {
@@ -951,6 +1081,11 @@ body.nav-collapsed {
 .settings-button:hover {
     background: rgba(255, 255, 255, 0.3);
     transform: translateY(-1px);
+}
+
+.settings-modal-close:hover {
+    background: #d32f2f !important;
+    transform: scale(1.1) !important;
 }
 
 /* Your preferred blue for Switch Mode */
@@ -1727,246 +1862,6 @@ body.nav-collapsed {
     background-color: #ccc;
 }
 
-/* ===== RESPONSIVE DESIGN ===== */
-@media (max-width: 768px) {
-    .app-title {
-        font-size: 2rem;
-    }
-    
-    .social-title {
-        font-size: 1.5rem;
-    }
-    
-    .header-content {
-        flex-direction: column;
-    }
-    
-    .mode-selection-cards {
-        grid-template-columns: 1fr;
-    }
-    
-    .prospects-grid,
-    .products-grid {
-        grid-template-columns: 1fr;
-        padding: 1rem;
-    }
-    
-    .results-stats {
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-    
-    .search-input-group {
-        flex-direction: column;
-    }
-    
-    .search-input-wrapper {
-        min-width: 100%;
-    }
-    
-    .search-button-large {
-        width: 100%;
-        justify-content: center;
-    }
-    
-    .user-info-card {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
-    .user-mode-info {
-        align-items: stretch;
-    }
-    
-    .user-actions {
-        justify-content: stretch;
-    }
-    
-    .switch-mode-button,
-    .signout-button {
-        flex: 1;
-        text-align: center;
-    }
-
-    .results-header {
-        flex-direction: column;
-        text-align: center;
-    }
-     .show-navbar-button {
-        font-size: 11px;
-        padding: 6px 12px;
-        top: 5px;
-    }
-    
-    /* Reduce transitions on mobile for performance */
-    .social-header,
-    .main-content-wrapper {
-        transition-duration: 0.2s;
-    }
-}
-
-/* For very small screens */
-@media (max-width: 480px) {
-    .social-header.hidden {
-        transform: translateY(-110%); /* Hide completely */
-    }
-    
-    .show-navbar-button {
-        width: 90%;
-        text-align: center;
-        justify-content: center;
-    }
-
-    .social-header.collapsed-nav .menu-button {
-        min-width: 40px !important;
-        min-height: 32px !important;
-        justify-content: center !important;
-    }
-    
-    .social-header.collapsed-nav .menu-button span {
-        display: none !important; /* Hide text on very small screens, keep icon */
-    }
-    
-    .social-header.collapsed-nav .menu-button i,
-    .social-header.collapsed-nav .menu-button svg {
-        margin-right: 0 !important;
-    }
-}
-
-@media (max-width: 480px) {
-    .app-container {
-        padding: 0.5rem;
-    }
-    
-    .mode-selection-screen,
-    .profile-setup-screen,
-    .social-main-content {
-        padding: 1rem;
-    }
-    
-    .prospect-card,
-    .product-card {
-        padding: 1rem;
-    }
-    
-    .detail-item {
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-    
-    .detail-value {
-        max-width: 100%;
-        text-align: left;
-    }
-}
-
-/* ===== PRINT STYLES ===== */
-@media print {
-    .main-social-interface {
-        box-shadow: none;
-        border: 1px solid #ddd;
-    }
-    
-    .search-button-large,
-    .connect-button,
-    .contact-seller-button,
-    .switch-mode-button,
-    .signout-button {
-        display: none;
-    }
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --light-bg: #f8f9fa;
-    --card-bg: #ffffff;
-    --border-color: #e9ecef;
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-light: #adb5bd;
-
-   /* Add shadow adjustments for light mode */
-    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.15);
-    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.2);
-    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.25);
-
-  }
-
-   .mode-selection-footer {
-    background: rgba(0, 0, 0, 0.05); 
-  }
-  
-    .social-header {
-        background: linear-gradient(135deg, #3a56d4, #5a0d9a);
-        padding: 0.5rem 1rem;
-    }
-}
-
-/* Responsive adjustments for Top Navigation Bar */
-@media (max-width: 1024px) {
-    .header-content {
-        flex-direction: column;
-        gap: 15px;
-        align-items: flex-start;
-    }
-    
-    .user-controls {
-        width: 100%;
-    }
-    
-    .user-info-card {
-        width: 100%;
-        justify-content: space-between;
-    }
-    
-    .user-mode-info {
-        border-left: none;
-        padding-left: 0;
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
-        padding-top: 10px;
-        width: 100%;
-        justify-content: space-between;
-    }
-}
-
-@media (max-width: 768px) {
-    .social-header {
-        padding: 1rem;
-    }
-    .mode-selection-cards {
-        flex-direction: column;
-        align-items: center;
-    }
-    
-    .mode-card {
-        width: 100%;
-        max-width: 400px;
-    }
-    
-    .user-info-card {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .user-mode-info {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    
-    .user-actions {
-        width: 100%;
-        flex-direction: column;
-    }
-    
-    .settings-button,
-    .switch-mode-button,
-    .signout-button {
-        width: 100%;
-    }
-}
-
 /* Add to your App.css */
 .app-footer {
     padding: 20px;
@@ -2226,106 +2121,6 @@ input:focus-visible {
     to { transform: translateX(0); opacity: 1; }
 }
 
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .collapsed-info {
-        gap: 10px;
-    }
-    
-    .user-email-small {
-        max-width: 100px;
-    }
-    
-    .location-small {
-        display: none;
-    }
-}
-
-
-@media print {
-    .social-header,
-    .search-section-card,
-    .search-button-large,
-    .connect-button,
-    .contact-seller-button,
-    .switch-mode-button,
-    .signout-button,
-    .app-footer,
-    .notification-container {
-        display: none !important;
-    }
-    
-    .app-container {
-        padding-top: 0;
-    }
-    
-    .prospects-grid,
-    .products-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1rem;
-    }
-    
-    .prospect-card,
-    .product-card {
-        break-inside: avoid;
-        box-shadow: none;
-        border: 1px solid #ddd;
-    }
-}
-
-@media (prefers-contrast: high) {
-    :root {
-        --text-primary: #000000;
-        --text-secondary: #333333;
-        --border-color: #000000;
-    }
-    
-    button {
-        border: 2px solid currentColor;
-    }
-
-    .social-header.hidden {
-        border: 2px solid transparent;
-    }
-    
-    .show-navbar-button {
-        border: 2px solid currentColor;
-    }
-}
-
-@media (prefers-color-scheme: light) {
-    .notification-button {
-        background: var(--card-bg);
-        border-color: var(--border-color);
-    }
-    
-    .notification-dropdown {
-        background: var(--card-bg);
-        border-color: var(--border-color);
-    }
-    
-    .notification-item.unread {
-        background-color: rgba(67, 97, 238, 0.05);
-    }
-}
-
-@media (prefers-color-scheme: light) {
-    /* Add for collapsed nav */
-    .collapsed-nav,
-    .social-header.collapsed-nav {
-        background: linear-gradient(135deg, #2a56c4, #4a0c8a) !important;
-    }
-    
-    .collapsed-nav .user-info-card {
-        background: rgba(0, 0, 0, 0.08);
-        border: 1px solid rgba(0, 0, 0, 0.15);
-    }
- 
-    .collapsed-nav .mode-tag-small {
-        background: rgba(255, 255, 255, 0.95);
-    }
-}
-
 @keyframes slideInDown {
     from {
         transform: translateY(-100%);
@@ -2373,135 +2168,10 @@ input:focus-visible {
     height: 0 !important;; /* Smaller when navbar is hidden */
 }
 
-/* Responsive adjustments for new behavior */
-@media (max-width: 768px) {
-    .social-header {
-        height: 60px !important;
-        max-height: 60px !important;
-    }
-    
-    .social-header.collapsed-nav {
-        height: 40px !important;
-        max-height: 40px !important;
-        padding: 0.25rem 0.5rem !important;
-    }
-    
-    .social-header.collapsed-nav .menu-button {
-        padding: 4px 8px !important;
-        font-size: 0.8rem !important;
-    }
-
-    .social-header.collapsed-nav .menu-button i,
-    .social-header.collapsed-nav .menu-button svg {
-        font-size: 1rem !important;
-        margin-right: 4px !important;
-    }
-
-    .main-content-wrapper {
-        padding-top: 16px !important; /* Smaller gap on mobile */
-        min-height: calc(100vh - 60px - 16px); 
-    }
-    
-    .notification-dropdown {
-        top: 100% !important; /* Still below navbar on mobile */
-        width: 300px;
-        right: 10px;
-    }
-
-    /* Make navbar always visible when touching top on mobile */
-    .social-header.at-top {
-        transform: translateY(0) !important;
-        opacity: 1 !important;
-    }
-}
-
-/* Touch device optimizations */
-@media (hover: none) and (pointer: coarse) {
-    /* Disable hover effects on touch devices */
-    .social-header:hover {
-        transform: translateY(0) !important;
-        opacity: 1 !important;
-    }
-    
-    /* Make show button more visible on touch */
-    .show-navbar-button {
-        background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
-        font-size: 14px;
-        padding: 12px 24px;
-    }
-}
-
-/* Reduced motion preferences */
-@media (prefers-reduced-motion: reduce) {
-    .social-header,
-    .main-content-wrapper,
-    .app-container,
-    .social-main-content {
-        transition: none !important;
-        animation: none !important;
-    }
-    
-    .show-navbar-button {
-        animation: none !important;
-    }
-    
-    .auto-hide-progress::after {
-        animation: none !important;
-    }
-}
-
-@supports (-webkit-touch-callout: none) {
-    .social-header {
-        /* iOS specific fixes */
-        -webkit-transform: translateZ(0);
-        transform: translateZ(0);
-    }
-}
-
 /* For keyboard users: keep navbar visible when focused */
 .social-header:focus-within {
     transform: translateY(0) !important;
     opacity: 1 !important;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .show-navbar-button {
-        font-size: 11px;
-        padding: 6px 12px;
-        top: 5px;
-    }
-    
-    .navbar-notice {
-        top: 60px;
-        font-size: 11px;
-        max-width: 90%;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-}
-
-/* ===== iOS SAFE AREA SUPPORT ===== */
-@supports (padding-top: env(safe-area-inset-top)) {
-    .social-header {
-        padding-top: calc(0.75rem + env(safe-area-inset-top));
-        height: calc(70px + env(safe-area-inset-top)) !important;
-    }
-    
-    .main-content-wrapper {
-        padding-top: calc(70px + env(safe-area-inset-top)) !important;
-    }
-    
-    @media (max-width: 768px) {
-        .social-header {
-            height: calc(60px + env(safe-area-inset-top)) !important;
-        }
-        
-        .main-content-wrapper {
-            padding-top: calc(60px + env(safe-area-inset-top)) !important;
-        }
-    }
 }
 
 /* ===== COMPACT FORM STYLES ===== */
@@ -2566,22 +2236,6 @@ input:focus-visible {
     width: 120px !important;
     height: 120px !important;
     margin: 10px auto !important;
-}
-
-/* Responsive adjustments for compact forms */
-@media (max-width: 640px) {
-    .seller-setup-form-container {
-        padding: 1rem !important;
-    }
-    
-    .form-group {
-        margin-bottom: 0.75rem !important;
-    }
-    
-    .compact-upload-area {
-        padding: 10px !important;
-        min-height: 80px !important;
-    }
 }
 
 /* ===== IMAGE UPLOADER SPECIFIC STYLES ===== */
@@ -2754,6 +2408,216 @@ input:focus-visible {
     border-color: #4F46E5;
 }
 
+/* Admin Button Styles */
+.admin-button {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px 16px !important;
+  border-radius: 20px !important;
+  font-weight: bold !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  margin-right: 10px !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3) !important;
+  transition: all 0.3s ease !important;
+  height: 36px !important;
+}
+
+.admin-button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4) !important;
+}
+
+.admin-button:active {
+  transform: translateY(0) !important;
+}
+
+.admin-button-collapsed {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
+  color: white !important;
+  border: none !important;
+  padding: 8px !important;
+  border-radius: 50% !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  margin-left: 10px !important;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.4) !important;
+  transition: all 0.2s ease !important;
+}
+
+.admin-button-collapsed:hover {
+  transform: scale(1.1) !important;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.6) !important;
+}
+
+/* Make sure the admin button is visible on different backgrounds */
+.social-header .admin-button {
+  position: relative;
+  z-index: 10;
+}
+
+@media (max-width: 480px) {
+    .upload-area {
+        padding: 10px;
+        min-height: 80px;
+    }
+    
+    .image-preview {
+        width: 90px;
+        height: 90px;
+    }
+    
+    .upload-instructions {
+        font-size: 0.7rem;
+    }
+}
+
+
+/* Responsive adjustments for compact forms */
+@media (max-width: 640px) {
+    .seller-setup-form-container {
+        padding: 1rem !important;
+    }
+    
+    .form-group {
+        margin-bottom: 0.75rem !important;
+    }
+    
+    .compact-upload-area {
+        padding: 10px !important;
+        min-height: 80px !important;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .admin-button .admin-text {
+    display: none;
+  }
+  
+  .admin-button {
+    padding: 8px !important;
+    width: 36px !important;
+    height: 36px !important;
+  }
+  
+  .collapsed-nav .admin-button-collapsed {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 6px !important;
+  }
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 768px) {
+    .app-title {
+        font-size: 2rem;
+    }
+    
+    .social-title {
+        font-size: 1.5rem;
+    }
+    
+    .header-content {
+        flex-direction: row !important; /* Keep items in a row */
+        flex-wrap: wrap !important;
+        justify-content: space-between !important;
+        gap: 0.5rem !important;
+        padding: 0 0.5rem !important;
+    }
+    
+    .mode-selection-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .prospects-grid,
+    .products-grid {
+        grid-template-columns: 1fr;
+        padding: 1rem;
+    }
+    
+    .results-stats {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .search-input-group {
+        flex-direction: column;
+    }
+    
+    .search-input-wrapper {
+        min-width: 100%;
+    }
+    
+    .search-button-large {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .user-info-card {
+        order: 2;
+        flex: 1 1 100% !important; /* Take full width */
+        margin-top: 0.5rem !important;
+        padding: 0.5rem !important;
+        min-width: 0 !important;
+        justify-content: space-between !important;
+    }
+    
+    .user-mode-info {
+        align-items: stretch;
+    }
+    
+    .user-actions {
+        justify-content: stretch;
+    }
+    
+    .switch-mode-button,
+    .signout-button {
+        flex: 1;
+        text-align: center;
+    }
+
+    .results-header {
+        flex-direction: column;
+        text-align: center;
+    }
+     .show-navbar-button {
+        font-size: 11px;
+        padding: 6px 12px;
+        top: 5px;
+    }
+    
+    /* Reduce transitions on mobile for performance */
+    .social-header,
+    .main-content-wrapper {
+        transition-duration: 0.2s;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .settings-modal-overlay {
+        padding-top: 10px !important;
+        align-items: flex-start !important;
+    }
+    
+    .settings-modal {
+        width: 95% !important;
+        margin-top: 10px !important;
+        max-height: 90vh !important;
+        padding: 20px !important;
+    }
+}
+
 /* ===== RESPONSIVE ADJUSTMENTS FOR MOBILE ===== */
 @media (max-width: 768px) {
     .upload-area {
@@ -2783,21 +2647,497 @@ input:focus-visible {
     }
 }
 
-@media (max-width: 480px) {
-    .upload-area {
-        padding: 10px;
-        min-height: 80px;
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .show-navbar-button {
+        font-size: 11px;
+        padding: 6px 12px;
+        top: 5px;
     }
     
-    .image-preview {
-        width: 90px;
-        height: 90px;
-    }
-    
-    .upload-instructions {
-        font-size: 0.7rem;
+    .navbar-notice {
+        top: 60px;
+        font-size: 11px;
+        max-width: 90%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
+
+/* Responsive adjustments for new behavior */
+@media (max-width: 768px) {
+    .social-header {
+        padding: 0.5rem !important;
+        height: auto !important; /* Allow height to adjust */
+        min-height: 70px !important;
+        flex-wrap: wrap !important;
+    }
+    
+    .social-header.collapsed-nav {
+        height: 40px !important;
+        max-height: 40px !important;
+        padding: 0.25rem 0.5rem !important;
+    }
+    
+    .social-header.collapsed-nav .menu-button {
+        padding: 4px 8px !important;
+        font-size: 0.8rem !important;
+    }
+
+    .social-header.collapsed-nav .menu-button i,
+    .social-header.collapsed-nav .menu-button svg {
+        font-size: 1rem !important;
+        margin-right: 4px !important;
+    }
+
+    .main-content-wrapper {
+        padding-top: 16px !important; /* Smaller gap on mobile */
+        min-height: calc(100vh - 60px - 16px); 
+    }
+    
+    .notification-dropdown {
+        top: 100% !important; /* Still below navbar on mobile */
+        width: 300px;
+        right: 10px;
+    }
+
+    /* Make navbar always visible when touching top on mobile */
+    .social-header.at-top {
+        transform: translateY(0) !important;
+        opacity: 1 !important;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .collapsed-info {
+        gap: 10px;
+    }
+    
+    .user-email-small {
+        max-width: 100px;
+    }
+    
+    .location-small {
+        display: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .social-header {
+        padding: 0.5rem;
+    }
+    .mode-selection-cards {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .mode-card {
+        width: 100%;
+        max-width: 400px;
+    }
+
+    .mode-tag {
+        padding: 3px 8px !important;
+        font-size: 0.7rem !important;
+    }
+    
+    .user-info-card {
+        order: 2;
+        flex: 1 1 100% !important; /* Take full width */
+        margin-top: 0.5rem !important;
+        padding: 0.5rem !important;
+        min-width: 0 !important;
+        justify-content: space-between !important;
+    }
+    
+    .user-mode-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .user-actions {
+        flex-wrap: nowrap !important;
+        gap: 0.25rem !important;
+
+    }
+    
+     .user-details {
+        min-width: 0 !important;
+        max-width: 150px !important;
+    }
+    
+    .user-email {
+        font-size: 0.8rem !important;
+        max-width: 150px !important;
+    }
+
+    .user-controls {
+        min-width: 0 !important;
+        flex: 1 !important;
+        justify-content: flex-end !important;
+    }
+
+    .user-avatar {
+        width: 28px !important;
+        height: 28px !important;
+    }
+
+    .settings-button,
+    .switch-mode-button,
+    .signout-button {
+        min-width: 80px !important;
+        padding: 6px 10px !important;
+        font-size: 0.75rem !important;
+    }
+}
+
+/* For mobile responsiveness */
+@media (max-width: 768px) {
+    .social-header.hidden .menu-button,
+    .social-header.collapsed-nav .menu-button {
+        padding: 6px 12px !important;
+        font-size: 0.9rem !important;
+    }
+    
+    .social-header.hidden {
+        height: 45px !important;
+        max-height: 45px !important;
+        padding: 0.5rem !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .social-header.hidden .header-content > *,
+    .social-header.collapsed-nav .header-content > *,
+    .social-header.hidden .user-controls,
+    .social-header.collapsed-nav .user-controls,
+    .social-header.hidden .user-info-card,
+    .social-header.collapsed-nav .user-info-card,
+    .social-header.hidden .user-mode-info,
+    .social-header.collapsed-nav .user-mode-info,
+    .social-header.hidden .user-actions,
+    .social-header.collapsed-nav .user-actions,
+    .social-header.hidden .settings-button,
+    .social-header.collapsed-nav .settings-button,
+    .social-header.hidden .switch-mode-button,
+    .social-header.collapsed-nav .switch-mode-button,
+    .social-header.hidden .signout-button,
+    .social-header.collapsed-nav .signout-button {
+        display: flex !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        width: auto !important;
+        height: auto !important;
+        padding: initial !important;
+        margin: initial !important;
+        overflow: visible !important;
+    }
+}
+
+@media (min-width: 769px) { /* Only apply hiding on desktop */
+    .social-header.hidden .header-content > *:not(.menu-section),
+    .social-header.collapsed-nav .header-content > *:not(.menu-section),
+    .social-header.hidden .user-controls,
+    .social-header.collapsed-nav .user-controls,
+    .social-header.hidden .user-info-card,
+    .social-header.collapsed-nav .user-info-card,
+    .social-header.hidden .user-mode-info,
+    .social-header.collapsed-nav .user-mode-info,
+    .social-header.hidden .user-actions,
+    .social-header.collapsed-nav .user-actions,
+    .social-header.hidden .settings-button,
+    .social-header.collapsed-nav .settings-button,
+    .social-header.hidden .switch-mode-button,
+    .social-header.collapsed-nav .switch-mode-button,
+    .social-header.hidden .signout-button,
+    .social-header.collapsed-nav .signout-button {
+        display: none !important;
+        opacity: 0 !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: hidden !important;
+    }
+}
+
+/* ===== iOS SAFE AREA SUPPORT ===== */
+@supports (padding-top: env(safe-area-inset-top)) {
+    .social-header {
+        padding-top: calc(0.75rem + env(safe-area-inset-top));
+        height: calc(70px + env(safe-area-inset-top)) !important;
+    }
+    
+    .main-content-wrapper {
+        padding-top: calc(70px + env(safe-area-inset-top)) !important;
+    }
+    
+    @media (max-width: 768px) {
+        .social-header {
+            height: calc(60px + env(safe-area-inset-top)) !important;
+        }
+        
+        .main-content-wrapper {
+            padding-top: calc(60px + env(safe-area-inset-top)) !important;
+        }
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    /* Disable hover effects on touch devices */
+    .social-header:hover {
+        transform: translateY(0) !important;
+        opacity: 1 !important;
+    }
+    
+    /* Make show button more visible on touch */
+    .show-navbar-button {
+        background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
+        font-size: 14px;
+        padding: 12px 24px;
+    }
+}
+
+@media (max-width: 480px) {
+    .social-header.hidden {
+        transform: translateY(-110%); /* Hide completely */
+    }
+    
+    .show-navbar-button {
+        width: 90%;
+        text-align: center;
+        justify-content: center;
+    }
+
+    .social-header.collapsed-nav .menu-button {
+        min-width: 40px !important;
+        min-height: 32px !important;
+        justify-content: center !important;
+    }
+    
+    .social-header.collapsed-nav .menu-button span {
+        display: none !important; /* Hide text on very small screens, keep icon */
+    }
+    
+    .social-header.collapsed-nav .menu-button i,
+    .social-header.collapsed-nav .menu-button svg {
+        margin-right: 0 !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .app-container {
+        padding: 0.5rem;
+    }
+    
+    .mode-selection-screen,
+    .profile-setup-screen,
+    .social-main-content {
+        padding: 1rem;
+    }
+    
+    .prospect-card,
+    .product-card {
+        padding: 1rem;
+    }
+    
+    .detail-item {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .detail-value {
+        max-width: 100%;
+        text-align: left;
+    }
+}
+
+/* ===== PRINT STYLES ===== */
+@media print {
+    .main-social-interface {
+        box-shadow: none;
+        border: 1px solid #ddd;
+    }
+    
+    .search-button-large,
+    .connect-button,
+    .contact-seller-button,
+    .switch-mode-button,
+    .signout-button {
+        display: none;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --light-bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --border-color: #e9ecef;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --text-light: #adb5bd;
+
+   /* Add shadow adjustments for light mode */
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.2);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.25);
+
+  }
+
+   .mode-selection-footer {
+    background: rgba(0, 0, 0, 0.05); 
+  }
+  
+    .social-header {
+        background: linear-gradient(135deg, #3a56d4, #5a0d9a);
+        padding: 0.5rem 1rem;
+    }
+}
+
+/* Responsive adjustments for Top Navigation Bar */
+@media (max-width: 1024px) {
+    .header-content {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+    }
+    
+    .user-controls {
+        width: 100%;
+    }
+    
+    .user-info-card {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .user-mode-info {
+        border-left: none;
+        padding-left: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        padding-top: 10px;
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+@media print {
+    .social-header,
+    .search-section-card,
+    .search-button-large,
+    .connect-button,
+    .contact-seller-button,
+    .switch-mode-button,
+    .signout-button,
+    .app-footer,
+    .notification-container {
+        display: none !important;
+    }
+    
+    .app-container {
+        padding-top: 0;
+    }
+    
+    .prospects-grid,
+    .products-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+    
+    .prospect-card,
+    .product-card {
+        break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ddd;
+    }
+}
+
+@media (prefers-contrast: high) {
+    :root {
+        --text-primary: #000000;
+        --text-secondary: #333333;
+        --border-color: #000000;
+    }
+    
+    button {
+        border: 2px solid currentColor;
+    }
+
+    .social-header.hidden {
+        border: 2px solid transparent;
+    }
+    
+    .show-navbar-button {
+        border: 2px solid currentColor;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    .notification-button {
+        background: var(--card-bg);
+        border-color: var(--border-color);
+    }
+    
+    .notification-dropdown {
+        background: var(--card-bg);
+        border-color: var(--border-color);
+    }
+    
+    .notification-item.unread {
+        background-color: rgba(67, 97, 238, 0.05);
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    /* Add for collapsed nav */
+    .collapsed-nav,
+    .social-header.collapsed-nav {
+        background: linear-gradient(135deg, #2a56c4, #4a0c8a) !important;
+    }
+    
+    .collapsed-nav .user-info-card {
+        background: rgba(0, 0, 0, 0.08);
+        border: 1px solid rgba(0, 0, 0, 0.15);
+    }
+ 
+    .collapsed-nav .mode-tag-small {
+        background: rgba(255, 255, 255, 0.95);
+    }
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    .social-header,
+    .main-content-wrapper,
+    .app-container,
+    .social-main-content {
+        transition: none !important;
+        animation: none !important;
+    }
+    
+    .show-navbar-button {
+        animation: none !important;
+    }
+    
+    .auto-hide-progress::after {
+        animation: none !important;
+    }
+}
+
+@supports (-webkit-touch-callout: none) {
+    .social-header {
+        /* iOS specific fixes */
+        -webkit-transform: translateZ(0);
+        transform: translateZ(0);
+    }
+}
+
 
 /* Smooth scrolling behavior */
 html {

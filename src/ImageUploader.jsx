@@ -16,10 +16,10 @@ const ImageUploader = ({ onUploadSuccess }) => {
 
       // --- COMPRESSION LOGIC ---
       const options = {
-        maxSizeMB: 0.4,           // Reduced from 0.5MB to 300KB
-        maxWidthOrHeight: 800,    // Reduced from 1024px to 800px
+        maxSizeMB: 0.4,
+        maxWidthOrHeight: 800,
         useWebWorker: true,
-        initialQuality: 0.8,      // 80% quality
+        initialQuality: 0.8,
       };
 
       console.log('Original size:', (imageFile.size / 1024 / 1024).toFixed(2), 'MB');
@@ -28,11 +28,10 @@ const ImageUploader = ({ onUploadSuccess }) => {
       
       console.log('Compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
 
-      const fileExt = 'jpg'; // Force JPEG for better compression
+      const fileExt = 'jpg';
       const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
       const filePath = fileName;
 
-      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('product-images')
         .upload(filePath, compressedFile, {
@@ -42,7 +41,6 @@ const ImageUploader = ({ onUploadSuccess }) => {
 
       if (uploadError) throw uploadError;
 
-      // Get the Public URL
       const { data } = supabase.storage
         .from('product-images')
         .getPublicUrl(filePath);
@@ -62,95 +60,92 @@ const ImageUploader = ({ onUploadSuccess }) => {
 
   return (
     <div style={{ 
-      marginBottom: '15px',
-      padding: '0',
-      width: '100%'
+      width: '100%',
+      height: '120px', // FIXED HEIGHT
+      position: 'relative',
+      marginBottom: '15px'
     }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '8px'
-      }}>
-        <label style={{ 
-          color: 'white', 
-          fontSize: '14px',
-          fontWeight: '600'
-        }}>
-          📷 Product Image *
-        </label>
-        <span style={{
-          fontSize: '12px',
-          color: '#9CA3AF'
-        }}>
-          Required
-        </span>
-      </div>
+      {/* Hidden file input */}
+      <input
+        id="image-upload-input"
+        type="file"
+        accept="image/*"
+        onChange={handleUpload}
+        disabled={uploading}
+        style={{ 
+          display: 'none',
+          width: '0',
+          height: '0',
+          opacity: '0',
+          position: 'absolute'
+        }}
+      />
       
-      <div style={{
-        position: 'relative',
-        border: '2px dashed #4F46E5',
-        borderRadius: '10px',
-        padding: '15px',
-        textAlign: 'center',
-        backgroundColor: 'rgba(79, 70, 229, 0.05)',
-        transition: 'all 0.2s ease',
-        cursor: 'pointer',
-        minHeight: '100px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}
-      onClick={() => document.getElementById('image-upload-input').click()}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.currentTarget.style.borderColor = '#10B981';
-        e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-      }}
-      onDragLeave={(e) => {
-        e.currentTarget.style.borderColor = '#4F46E5';
-        e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.05)';
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-          const event = { target: { files } };
-          handleUpload(event);
-        }
-      }}
+      {/* Upload Container */}
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          border: '2px dashed #4F46E5',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(79, 70, 229, 0.05)',
+          cursor: 'pointer',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '12px',
+          position: 'relative',
+          overflow: 'hidden',
+          transition: 'all 0.2s ease'
+        }}
+        onClick={() => document.getElementById('image-upload-input').click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.currentTarget.style.borderColor = '#10B981';
+          e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+        }}
+        onDragLeave={(e) => {
+          e.currentTarget.style.borderColor = '#4F46E5';
+          e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.05)';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const files = e.dataTransfer.files;
+          if (files.length > 0) {
+            const event = { target: { files } };
+            handleUpload(event);
+          }
+        }}
       >
-        <input
-          id="image-upload-input"
-          type="file"
-          accept="image/*"
-          onChange={handleUpload}
-          disabled={uploading}
-          style={{ 
-            display: 'none',
-            width: '0',
-            height: '0',
-            opacity: '0',
-            position: 'absolute'
-          }}
-        />
-        
-        <div style={{ fontSize: '32px', marginBottom: '8px' }}>
+        {/* Upload Icon */}
+        <div style={{ 
+          fontSize: '24px', 
+          marginBottom: '6px',
+          color: uploading ? '#10B981' : '#9CA3AF'
+        }}>
           {uploading ? '⏳' : '📷'}
         </div>
         
         {uploading ? (
-          <div style={{ width: '100%' }}>
-            <p style={{ color: '#25D366', fontSize: '14px', marginBottom: '8px' }}>
-              Compressing & Uploading...
+          <div style={{ 
+            width: '100%',
+            textAlign: 'center'
+          }}>
+            <p style={{ 
+              color: '#25D366', 
+              fontSize: '13px',
+              marginBottom: '8px',
+              fontWeight: '500'
+            }}>
+              Uploading...
             </p>
             {uploadProgress > 0 && (
               <div style={{
                 width: '100%',
-                height: '6px',
+                height: '4px',
                 backgroundColor: '#374151',
-                borderRadius: '3px',
+                borderRadius: '2px',
                 overflow: 'hidden'
               }}>
                 <div style={{
@@ -163,36 +158,48 @@ const ImageUploader = ({ onUploadSuccess }) => {
             )}
           </div>
         ) : (
-          <>
+          <div style={{ 
+            textAlign: 'center',
+            maxWidth: '90%'
+          }}>
             <p style={{ 
               color: '#D1D5DB', 
-              fontSize: '14px',
+              fontSize: '13px',
               marginBottom: '4px',
-              fontWeight: '500'
+              fontWeight: '500',
+              lineHeight: '1.2'
             }}>
-              Click to upload or drag & drop
+              Upload Image
             </p>
             <p style={{ 
               color: '#9CA3AF', 
-              fontSize: '12px',
-              lineHeight: '1.3'
+              fontSize: '11px',
+              lineHeight: '1.2'
             }}>
-              JPG, PNG, WebP • Max 5MB • Auto-compressed to 300KB
+              Click or drag & drop
             </p>
-          </>
+          </div>
         )}
-      </div>
-      
-      {uploading && (
-        <p style={{ 
-          color: '#9CA3AF', 
-          fontSize: '11px',
-          marginTop: '6px',
+        
+        {/* Bottom label */}
+        <div style={{
+          position: 'absolute',
+          bottom: '8px',
+          left: '0',
+          right: '0',
           textAlign: 'center'
         }}>
-          Optimizing for fast loading...
-        </p>
-      )}
+          <span style={{
+            fontSize: '10px',
+            color: '#6B7280',
+            backgroundColor: 'rgba(0, 0, 0, 0.3)',
+            padding: '2px 6px',
+            borderRadius: '4px'
+          }}>
+            Max 5MB • Auto-compressed
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
