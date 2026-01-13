@@ -1,29 +1,32 @@
+import React, { useState, useEffect, Suspense, lazy } from 'react'; // Added Suspense & lazy
+
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import Auth from './signup';
-import SocialAIMarketingEngine from './SocialAIMarketingEngine';
-import PrivacyPolicy from './PrivacyPolicy';
-import Terms from './Terms.jsx';
 import './App.css';
 import { supabase } from './lib/supabase';
 import CookieBanner from './CookieBanner.jsx';
 import * as Sentry from "@sentry/react";
 import ReactGA from "react-ga4";
 import { toast, Toaster } from 'react-hot-toast';
-import HelpCenter from './HelpCenter.jsx';
-import AdminDashboard from './AdminDashboard.jsx';
-import NotificationsList from './NotificationsList';
-import WishlistButton from './WishlistButton.jsx';
-
-import React, { useState, useEffect } from 'react';
-import SimpleAdmin from './SimpleAdmin';
-
-import ResetPassword from './ResetPassword.jsx';
 
 // Import AuthContext from separate file
 import { AuthProvider, useAuth } from './AuthContext.jsx';
+import PullToRefreshWrapper from './PullToRefreshWrapper.jsx';
 
 import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
+
+// --- LAZY LOADED COMPONENTS ---
+// These only load when the user navigates to them
+const Auth = lazy(() => import('./signup'));
+const SocialAIMarketingEngine = lazy(() => import('./SocialAIMarketingEngine.jsx'));
+const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
+const Terms = lazy(() => import('./Terms.jsx'));
+const HelpCenter = lazy(() => import('./HelpCenter.jsx'));
+const AdminDashboard = lazy(() => import('./AdminDashboard.jsx'));
+const NotificationsList = lazy(() => import('./NotificationsList'));
+const WishlistButton = lazy(() => import('./WishlistButton.jsx'));
+const SimpleAdmin = lazy(() => import('./SimpleAdmin'));
+const ResetPassword = lazy(() => import('./ResetPassword.jsx'));
 
 const TestAdmin = () => {
   console.log('TestAdmin loaded');
@@ -353,59 +356,66 @@ function App() {
       <AuthProvider>
         <Router>
           <RefreshPersistenceWrapper>
-            <AnalyticsTracker />
-            <NotificationWatcher />
-            
-            {/* Fixed Header */}
-            <AppHeader />
-            
-            <div className="app">
-              <OfflineBanner />
+            <PullToRefreshWrapper>
+              <AnalyticsTracker />
+              <NotificationWatcher />
               
-              {/* Main Content Area with proper spacing */}
-              <main>
-                <Routes>
-                  {/* Public Routes */}
-                  <Route path="/" element={<Auth />} />
-                  <Route path="/privacy" element={<PrivacyPolicy />} />
-                  <Route path="/terms" element={<Terms />} />
-                  <Route path="/help" element={<HelpCenter />} />
-                  <Route path="/wishlist" element={<WishlistButton />} />
+              {/* Fixed Header */}
+              <AppHeader />
+              
+              <div className="app">
+                <OfflineBanner />
+                
+                {/* Main Content Area with proper spacing */}
+                <main>
+                  {/* The Suspense component handles the "Wait" while your 
+                    subsequent pages (Mode Selection, Search, Products) load.
+                  */}
+                  <Suspense fallback={
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+                      <div className="loading-spinner">Loading your experience...</div>
+                    </div>
+                  }>
+                    <Routes>
+                      {/* Stage 1: Auth */}
+                      <Route path="/" element={<Auth />} />
+                      
+                      {/* Stage 2 & 3: Mode Selection & Engine */}
+                      <Route path="/app" element={
+                        <ProtectedRoute>
+                          <SocialAIMarketingEngine />
+                        </ProtectedRoute>
+                      } />
+                      
+                      {/* Stage 4: Notifications/Other */}
+                      <Route path="/notifications" element={
+                        <ProtectedRoute>
+                          <NotificationsList />
+                        </ProtectedRoute>
+                      } />
 
-                  <Route path="/reset-password" element={<ResetPassword />} />
-                  <Route path="/admin" element={<SimpleAdmin />} />
-                  
-                  {/* Protected Routes */}
-                  <Route path="/app" element={
-                    <ProtectedRoute>
-                      <SocialAIMarketingEngine />
-                    </ProtectedRoute>
-                  } />
-                  
-                  <Route path="/admin" element={
-                    <AdminRoute>
-                      <AdminDashboard />
-                    </AdminRoute>
-                  } />
-                                    
-                  <Route path="/notifications" element={
-                    <ProtectedRoute>
-                      <NotificationsList />
-                    </ProtectedRoute>
-                  } />
-                  
-                  {/* Catch-all */}
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </main>
-              
-              <CookieBanner /> 
-              <FeedbackButton />
-            </div>
+                      <Route path="/privacy" element={<PrivacyPolicy />} />
+                      <Route path="/terms" element={<Terms />} />
+                      <Route path="/help" element={<HelpCenter />} />
+                      <Route path="/wishlist" element={<WishlistButton />} />
+                      <Route path="/reset-password" element={<ResetPassword />} />
+                      <Route path="/admin" element={<SimpleAdmin />} />
+                      
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </Suspense>
+                </main>
+                
+                <CookieBanner /> 
+                <FeedbackButton />
+              </div>
+             </PullToRefreshWrapper>
           </RefreshPersistenceWrapper>
         </Router>
       </AuthProvider>
     </Sentry.ErrorBoundary>
+    
+
   );
 }
 

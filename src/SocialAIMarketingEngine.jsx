@@ -20,6 +20,7 @@ import ReportButton from './ReportButton.jsx';
 
 import { UserActivityTracker } from './userActivityTracker.js';
 import SimpleAdmin from './SimpleAdmin.jsx';
+import ToolsPanel from './ToolsPanel.jsx';
 
 class UserBehaviorAnalyzer {
   constructor() {
@@ -169,9 +170,8 @@ const sanitizeProductName = (name) => {
         .substring(0, 200);
 };
 
-// Helper function for word variations - FIXED
+// Helper function for word variations - IMPROVED VERSION
 function getWordVariations(word) {
-    // ADD MORE COMPREHENSIVE CHECKS
     if (!word || typeof word !== 'string') {
         console.warn('getWordVariations received invalid input:', word, typeof word);
         return [];
@@ -185,15 +185,20 @@ function getWordVariations(word) {
     
     const variations = new Set();
     
+    // Add the original word
+    variations.add(sanitizedWord);
+    
+    // Common plural/singular variations
     if (sanitizedWord.endsWith('s')) {
-        variations.add(sanitizedWord.slice(0, -1));
+        variations.add(sanitizedWord.slice(0, -1)); // Remove 's'
         variations.add(sanitizedWord + 'es');
     } else {
         variations.add(sanitizedWord + 's');
         variations.add(sanitizedWord + 'es');
     }
     
-    ['ing', 'ed', 'er', 'est', 'ly'].forEach(ending => {
+    // Common suffixes
+    ['ing', 'ed', 'er', 'est', 'ly', 'able', 'ful', 'less', 'ment'].forEach(ending => {
         if (!sanitizedWord.endsWith(ending)) {
             const variation = sanitizedWord + ending;
             if (variation.length <= 50) {
@@ -202,7 +207,24 @@ function getWordVariations(word) {
         }
     });
     
-    return Array.from(variations);
+    // Remove common suffixes to get root words
+    ['s', 'es', 'ing', 'ed', 'er'].forEach(ending => {
+        if (sanitizedWord.endsWith(ending) && sanitizedWord.length > ending.length) {
+            const root = sanitizedWord.slice(0, -ending.length);
+            if (root.length >= 2) {
+                variations.add(root);
+            }
+        }
+    });
+    
+    // Common prefixes
+    ['re', 'un', 'dis', 'pre', 'mis'].forEach(prefix => {
+        if (!sanitizedWord.startsWith(prefix)) {
+            variations.add(prefix + sanitizedWord);
+        }
+    });
+    
+    return Array.from(variations).filter(v => v && v.length >= 2);
 }
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
@@ -263,6 +285,28 @@ function SocialAIMarketingEngine() {
     const [isAdmin, setIsAdmin] = useState(false);
  
     const [limits, setLimits] = useState({});
+    const [showSafetyWarning, setShowSafetyWarning] = useState(false);
+    const [similarProducts, setSimilarProducts] = useState([]);
+    const [showSimilarProducts, setShowSimilarProducts] = useState(false);
+    const [similarProductsLoading, setSimilarProductsLoading] = useState(false);
+
+    const [isFilterCollapsed, setIsFilterCollapsed] = useState(true);
+    const [showFilterModal, setShowFilterModal] = useState(false);
+    const [showToolsPanel, setShowToolsPanel] = useState(false);
+
+    const [filters, setFilters] = useState({
+    minPrice: '',
+    maxPrice: '',
+    location: '',
+    sortBy: 'newest', // 'newest', 'price_low', 'price_high'
+    category: '' // Optional: if you have categories
+    });
+
+    // Calculate active filter count
+    const activeFilterCount = Object.values(filters).filter(val => 
+        (typeof val === 'string' && val !== '' && val !== 'newest') || 
+        (typeof val === 'number' && val !== 0)
+    ).length;
 
     const loadMoreProducts = async () => {
         setLoading(true);
@@ -270,12 +314,19 @@ function SocialAIMarketingEngine() {
             const from = currentPage * ITEMS_PER_PAGE;
             const to = from + ITEMS_PER_PAGE - 1;
 
-            const { data, count, error } = await supabase
+            // Start with base query
+            let query = supabase
                 .from('products')
                 .select('*', { count: 'exact' })
-                .ilike('name', `%${productSearch}%`)
-                .range(from, to)
-                .order('created_at', { ascending: false });
+                .ilike('name', `%${productSearch}%`);
+            
+            // Apply filters
+            query = applyFiltersToQuery(query, filters);
+            
+            // Add pagination
+            query = query.range(from, to);
+
+            const { data, count, error } = await query;
 
             if (error) throw error;
 
@@ -531,11 +582,16 @@ function SocialAIMarketingEngine() {
         setProductsFetchLoading(true);
         setError(null);
         try {
-            const { data: products, error: productsError } = await supabase
+            // Start with base query
+            let query = supabase
                 .from('products')
                 .select('*')
-                .ilike('name', `%${searchTerm}%`)
-                .order('created_at', { ascending: false });
+                .ilike('name', `%${searchTerm}%`);
+
+            // Apply filters when fetching all products
+            query = applyFiltersToQuery(query, filters);
+
+            const { data: products, error: productsError } = await query;
 
             if (productsError) {
                 throw new Error(`Failed to fetch products: ${productsError.message}`);
@@ -582,134 +638,134 @@ function SocialAIMarketingEngine() {
         } finally {
             setProductsFetchLoading(false);
         }
-    }, [user , selectedMode]);
+    }, [user , selectedMode , filters]);
 
    // --- SAVE TO WISHLIST FUNCTION ---
     const saveToWishlist = async (item, itemType = 'product') => {
-    // Behavior check
-    if (!user) {
-        alert('Please log in to save items to wishlist');
-        return;
-    }
-
-    if (!smartLimiterInstance) {
-        initializeRateLimiter();
-    }
-    
-    // Check rate limit
-    let check;
-    try {
-        check = await smartLimiterInstance.checkAndUpdate(user.id, 'SAVE_WISHLIST', {
-        itemType: itemType,
-        itemName: item.name
-        });
-        
-        if (!check.allowed) {
-        alert(`Save blocked: ${check.reason}`);
-        return;
-        }
-    } catch (error) {
-        console.error('Rate limit check error:', error);
-        // Continue anyway if rate limiter fails
-    }
-
-    try {
-        // Check if item is already in wishlist
-            const { data: existing } = await supabase
-            .from('saved_items')
-            .select('*')
-            .eq('user_id', user.id)
-            .eq('item_type', itemType)
-            .eq(itemType === 'product' ? 'product_id' : 'prospect_id', 
-                itemType === 'product' ? item.id : item.id)
-            .single();
-
-            if (existing) {
-            alert('✅ This item is already in your wishlist!');
+        // Behavior check
+        if (!user) {
+            alert('Please log in to save items to wishlist');
             return;
-            }
+        }
 
-            // Save to wishlist
-            const savedData = {
-            user_id: user.id,
-            item_type: itemType,
-            created_at: new Date().toISOString()
-            };
-
-            if (itemType === 'product') {
-            savedData.product_id = item.id;
-            savedData.product_name = item.name;
-            savedData.product_price = item.price;
-            savedData.product_image = item.image_url;
-            savedData.seller_location = item.location;
-            savedData.seller_phone = item.phone_number;
-            } else {
-            savedData.prospect_id = item.id;
-            savedData.prospect_email = item.email;
-            savedData.prospect_location = item.location;
-            savedData.prospect_phone = item.phone_number;
-            savedData.interested_in = item.interest;
-            }
-
-            // Save to database
-            const { error } = await supabase
-            .from('saved_items')
-            .insert([savedData]);
-
-            if (error) throw error;
-            
-            if (itemType === 'product') {
-            try {
-                const followUpDate = new Date();
-                followUpDate.setDate(followUpDate.getDate() + 2);
-                
-                await supabase.from('follow_ups').insert([{
-                product_id: item.id,
-                user_id: user.id,
-                scheduled_for: followUpDate.toISOString(),
-                step_number: 1,
-                status: 'pending'
-                }]);
-
-                await UserActivityTracker.trackActivity(user.id, 'save_wishlist', {
-                    targetId: item.id,
-                    targetType: itemType,
-                    itemName: item.name
-                });
-                
-                // CHANGED: Simple message without opening interface
-                alert('✅ Saved to wishlist! Reminder set for 2 days from now.\n\nClick "My Wishlist" button to view all saved items.');
-            } catch (followUpError) {
-                console.log('Follow-up scheduling skipped');
-                // CHANGED: Simple message
-                alert('✅ Saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
-            }
-            } else {
-            // CHANGED: Simple message for prospects too
-            alert('✅ Prospect saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
-            }
-            
-            // Track with Google Analytics
-            if (typeof ReactGA !== 'undefined') {
-            ReactGA.event({
-                category: 'Wishlist',
-                action: 'Item Added',
-                label: itemType
-            });
+        if (!smartLimiterInstance) {
+            initializeRateLimiter();
         }
         
-        // Track user behavior
-        if (behaviorAnalyzerInstance) {
-        behaviorAnalyzerInstance.recordUserAction(user.id, 'save_to_wishlist', {
+        // Check rate limit
+        let check;
+        try {
+            check = await smartLimiterInstance.checkAndUpdate(user.id, 'SAVE_WISHLIST', {
             itemType: itemType,
             itemName: item.name
-        });
+            });
+            
+            if (!check.allowed) {
+            alert(`Save blocked: ${check.reason}`);
+            return;
+            }
+        } catch (error) {
+            console.error('Rate limit check error:', error);
+            // Continue anyway if rate limiter fails
         }
-        
-    } catch (error) {
-        console.error('Error saving to wishlist:', error);
-        alert('Failed to save to wishlist. Please try again.');
-    }
+
+        try {
+            // Check if item is already in wishlist
+                const { data: existing } = await supabase
+                .from('saved_items')
+                .select('*')
+                .eq('user_id', user.id)
+                .eq('item_type', itemType)
+                .eq(itemType === 'product' ? 'product_id' : 'prospect_id', 
+                    itemType === 'product' ? item.id : item.id)
+                .single();
+
+                if (existing) {
+                alert('✅ This item is already in your wishlist!');
+                return;
+                }
+
+                // Save to wishlist
+                const savedData = {
+                user_id: user.id,
+                item_type: itemType,
+                created_at: new Date().toISOString()
+                };
+
+                if (itemType === 'product') {
+                savedData.product_id = item.id;
+                savedData.product_name = item.name;
+                savedData.product_price = item.price;
+                savedData.product_image = item.image_url;
+                savedData.seller_location = item.location;
+                savedData.seller_phone = item.phone_number;
+                } else {
+                savedData.prospect_id = item.id;
+                savedData.prospect_email = item.email;
+                savedData.prospect_location = item.location;
+                savedData.prospect_phone = item.phone_number;
+                savedData.interested_in = item.interest;
+                }
+
+                // Save to database
+                const { error } = await supabase
+                .from('saved_items')
+                .insert([savedData]);
+
+                if (error) throw error;
+                
+                if (itemType === 'product') {
+                try {
+                    const followUpDate = new Date();
+                    followUpDate.setDate(followUpDate.getDate() + 2);
+                    
+                    await supabase.from('follow_ups').insert([{
+                    product_id: item.id,
+                    user_id: user.id,
+                    scheduled_for: followUpDate.toISOString(),
+                    step_number: 1,
+                    status: 'pending'
+                    }]);
+
+                    await UserActivityTracker.trackActivity(user.id, 'save_wishlist', {
+                        targetId: item.id,
+                        targetType: itemType,
+                        itemName: item.name
+                    });
+                    
+                    // CHANGED: Simple message without opening interface
+                    alert('✅ Saved to wishlist! Reminder set for 2 days from now.\n\nClick "My Wishlist" button to view all saved items.');
+                } catch (followUpError) {
+                    console.log('Follow-up scheduling skipped');
+                    // CHANGED: Simple message
+                    alert('✅ Saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+                }
+                } else {
+                // CHANGED: Simple message for prospects too
+                alert('✅ Prospect saved to wishlist!\n\nClick "My Wishlist" button to view all saved items.');
+                }
+                
+                // Track with Google Analytics
+                if (typeof ReactGA !== 'undefined') {
+                ReactGA.event({
+                    category: 'Wishlist',
+                    action: 'Item Added',
+                    label: itemType
+                });
+            }
+            
+            // Track user behavior
+            if (behaviorAnalyzerInstance) {
+            behaviorAnalyzerInstance.recordUserAction(user.id, 'save_to_wishlist', {
+                itemType: itemType,
+                itemName: item.name
+            });
+            }
+            
+        } catch (error) {
+            console.error('Error saving to wishlist:', error);
+            alert('Failed to save to wishlist. Please try again.');
+        }
     };
  
     // --- CHECK FOR MATCHES FUNCTION ---
@@ -789,6 +845,96 @@ function SocialAIMarketingEngine() {
             console.error('Error checking matches:', error);
         }
     };
+
+    // --- FIND SIMILAR PRODUCTS FUNCTION ---
+    const findSimilarProducts = useCallback(async (searchTerm, excludeIds = []) => {
+        if (!searchTerm || searchTerm.trim().length < 2) {
+            setSimilarProducts([]);
+            setShowSimilarProducts(false);
+            return;
+        }
+
+        setSimilarProductsLoading(true);
+
+        try {
+            const sanitizedSearch = sanitizeProductName(searchTerm);
+            const searchTermLower = sanitizedSearch.toLowerCase();
+            
+            // Get word variations for better matching
+            const variations = getWordVariations(searchTermLower);
+            const searchWords = [...new Set([searchTermLower, ...variations])];
+            
+            console.log('🔍 Searching similar products for:', searchTerm, 'variations:', searchWords);
+            
+            // Query for products with similar names
+            let allSimilarProducts = [];
+            
+            // Try each variation
+            for (const word of searchWords) {
+                if (word.length < 2) continue;
+                
+                // FIXED: Correct Supabase query syntax
+                let query = supabase
+                    .from('products')
+                    .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
+                    .ilike('name', `%${word}%`)
+                    .limit(10);
+                
+                // Only add .not() if we have IDs to exclude
+                if (excludeIds.length > 0) {
+                    query = query.not('id', 'in', `(${excludeIds.join(',')})`);
+                }
+                
+                const { data: products, error } = await query;
+                
+                if (!error && products) {
+                    allSimilarProducts = [...allSimilarProducts, ...products];
+                }
+            }
+            
+            // Remove duplicates by product id
+            const uniqueProducts = Array.from(
+                new Map(allSimilarProducts.map(p => [p.id, p])).values()
+            );
+            
+            // Sort by relevance (exact matches first, then partial matches)
+            const sortedProducts = uniqueProducts.sort((a, b) => {
+                const aName = a.name ? a.name.toLowerCase() : '';
+                const bName = b.name ? b.name.toLowerCase() : '';
+                
+                // Exact match gets highest priority
+                if (aName === searchTermLower && bName !== searchTermLower) return -1;
+                if (aName !== searchTermLower && bName === searchTermLower) return 1;
+                
+                // Starts with search term gets next priority
+                if (aName.startsWith(searchTermLower) && !bName.startsWith(searchTermLower)) return -1;
+                if (!aName.startsWith(searchTermLower) && bName.startsWith(searchTermLower)) return 1;
+                
+                // Contains search term
+                if (aName.includes(searchTermLower) && !bName.includes(searchTermLower)) return -1;
+                if (!aName.includes(searchTermLower) && bName.includes(searchTermLower)) return 1;
+                
+                // Sort by price (cheaper first)
+                return (a.price || 0) - (b.price || 0);
+            });
+            
+            // Limit to 6 similar products max
+            const limitedProducts = sortedProducts.slice(0, 6);
+            
+            console.log(`✅ Found ${limitedProducts.length} similar products for "${searchTerm}"`);
+            
+            setSimilarProducts(limitedProducts);
+            setShowSimilarProducts(limitedProducts.length > 0);
+            
+        } catch (error) {
+            console.error('❌ Error finding similar products:', error);
+            setSimilarProducts([]);
+            setShowSimilarProducts(false);
+        
+        } finally {
+            setSimilarProductsLoading(false);
+        }
+    }, []);
 
     // Fetch user profile
     const fetchProfile = useCallback(async () => {  
@@ -974,6 +1120,17 @@ function SocialAIMarketingEngine() {
         });
     }
     }, [user, isProfileComplete, selectedMode]);
+
+    // Auto-hide safety warning after 5 seconds
+    useEffect(() => {
+        if (showSafetyWarning) {
+            const timer = setTimeout(() => {
+                setShowSafetyWarning(false);
+            }, 5000); // 5 seconds
+            
+            return () => clearTimeout(timer);
+        }
+    }, [showSafetyWarning]);
 
     // Add this useEffect to check admin status
     useEffect(() => {
@@ -1220,6 +1377,94 @@ function SocialAIMarketingEngine() {
         }
     }, [searchCache]);
 
+    // 🔔 REAL-TIME SEARCH ALERT MONITORING
+    useEffect(() => {
+        if (!user || !isProfileComplete || selectedMode !== 'buyer') return;
+
+        const alertChannel = supabase
+            .channel('search-alert-monitoring')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'products',
+                    filter: `seller_id=neq.${user.id}`
+                },
+                async (payload) => {
+                    try {
+                        const newProduct = payload.new;
+                        
+                        // Get user's active search alerts
+                        const { data: userAlerts } = await supabase
+                            .from('search_alerts')
+                            .select('*')
+                            .eq('user_id', user.id)
+                            .eq('is_active', true);
+
+                        if (!userAlerts || userAlerts.length === 0) return;
+
+                        const productNameLower = newProduct.name ? newProduct.name.toLowerCase() : '';
+                        const productLocation = newProduct.location || '';
+                        
+                        // Check each alert
+                        for (const alert of userAlerts) {
+                            const alertTermLower = alert.search_term ? alert.search_term.toLowerCase() : '';
+                            
+                            // Check if product matches search term
+                            const termMatch = productNameLower.includes(alertTermLower) || 
+                                            alertTermLower.includes(productNameLower);
+                            
+                            if (!termMatch) continue;
+                            
+                            // Check price range if specified
+                            if (alert.min_price !== null && newProduct.price < alert.min_price) continue;
+                            if (alert.max_price !== null && newProduct.price > alert.max_price) continue;
+                            
+                            // Check location if specified
+                            if (alert.location && productLocation) {
+                                const alertLocationLower = alert.location.toLowerCase();
+                                const productLocationLower = productLocation.toLowerCase();
+                                
+                                if (!productLocationLower.includes(alertLocationLower) && 
+                                    !alertLocationLower.includes(productLocationLower)) {
+                                    continue;
+                                }
+                            }
+                            
+                            // All checks passed - send notification
+                            await supabase.from('notifications').insert([{
+                                user_id: user.id,
+                                sender_id: newProduct.seller_id,
+                                product_id: newProduct.id,
+                                product_image: newProduct.image_url,
+                                message: `🚨 ALERT MATCH! New "${newProduct.name}" ($${newProduct.price}) matches your saved search "${alert.search_term}"!`,
+                                link_type: 'search_alert_match',
+                                status: 'unread',
+                                created_at: new Date().toISOString()
+                            }]);
+                            
+                            // Update last notified time
+                            await supabase
+                                .from('search_alerts')
+                                .update({ last_notified_at: new Date().toISOString() })
+                                .eq('id', alert.id);
+                            
+                            console.log(`✅ Alert notification sent for: ${alert.search_term}`);
+                        }
+                        
+                    } catch (error) {
+                        console.error('Error in search alert monitoring:', error);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(alertChannel);
+        };
+    }, [user, isProfileComplete, selectedMode]);
+
     // 🔔 REAL-TIME MATCH DETECTION: Listen for new products and notify matching buyers
     useEffect(() => {
         if (!user || !isProfileComplete || selectedMode !== 'buyer') return;
@@ -1397,6 +1642,23 @@ function SocialAIMarketingEngine() {
         };
     }, [user, isProfileComplete, selectedMode, fetchNotifications, showNotifications]);
 
+    // Save filters to localStorage
+    useEffect(() => {
+        if (selectedMode === 'buyer') {
+            localStorage.setItem('buyerFilters', JSON.stringify(filters));
+        }
+    }, [filters, selectedMode]);
+
+    // Load filters from localStorage
+    useEffect(() => {
+        if (selectedMode === 'buyer') {
+            const savedFilters = localStorage.getItem('buyerFilters');
+            if (savedFilters) {
+                setFilters(JSON.parse(savedFilters));
+            }
+        }
+    }, [selectedMode]);
+
     // --- ENSURE BASIC PROFILE EXISTS ---
     useEffect(() => {
         const ensureBasicProfile = async () => {
@@ -1463,6 +1725,9 @@ function SocialAIMarketingEngine() {
         setCurrentPage(0);
         setHasMore(true);
         setSearchCache({});
+
+        setSimilarProducts([]); 
+        setShowSimilarProducts(false);
     };
 
     // Clear state when changing modes
@@ -1759,6 +2024,7 @@ function SocialAIMarketingEngine() {
     const handleSearch = async () => {
         setSearchLoading(true);
         setError(null);
+        setShowSafetyWarning(false)
         try {
             const sanitizedSearch = sanitizeProductName(productSearch);
             
@@ -1794,8 +2060,43 @@ function SocialAIMarketingEngine() {
         }
     };
 
+    // --- REUSABLE FILTER FUNCTION ---
+    const applyFiltersToQuery = (query, filtersObj) => {
+        let filteredQuery = query;
+        
+        // Price Filter
+        if (filtersObj.minPrice && !isNaN(filtersObj.minPrice)) {
+            filteredQuery = filteredQuery.gte('price', Number(filtersObj.minPrice));
+        }
+        if (filtersObj.maxPrice && !isNaN(filtersObj.maxPrice)) {
+            filteredQuery = filteredQuery.lte('price', Number(filtersObj.maxPrice));
+        }
+        
+        // Location Filter (case-insensitive partial match)
+        if (filtersObj.location && filtersObj.location.trim()) {
+            filteredQuery = filteredQuery.ilike('location', `%${filtersObj.location.trim()}%`);
+        }
+        
+        // Date/Sort Filter
+        switch (filtersObj.sortBy) {
+            case 'newest':
+            filteredQuery = filteredQuery.order('created_at', { ascending: false });
+            break;
+            case 'price_low':
+            filteredQuery = filteredQuery.order('price', { ascending: true });
+            break;
+            case 'price_high':
+            filteredQuery = filteredQuery.order('price', { ascending: false });
+            break;
+            default:
+            filteredQuery = filteredQuery.order('created_at', { ascending: false });
+        }
+        
+        return filteredQuery;
+    };
+
     // --- FIND PRODUCTS (BUYER MODE) ---
-    const findProducts = useCallback(async (searchTerm) => {
+    const findProducts = useCallback(async (searchTerm, useFilters = false) => {
         console.log('🔍 Starting findProducts with search:', searchTerm);
         
         if (!user) {
@@ -1803,14 +2104,16 @@ function SocialAIMarketingEngine() {
             return;
         }
 
+        setShowSafetyWarning(false);
+        setShowSimilarProducts(false);
+
         const cacheKey = searchTerm.toLowerCase().trim();
-        if (searchCache[cacheKey]) {
+        if (searchCache[cacheKey] && !useFilters) {
             console.log('Cache hit for:', cacheKey);
             setProductsFound(searchCache[cacheKey]);
             return;
         }
 
-        // Continue with search if allowed
         setSearchLoading(true);
         setError(null);
         
@@ -1818,94 +2121,115 @@ function SocialAIMarketingEngine() {
             const sanitizedSearch = sanitizeProductName(searchTerm);
             
             if (!sanitizedSearch || sanitizedSearch.length < 2) {
-                setError('Please enter a product name with at least two characters.');
-                return;
+            setError('Please enter a product name with at least two characters.');
+            return;
             }
 
             console.log('📋 Fetching products from database...');
             
-            // FIXED: Use proper Supabase query syntax - SIMPLIFIED LIKE PREVIOUS VERSION
-            const { data: products, error: fetchError } = await supabase
-                .from('products')
-                .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
-                .ilike('name', `%${sanitizedSearch}%`)
-                .order('price', { ascending: true });
+            // Start with base query
+            let query = supabase
+            .from('products')
+            .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
+            .ilike('name', `%${sanitizedSearch}%`);
+            
+            // Apply filters if requested
+            if (useFilters) {
+            query = applyFiltersToQuery(query, filters);
+            } else {
+            // Default sorting by price ascending when no filters
+            query = query.order('price', { ascending: true });
+            }
+
+            const { data: products, error: fetchError } = await query;
 
             if (fetchError) {
-                console.error('❌ Error fetching products:', fetchError);
-                setError(`Failed to fetch products: ${fetchError.message}`);
-                return;
+            console.error('❌ Error fetching products:', fetchError);
+            setError(`Failed to fetch products: ${fetchError.message}`);
+            return;
             }
 
             const productsData = products || [];
             console.log(`✅ Found ${productsData.length} products for: "${sanitizedSearch}"`);
             
             if (productsData.length === 0) {
-                console.log('⚠️ No products found in database');
+            console.log('⚠️ No products found in database');
+            await findSimilarProducts(sanitizedSearch);
             } else {
-                console.log('📊 Sample product:', productsData[0]);
+            if (productsData.length < 3) {
+                const excludeIds = productsData.map(p => p.id);
+                await findSimilarProducts(sanitizedSearch, excludeIds);
+            }
+            }
+
+            if (productsData.length > 0) {
+            setShowSafetyWarning(true);
             }
             
-            // Save to cache
+            // Save to cache only if not using filters
+            if (!useFilters) {
             setSearchCache(prev => ({
                 ...prev,
                 [cacheKey]: productsData
             }));
+            }
 
             // Update products found state
             setProductsFound(productsData);
 
-            // 🔔 REAL-TIME MATCH NOTIFICATION: Notify sellers about the search
+            // 🔔 REAL-TIME MATCH NOTIFICATION
             if (productsData && productsData.length > 0 && selectedMode === 'buyer') {
-                try {
-                    const uniqueSellerIds = [...new Set(productsData
-                        .filter(p => p.seller_id && p.seller_id !== user.id)
-                        .map(p => p.seller_id)
-                    )];
-                    
-                    if (uniqueSellerIds.length > 0) {
-                        for (const sellerId of uniqueSellerIds) {
-                            await supabase.from('notifications').insert([{
-                                user_id: sellerId,
-                                sender_id: user.id,
-                                message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
-                                link_type: 'search_match',
-                                status: 'unread',
-                                created_at: new Date().toISOString()
-                            }]);
-                        }
-                    }
-                } catch (notificationError) {
-                    console.error('Error notifying sellers:', notificationError);
+            try {
+                const uniqueSellerIds = [...new Set(productsData
+                .filter(p => p.seller_id && p.seller_id !== user.id)
+                .map(p => p.seller_id)
+                )];
+                
+                if (uniqueSellerIds.length > 0) {
+                for (const sellerId of uniqueSellerIds) {
+                    await supabase.from('notifications').insert([{
+                    user_id: sellerId,
+                    sender_id: user.id,
+                    message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
+                    link_type: 'search_match',
+                    status: 'unread',
+                    created_at: new Date().toISOString()
+                    }]);
                 }
+                }
+            } catch (notificationError) {
+                console.error('Error notifying sellers:', notificationError);
+            }
             }
 
             // Log the search
             try {
-                await supabase.from('searches').insert([
-                    { 
-                        buyer_id: user.id, 
-                        seller_id: null,
-                        product_name: sanitizedSearch,
-                        search_type: 'product',
-                        prospects_found: productsData.length,
-                        created_at: new Date().toISOString()
-                    }
-                ]);
+            await supabase.from('searches').insert([
+                { 
+                buyer_id: user.id, 
+                seller_id: null,
+                product_name: sanitizedSearch,
+                search_type: 'product',
+                prospects_found: productsData.length,
+                created_at: new Date().toISOString()
+                }
+            ]);
             } catch (logError) {
-                console.error('Error logging search:', logError);
+            console.error('Error logging search:', logError);
             }
         } catch (err) {
             console.error('❌ Find products error:', err);
             setError('An unexpected error occurred. Please try again.');
-        } finally {
-            setSearchLoading(false);
-        }
-    }, [user, searchCache, selectedMode]);  
+    } finally {
+        setSearchLoading(false);
+    }
+    }, [user, searchCache, selectedMode, findSimilarProducts, filters , applyFiltersToQuery]); 
 
         // --- FIND PROSPECTS (SELLER MODE) ---
     const findProspects = useCallback(async (searchTerm) => {
         console.log('🔍 Starting findProspects with search:', searchTerm);
+
+        setShowSafetyWarning(false)
         
         const cacheKey = `prospect_${searchTerm ? searchTerm.toLowerCase().trim() : 'empty'}`;
         
@@ -2047,6 +2371,10 @@ function SocialAIMarketingEngine() {
                 };
             });
             
+            if (matchingProspects.length > 0) {
+                setShowSafetyWarning(true);
+            }
+
             // Save to cache
             setSearchCache(prev => ({
                 ...prev,
@@ -2080,6 +2408,31 @@ function SocialAIMarketingEngine() {
             setSearchLoading(false);
         }
     }, [user, profileData, searchCache]);
+
+    useEffect(() => {
+        // Listen for pull-to-refresh event
+        const handlePullToRefresh = () => {
+            console.log('🔄 Pull-to-refresh triggered in SocialAIMarketingEngine');
+            
+            if (selectedMode === 'seller' && productSearch.trim()) {
+            // Refresh prospects
+            findProspects(productSearch);
+            } else if (selectedMode === 'buyer' && productSearch.trim()) {
+            // Refresh products
+            findProducts(productSearch);
+            } else if (selectedMode === 'buyer') {
+            // Refresh all products
+            fetchProducts();
+            }
+        };
+        
+        window.addEventListener('pull-to-refresh', handlePullToRefresh);
+        
+        return () => {
+            window.removeEventListener('pull-to-refresh', handlePullToRefresh);
+        };
+    }, [selectedMode, productSearch, findProspects, findProducts, fetchProducts]);
+
 
     const handleSignOut = async () => {
         try {
@@ -2339,46 +2692,143 @@ function SocialAIMarketingEngine() {
              
         <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : ''} ${isNavbarHidden ? 'has-hidden-nav' : ''}`}>
             <div className="app-container">
+                {/* 🎯 More Features Button - ABOVE Wishlist Button */}
+                {!showWishlist && !showToolsPanel && (
+                    <button
+                        onClick={() => setShowToolsPanel(true)}
+                        style={{
+                            position: 'fixed',
+                            bottom: '150px',
+                            right: '20px',
+                            backgroundColor: '#4CAF50',
+                            color: 'white',
+                            border: 'none',
+                            padding: '12px 16px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            zIndex: 1001, // Higher than wishlist button
+                            transition: 'all 0.3s ease',
+                        }}
+                        title="Open advanced features and tools"
+                    >
+                        <span style={{ fontSize: '18px' }}>🎯</span>
+                        More Features
+                    </button>
+                )}
+
                 {/* Floating "Saved Searches" Button - Only shown when NOT in wishlist view */}
-                {!showWishlist && (
+                {!showWishlist && !showToolsPanel && (
                     <button
                         onClick={() => {
-                        setPreviousSearchState({
-                            productSearch: productSearch,
-                            prospects: prospects,
-                            productsFound: productsFound,
-                            searchLoading: searchLoading
-                        });
-                        setShowWishlist(true);
+                            setPreviousSearchState({
+                                productSearch: productSearch,
+                                prospects: prospects,
+                                productsFound: productsFound,
+                                searchLoading: searchLoading
+                            });
+                            setShowWishlist(true);
                         }}
                         style={{
-                        position: 'fixed',
-                        bottom: '80px',
-                        right: '20px',
-                        backgroundColor: '#7209b7',
-                        color: 'white',
-                        border: 'none',
-                        padding: '12px 16px',
-                        borderRadius: '50px',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                        zIndex: 1000,
-                        transition: 'all 0.3s ease',
+                            position: 'fixed',
+                            bottom: '80px',
+                            right: '20px',
+                            backgroundColor: '#7209b7',
+                            color: 'white',
+                            border: 'none',
+                            padding: '12px 16px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            zIndex: 1000,
+                            transition: 'all 0.3s ease',
                         }}
                         title="View your saved items"
                     >
                         <span style={{ fontSize: '18px' }}>📋</span>
                         View My Wishlist  🧾
                     </button>
-
                 )}
 
+                {/* Tools Panel Modal Overlay */}
+                {showToolsPanel && (
+                    <div 
+                        className="tools-modal-overlay"
+                        style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            height: '100%',
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            zIndex: 9999,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '20px',
+                            animation: 'fadeIn 0.3s ease'
+                        }}
+                    >
+                        <div 
+                            className="tools-modal-content"
+                            style={{
+                                background: 'white',
+                                borderRadius: '15px',
+                                width: '100%',
+                                maxWidth: '500px',
+                                maxHeight: '85vh',
+                                overflow: 'auto',
+                                position: 'relative',
+                                boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+                            }}
+                        >
+                            {/* Close button */}
+                            <button 
+                                onClick={() => setShowToolsPanel(false)}
+                                style={{
+                                    position: 'absolute',
+                                    top: '15px',
+                                    right: '15px',
+                                    background: '#ff4444',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '50%',
+                                    width: '36px',
+                                    height: '36px',
+                                    cursor: 'pointer',
+                                    fontSize: '20px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    zIndex: 10001
+                                }}
+                            >
+                                ×
+                            </button>
+                            
+                            {/* ToolsPanel Component */}
+                            <ToolsPanel 
+                                user={user}
+                                selectedMode={selectedMode}
+                                onBack={() => setShowToolsPanel(false)}
+                                showToastNotification={showToastNotification}
+                            />
+                        </div>
+                    </div>
+                )}
+                
                 {/* Notifications */}
                 <div className="notification-container">
                     <button 
@@ -2509,10 +2959,234 @@ function SocialAIMarketingEngine() {
                         </div>
                     </div>
 
+                    {/* Mobile Filter Icon Button */}
+                    <button 
+                        className={`filter-icon-mobile ${activeFilterCount > 0 ? 'active' : ''}`}
+                        onClick={() => setShowFilterModal(true)}
+                        title="Filter Results"
+                        style={{
+                            position: 'fixed',
+                            bottom: '140px',
+                            left: '20px',
+                            background: activeFilterCount > 0 ? '#4CAF50' : '#667eea',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '50%',
+                            width: '60px',
+                            height: '60px',
+                            fontSize: '24px',
+                            cursor: 'pointer',
+                            zIndex: 1000,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}
+                    >
+                        🔍
+                        {activeFilterCount > 0 && (
+                            <span style={{
+                                position: 'absolute',
+                                top: '-5px',
+                                right: '-5px',
+                                background: '#ff3b30',
+                                color: 'white',
+                                borderRadius: '50%',
+                                width: '24px',
+                                height: '24px',
+                                fontSize: '12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 'bold',
+                                border: '2px solid white'
+                            }}>
+                                {activeFilterCount}
+                            </span>
+                        )}
+                    </button>
+
+                    <div className="filter-container">
+                        <button 
+                            onClick={() => setIsFilterCollapsed(!isFilterCollapsed)}
+                            className={`filter-toggle-button ${isFilterCollapsed ? 'collapsed' : ''}`}
+                        >
+                            <span className="filter-icon">🔻</span>
+                            {isFilterCollapsed ? 'Show Filters' : 'Hide Filters'}
+                            {activeFilterCount > 0 && (
+                                <span className="active-filter-indicator">
+                                    {activeFilterCount} Active
+                                </span>
+                            )}
+                        </button>
+                        
+                        <div className={`collapsible-filter-section ${isFilterCollapsed ? 'collapsed' : ''}`}>
+                            <div className="filter-section-content">
+                                <div className="filter-header">
+                                    <h4>
+                                        <span style={{ marginRight: '8px' }}>🔍</span>
+                                        Filter Results
+                                    </h4>
+                                    <button 
+                                        onClick={() => {
+                                            setFilters({
+                                                minPrice: '',
+                                                maxPrice: '',
+                                                location: '',
+                                                sortBy: 'newest',
+                                                category: ''
+                                            });
+                                            if (productSearch.trim()) {
+                                                findProducts(productSearch);
+                                            } else {
+                                                fetchProducts();
+                                            }
+                                        }}
+                                        className="clear-filters-btn"
+                                        disabled={!Object.values(filters).some(val => 
+                                            (typeof val === 'string' && val !== '' && val !== 'newest') || 
+                                            (typeof val === 'number' && val !== 0)
+                                        )}
+                                    >
+                                        Clear Filters
+                                    </button>
+                                </div>
+                                
+                                <div className="filter-grid">
+                                    {/* Price Range */}
+                                    <div className="filter-group">
+                                        <label>Price Range</label>
+                                        <div className="price-inputs">
+                                            <input
+                                                type="number"
+                                                placeholder="Min $"
+                                                value={filters.minPrice}
+                                                onChange={(e) => setFilters(prev => ({...prev, minPrice: e.target.value}))}
+                                                min="0"
+                                            />
+                                            <span style={{ color: 'var(--text-secondary)' }}>to</span>
+                                            <input
+                                                type="number"
+                                                placeholder="Max $"
+                                                value={filters.maxPrice}
+                                                onChange={(e) => setFilters(prev => ({...prev, maxPrice: e.target.value}))}
+                                                min="0"
+                                            />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Location */}
+                                    <div className="filter-group">
+                                        <label>Location</label>
+                                        <input
+                                            type="text"
+                                            placeholder="City or area"
+                                            value={filters.location}
+                                            onChange={(e) => setFilters(prev => ({...prev, location: e.target.value}))}
+                                        />
+                                    </div>
+                                    
+                                    {/* Sort By */}
+                                    <div className="filter-group">
+                                        <label>Sort By</label>
+                                        <select
+                                            value={filters.sortBy}
+                                            onChange={(e) => setFilters(prev => ({...prev, sortBy: e.target.value}))}
+                                        >
+                                            <option value="newest">Newest First</option>
+                                            <option value="price_low">Price: Low to High</option>
+                                            <option value="price_high">Price: High to Low</option>
+                                        </select>
+                                    </div>
+                                    
+                                    {/* Apply Filters Button */}
+                                    <div className="filter-group">
+                                        <label>&nbsp;</label>
+                                        <button
+                                            onClick={() => {
+                                                if (productSearch.trim()) {
+                                                    findProducts(productSearch, true);
+                                                } else {
+                                                    fetchProducts();
+                                                }
+                                            }}
+                                            className="apply-filters-btn"
+                                            disabled={searchLoading}
+                                        >
+                                            {searchLoading ? 'Applying...' : 'Apply Filters'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {error && (
                         <div className="error-alert">
                             <span className="error-icon">⚠️</span>
                             <span>{error}</span>
+                        </div>
+                    )}
+                    
+                    {/* 🔴 SAFETY WARNING MESSAGE - Add this component */}
+                    {showSafetyWarning && (
+                        <div 
+                            className="safety-warning-message"
+                            style={{
+                                backgroundColor: '#fff3cd',
+                                border: '2px solid #ffc107',
+                                borderRadius: '8px',
+                                padding: '15px',
+                                margin: '15px 0',
+                                position: 'relative',
+                                animation: 'fadeIn 0.3s ease-in'
+                            }}
+                        >
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'flex-start',
+                                gap: '10px'
+                            }}>
+                                <span style={{
+                                    fontSize: '24px',
+                                    color: '#ff9800'
+                                }}>⚠️</span>
+                                <div style={{ flex: 1 }}>
+                                    <h4 style={{
+                                        margin: '0 0 8px 0',
+                                        color: '#856404',
+                                        fontSize: '16px',
+                                        fontWeight: 'bold'
+                                    }}>
+                                        Important Safety Reminder
+                                    </h4>
+                                    <p style={{
+                                        margin: '0',
+                                        color: '#856404',
+                                        fontSize: '14px',
+                                        lineHeight: '1.5'
+                                    }}>
+                                        <strong>No Pre-payments:</strong> Do not "deposit" or "reserve" items with money before. 
+                                        Always inspect the product before paying. 
+                                        <strong> [Straun Marketing App]</strong> is not responsible for private transactions.
+                                    </p>
+                                </div>
+                                <button 
+                                    onClick={() => setShowSafetyWarning(false)}
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        fontSize: '20px',
+                                        color: '#666',
+                                        cursor: 'pointer',
+                                        padding: '0',
+                                        lineHeight: '1'
+                                    }}
+                                    title="Close warning"
+                                >
+                                    ×
+                                </button>
+                            </div>
                         </div>
                     )}
                     
@@ -2523,9 +3197,36 @@ function SocialAIMarketingEngine() {
                     )}
                     
                     <div className="separator"></div>
-
-                        {/* Wishlist View or Main Interface */}
-                    {showWishlist ? (
+            
+                    {/* Tools Panel or Wishlist or Main Interface */}
+                    {showToolsPanel ? (
+                        <div className="tools-panel-container" style={{ width: '100%', padding: '1rem' }}>
+                            <button 
+                                onClick={() => setShowToolsPanel(false)}
+                                style={{
+                                    background: 'var(--primary-color)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '10px 16px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontSize: '14px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    marginBottom: '20px'
+                                }}
+                            >
+                                ← Back to Search
+                            </button>
+                            <ToolsPanel 
+                                user={user}
+                                selectedMode={selectedMode}
+                                onBack={() => setShowToolsPanel(false)}
+                                showToastNotification={showToastNotification}
+                            />
+                        </div>
+                    ) : showWishlist ? (
                         <div style={{ width: '100%', padding: '1rem' }}>
                             {/* Simple "Back" button in Wishlist view */}
                             <button 
@@ -2571,7 +3272,23 @@ function SocialAIMarketingEngine() {
                         {selectedMode === 'seller' ? (
                             <div className="seller-results-card">
                                 <div className="results-header">
-                                    <h3>📈 Marketing Prospects</h3>
+                                    <h3>
+                                        {selectedMode === 'seller' ? '📈 Marketing Prospects' : '🛒 Available Products'}
+                                        {selectedMode === 'buyer' && (
+                                            <button 
+                                                onClick={() => setIsFilterCollapsed(!isFilterCollapsed)}
+                                                className="filter-toggle-button"
+                                                style={{
+                                                    marginLeft: '15px',
+                                                    fontSize: '13px',
+                                                    padding: '6px 12px'
+                                                }}
+                                            >
+                                                <span className="filter-icon">🔻</span>
+                                                {isFilterCollapsed ? 'Show Filters' : 'Hide Filters'}
+                                            </button>
+                                        )}
+                                    </h3>
                                     <div className="results-stats">
                                         <span className="stat-item">
                                             <strong>Your Location:</strong> {profileData?.location}
@@ -2813,20 +3530,49 @@ function SocialAIMarketingEngine() {
                                     {productsFound.length === 0 ? (
                                         <div className="empty-results">
                                             <div className="empty-icon">🛒</div>
-                                            <h4>No products found</h4>
-                                            <p>
-                                                {productSearch.trim() && !loading
-                                                    ? `No sellers found for "${productSearch}". Try a different product name.`
-                                                    : 'Enter a product above to find sellers offering it.'}
-                                            </p>
-                                            <div className="empty-tips">
-                                                <p><strong>Tips for better results:</strong></p>
-                                                <ul>
-                                                    <li>Try broader product categories</li>
-                                                    <li>Check spelling of product names</li>
-                                                    <li>Consider related products</li>
-                                                </ul>
-                                            </div>
+                                            <h4>No products found for "{productSearch}"</h4>
+                                            <p>We couldn't find any products matching your search.</p>
+                                            
+                                            {showSimilarProducts && similarProducts.length > 0 ? (
+                                                <div style={{ marginTop: '20px' }}>
+                                                    <p><strong>Try these similar products instead:</strong></p>
+                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '15px' }}>
+                                                        {similarProducts.slice(0, 3).map((product, index) => (
+                                                            <button
+                                                                key={`empty-similar-${index}`}
+                                                                onClick={() => {
+                                                                    setProductSearch(product.name);
+                                                                    setTimeout(() => handleSearch(), 100);
+                                                                }}
+                                                                style={{
+                                                                    background: '#667eea',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    padding: '8px 12px',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '13px',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    gap: '5px'
+                                                                }}
+                                                            >
+                                                                <span>🔍</span>
+                                                                {product.name}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="empty-tips">
+                                                    <p><strong>Tips for better results:</strong></p>
+                                                    <ul>
+                                                        <li>Try broader product categories</li>
+                                                        <li>Check spelling of product names</li>
+                                                        <li>Consider related products</li>
+                                                    </ul>
+                                                </div>
+                                            )}
                                         </div>
                                     ) : (
                                         <div className="products-grid">
@@ -3038,7 +3784,112 @@ function SocialAIMarketingEngine() {
                                                 )}
                                             </div>
                                         </div>
-                                    )}
+
+                                        )}
+                                        
+                                        {/* SIMILAR PRODUCTS SUGGESTIONS */}
+                                        {showSimilarProducts && similarProducts.length > 0 && (
+                                            <div className="similar-products-section">
+                                                <div className="section-header" style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    marginBottom: '20px',
+                                                    padding: '15px',
+                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                    borderRadius: '10px',
+                                                    color: 'white'
+                                                }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                                        <span style={{ fontSize: '24px' }}>💡</span>
+                                                        <div>
+                                                            <h3 style={{ margin: 0, fontSize: '18px' }}>You might also like</h3>
+                                                            <p style={{ margin: '5px 0 0 0', fontSize: '14px', opacity: 0.9 }}>
+                                                                Similar products to "{productSearch}"
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => setShowSimilarProducts(false)}
+                                                        style={{
+                                                            background: 'rgba(255,255,255,0.2)',
+                                                            border: 'none',
+                                                            color: 'white',
+                                                            padding: '8px 12px',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '14px'
+                                                        }}
+                                                    >
+                                                        Hide suggestions
+                                                    </button>
+                                                </div>
+                                                
+                                                <div className="similar-products-grid" style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                                                    gap: '20px',
+                                                    marginTop: '10px'
+                                                }}>
+                                                    {similarProducts.map((product, index) => (
+                                                        <div key={`similar-${product.id || index}`} className="similar-product-card" style={{
+                                                            background: '#f8f9fa',
+                                                            borderRadius: '10px',
+                                                            padding: '15px',
+                                                            border: '1px solid #e0e0e0',
+                                                            transition: 'all 0.3s ease'
+                                                        }}>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                                                                <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                                                                    {product.name || 'Unnamed Product'}
+                                                                </h4>
+                                                                <span style={{
+                                                                    background: '#4CAF50',
+                                                                    color: 'white',
+                                                                    padding: '3px 8px',
+                                                                    borderRadius: '4px',
+                                                                    fontSize: '12px',
+                                                                    fontWeight: 'bold'
+                                                                }}>
+                                                                    ${product.price || '0'}
+                                                                </span>
+                                                            </div>
+                                                            
+                                                            <div style={{ marginBottom: '10px' }}>
+                                                                <span style={{ fontSize: '12px', color: '#666', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                                    📍 {product.location || 'Location not specified'}
+                                                                </span>
+                                                            </div>
+                                                            
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setProductSearch(product.name);
+                                                                    setTimeout(() => handleSearch(), 100);
+                                                                }}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    padding: '10px',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '14px',
+                                                                    fontWeight: 'bold',
+                                                                    marginTop: '10px',
+                                                                    transition: 'transform 0.2s'
+                                                                }}
+                                                                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                                                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                                                            >
+                                                                🔍 View this product
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    
                                 </div>
                             )}
                         </div>
@@ -3154,6 +4005,235 @@ function SocialAIMarketingEngine() {
             </div>
         </div>
       </div>
+
+        {/* Mobile Filter Modal */}
+        {showFilterModal && (
+            <div 
+                className="filter-modal-overlay" 
+                onClick={() => setShowFilterModal(false)}
+                style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    background: 'rgba(0,0,0,0.5)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'center'
+                }}
+            >
+                <div 
+                    className="filter-modal-content" 
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: 'white',
+                        width: '100%',
+                        maxHeight: '80vh',
+                        borderTopLeftRadius: '20px',
+                        borderTopRightRadius: '20px',
+                        padding: '20px',
+                        overflow: 'auto'
+                    }}
+                >
+                    <div className="filter-modal-header" style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '20px',
+                        paddingBottom: '15px',
+                        borderBottom: '1px solid #e0e0e0'
+                    }}>
+                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span>🔍</span>
+                            Filter Results
+                            {activeFilterCount > 0 && (
+                                <span style={{
+                                    marginLeft: '10px',
+                                    background: '#4CAF50',
+                                    color: 'white',
+                                    padding: '2px 8px',
+                                    borderRadius: '10px',
+                                    fontSize: '12px'
+                                }}>
+                                    {activeFilterCount} active
+                                </span>
+                            )}
+                        </h3>
+                        <button 
+                            className="filter-modal-close"
+                            onClick={() => setShowFilterModal(false)}
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                fontSize: '28px',
+                                cursor: 'pointer',
+                                color: '#666'
+                            }}
+                        >
+                            ×
+                        </button>
+                    </div>
+                    
+                    <div className="filter-modal-body">
+                        <div className="mobile-filter-section">
+                            <div className="filter-grid" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                                {/* Price Range */}
+                                <div className="filter-group">
+                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>💰 Price Range</label>
+                                    <div className="price-inputs" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <div style={{ flex: 1 }}>
+                                            <input
+                                                type="number"
+                                                placeholder="Min $"
+                                                value={filters.minPrice}
+                                                onChange={(e) => setFilters(prev => ({...prev, minPrice: e.target.value}))}
+                                                min="0"
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '12px',
+                                                    border: '2px solid #ddd',
+                                                    borderRadius: '8px'
+                                                }}
+                                            />
+                                        </div>
+                                        <span style={{ color: '#666', margin: '0 5px' }}>to</span>
+                                        <div style={{ flex: 1 }}>
+                                            <input
+                                                type="number"
+                                                placeholder="Max $"
+                                                value={filters.maxPrice}
+                                                onChange={(e) => setFilters(prev => ({...prev, maxPrice: e.target.value}))}
+                                                min="0"
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '12px',
+                                                    border: '2px solid #ddd',
+                                                    borderRadius: '8px'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* Location */}
+                                <div className="filter-group">
+                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>📍 Location</label>
+                                    <input
+                                        type="text"
+                                        placeholder="City or area"
+                                        value={filters.location}
+                                        onChange={(e) => setFilters(prev => ({...prev, location: e.target.value}))}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px',
+                                            border: '2px solid #ddd',
+                                            borderRadius: '8px',
+                                            fontSize: '16px'
+                                        }}
+                                    />
+                                </div>
+                                
+                                {/* Sort By */}
+                                <div className="filter-group">
+                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>📊 Sort By</label>
+                                    <select
+                                        value={filters.sortBy}
+                                        onChange={(e) => setFilters(prev => ({...prev, sortBy: e.target.value}))}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px',
+                                            border: '2px solid #ddd',
+                                            borderRadius: '8px',
+                                            fontSize: '16px',
+                                            background: 'white'
+                                        }}
+                                    >
+                                        <option value="newest">🆕 Newest First</option>
+                                        <option value="price_low">💰 Price: Low to High</option>
+                                        <option value="price_high">💎 Price: High to Low</option>
+                                    </select>
+                                </div>
+                                
+                                {/* Action Buttons */}
+                                <div style={{ 
+                                    display: 'flex', 
+                                    gap: '10px', 
+                                    marginTop: '20px',
+                                    position: 'sticky',
+                                    bottom: '0',
+                                    background: 'white',
+                                    padding: '15px 0',
+                                    borderTop: '1px solid #e0e0e0'
+                                }}>
+                                    <button
+                                        onClick={() => {
+                                            setFilters({
+                                                minPrice: '',
+                                                maxPrice: '',
+                                                location: '',
+                                                sortBy: 'newest',
+                                                category: ''
+                                            });
+                                        }}
+                                        className="clear-filters-btn"
+                                        disabled={activeFilterCount === 0}
+                                        style={{ 
+                                            flex: 1,
+                                            padding: '14px',
+                                            background: activeFilterCount === 0 ? '#ccc' : '#ff4444',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            fontWeight: 'bold',
+                                            fontSize: '16px',
+                                            cursor: activeFilterCount === 0 ? 'not-allowed' : 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '8px'
+                                        }}
+                                    >
+                                        ❌ Clear All
+                                    </button>
+                                    
+                                    <button
+                                        onClick={() => {
+                                            if (productSearch.trim()) {
+                                                findProducts(productSearch, true);
+                                            } else {
+                                                fetchProducts();
+                                            }
+                                            setShowFilterModal(false);
+                                        }}
+                                        className="apply-filters-btn"
+                                        disabled={searchLoading}
+                                        style={{ 
+                                            flex: 1,
+                                            padding: '14px',
+                                            background: searchLoading ? '#ccc' : '#4CAF50',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            fontWeight: 'bold',
+                                            fontSize: '16px',
+                                            cursor: searchLoading ? 'not-allowed' : 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '8px'
+                                        }}
+                                    >
+                                        {searchLoading ? '⏳ Applying...' : '✅ Apply Filters'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
      </div>
      
     );

@@ -44,9 +44,41 @@ export default function WishlistManager({ onBack }) {
   const filteredItems = wishlistItems.filter(item => 
     activeTab === 'products' ? item.item_type === 'product' : item.item_type === 'prospect'
   );
-
   useEffect(() => {
     fetchWishlistItems();
+
+    // Real-time subscription (already added)
+    const channel = supabase
+      .channel('saved_items_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'saved_items',
+        },
+        (payload) => {
+          supabase.auth.getUser().then(({ data: { user } }) => {
+            if (user && payload.new && payload.new.user_id === user.id) {
+              fetchWishlistItems();
+            }
+          });
+        }
+      )
+      .subscribe();
+
+    // ADD THIS SEPARATE EVENT LISTENER FOR PULL-TO-REFRESH
+    const handlePullToRefresh = () => {
+      console.log('🔄 Pull-to-refresh detected in WishlistManager');
+      fetchWishlistItems(); // Simply refresh the wishlist
+    };
+    
+    window.addEventListener('pull-to-refresh', handlePullToRefresh);
+    
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('pull-to-refresh', handlePullToRefresh);
+    };
   }, []);
 
   if (loading) {

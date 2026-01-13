@@ -35,6 +35,33 @@ body {
   padding-top: 0 !important; /* Ensure no top padding */
 }
 
+/* Add this after the body styles */
+html {
+  background-color: #242424 !important;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+/* Add this to remove any potential white borders */
+#root {
+  background-color: #242424 !important;
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+/* Add this to ensure no element overflows */
+* {
+  max-width: 100%;
+}
+
+/* Add this for any content containers */
+main, .form-container, .page-container {
+  background-color: #000000 !important;
+}
+
 :not(.social-media-page) header,
 :not(.social-media-page) nav,
 :not(.social-media-page) .navbar,
