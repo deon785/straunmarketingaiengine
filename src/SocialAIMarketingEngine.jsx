@@ -383,6 +383,27 @@ function SocialAIMarketingEngine() {
         }
     }, [user]);
 
+    const PushEnableButton = () => {
+        const handleEnable = async () => {
+            // 1. Ask browser for permission
+            const permission = await Notification.requestPermission();
+            
+            if (permission === 'granted') {
+            // 2. Run the subscription function we wrote earlier
+            await subscribeToPush(); 
+            alert("Notifications enabled! You'll receive updates like WhatsApp.");
+            } else {
+            alert("You denied notifications. Please enable them in browser settings to get updates.");
+            }
+        };
+
+        return (
+            <button onClick={handleEnable} className="push-btn">
+            🔔 Enable Push Notifications
+            </button>
+        );
+        };
+
     const playNotificationSound = () => {
         const soundUrl = 'https://cdn.pixabay.com/download/audio/2023/11/07/audio_f558d7e0d3.mp3';
         const audio = new Audio(soundUrl);

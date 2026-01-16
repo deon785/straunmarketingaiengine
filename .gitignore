@@ -31,3 +31,20 @@ dist-ssr
 .env.*
 .env.production
 .env.development
+
+backup-scripts/.env
+backup-scripts/service-account-key.json
+backup-scripts/backups/
+*.pyc
+__pycache__/
+
+scripts/.env
+scripts/credentials.json
+scripts/backups/
+scripts/node_modules/
+
+# Backup files
+*.backup
+*.sql
+*.sql.gz
+backup-*.json

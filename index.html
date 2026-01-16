@@ -1,25 +1,61 @@
+
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     
+    <!-- ✅ CORRECT VIEWPORT (keep this) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     
+    <!-- ✅ SEO/Open Graph (good) -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://straunmarketingaiengine.vercel.app/">
     <meta property="og:title" content="Straun Marketing AI Engine">
-    <meta property="og:description" content="Find products and generate marketing content in seconds.">
+    <meta property="og:description" content="AI-Powered Marketing Platform - Find Buyers & Sellers Instantly">
     <meta property="og:image" content="/straun-app.png">
 
     <meta property="twitter:card" content="summary_large_image">
     <meta property="twitter:title" content="Straun Marketing AI Engine">
+    <meta property="twitter:description" content="Find products and generate marketing content in seconds.">
+    <meta property="twitter:image" content="/straun-app.png">
     
-    <title>Straun Marketing AI App</title>
+    <title>Straun Marketing AI Engine</title>
 
-    <meta name="theme-color" content="#007bff" />
+    <!-- ✅ THEME COLOR (MUST match manifest) -->
+    <meta name="theme-color" content="#667eea" />
     
-
+    <!-- ✅ APPLE/IOS METADATA -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StraunAI">
+    
+    <!-- ✅ PWA MANIFEST -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- ✅ FAVICONS (ESSENTIAL - multiple sizes) -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    
+    <!-- ✅ MICROSOFT TILE COLOR (for Windows) -->
+    <meta name="msapplication-TileColor" content="#667eea">
+    
+    <!-- ✅ ANDROID CHROME THEME -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="StraunAI">
+    
+    <!-- ✅ WEB APP CAPABLE -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <!-- ✅ DISABLE TELEPHONE DETECTION -->
+    <meta name="format-detection" content="telephone=no">
+    
+    <!-- ✅ ADD APPLE TOUCH ICON FOR PUSH NOTIFICATIONS -->
+    <link rel="apple-touch-icon" href="/pwa-192x192.png">
+    
+    <!-- ✅ ADDITIONAL ICON SIZES (optional but recommended) -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/pwa-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/pwa-512x512.png">
+    
   </head>
   <body>
     <div id="root"></div>

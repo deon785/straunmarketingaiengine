@@ -1,0 +1,21 @@
+{
+  "name": "supabase-backup-scripts",
+  "version": "1.0.0",
+  "description": "Supabase backup to Google Drive",
+  "main": "backup.js",
+  "scripts": {
+    "backup": "node backup.js",
+    "backup:quick": "node backup.js --quick",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "dependencies": {
+    "@google-cloud/local-auth": "^2.1.0",
+    "archiver": "^5.3.0",
+    "dotenv": "^16.0.0",
+    "googleapis": "^105.0.0",
+    "pg": "^8.17.1"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

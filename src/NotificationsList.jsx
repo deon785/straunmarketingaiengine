@@ -5,9 +5,44 @@ const NotificationsList = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Function to send push notification
+  const sendPushNotification = async (notification) => {
+    try {
+      // Get user's push subscription from Supabase
+      const { data: subscriptions, error } = await supabase
+        .from('push_subscriptions')
+        .select('subscription')
+        .eq('user_id', notification.user_id);
+      
+      if (error || !subscriptions || subscriptions.length === 0) {
+        console.log('No push subscriptions found for user');
+        return;
+      }
+      
+      // Send push notification to each subscription
+      // TODO: Create this backend endpoint
+      for (const sub of subscriptions) {
+        await fetch('/api/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subscription: sub.subscription,
+            title: 'New Buyer Request!',
+            body: notification.message,
+            url: window.location.origin,
+            icon: '/pwa-192x192.png'
+          })
+        });
+      }
+    } catch (error) {
+      console.error('Error sending push notification:', error);
+    }
+  };
+
   useEffect(() => {
     fetchNotifications();
 
+    // Setup Supabase real-time channel
     const channel = supabase
       .channel('notifications_changes')
       .on(
@@ -17,13 +52,17 @@ const NotificationsList = () => {
           schema: 'public',
           table: 'notifications',
         },
-        (payload) => {
-          supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user && payload.new.user_id === user.id) {
-              setNotifications(prev => [payload.new, ...prev]);
-              setLoading(false);
+        async (payload) => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user && payload.new.user_id === user.id) {
+            setNotifications(prev => [payload.new, ...prev]);
+            setLoading(false);
+            
+            // Send push notification for unread notifications
+            if (payload.new.status === 'unread') {
+              sendPushNotification(payload.new);
             }
-          });
+          }
         }
       )
       .on(
@@ -39,6 +78,7 @@ const NotificationsList = () => {
       )
       .subscribe();
 
+    // Pull-to-refresh listener
     const handlePullToRefresh = () => {
       console.log('🔄 Pull-to-refresh detected in NotificationsList');
       fetchNotifications();

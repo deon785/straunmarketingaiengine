@@ -15,6 +15,7 @@ import PullToRefreshWrapper from './PullToRefreshWrapper.jsx';
 import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
 
+import PushNotificationHandler from './PushNotificationHandler.jsx';
 // --- LAZY LOADED COMPONENTS ---
 // These only load when the user navigates to them
 const Auth = lazy(() => import('./signup'));
@@ -27,6 +28,24 @@ const NotificationsList = lazy(() => import('./NotificationsList'));
 const WishlistButton = lazy(() => import('./WishlistButton.jsx'));
 const SimpleAdmin = lazy(() => import('./SimpleAdmin'));
 const ResetPassword = lazy(() => import('./ResetPassword.jsx'));
+
+async function subscribeToPush(userId) {
+  const registration = await navigator.serviceWorker.ready;
+  
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: import.meta.env.VITE_VAPID_PUBLIC_KEY
+  });
+
+  const { error } = await supabase
+    .from('push_subscriptions')
+    .upsert({ 
+      id: userId, // Use the passed ID
+      subscription_json: subscription 
+    });
+
+  if (!error) console.log("Subscribed successfully!");
+}
 
 const TestAdmin = () => {
   console.log('TestAdmin loaded');
@@ -57,6 +76,9 @@ const NotificationWatcher = () => {
   
   useEffect(() => {
     if (!user) return;
+
+    // Trigger the Push Subscription when the user logs in
+    subscribeToPush().catch(err => console.error("Push subscription failed:", err));
     
     // Track notification access
     if (userMonitor) {
@@ -408,6 +430,7 @@ function App() {
                 
                 <CookieBanner /> 
                 <FeedbackButton />
+                <PushNotificationHandler />
               </div>
              </PullToRefreshWrapper>
           </RefreshPersistenceWrapper>

@@ -5,6 +5,19 @@ import App from './App.jsx';
 import './index.css';
 import ReactGA from "react-ga4";
 
+import { registerSW } from 'virtual:pwa-register'
+
+// This automatically updates the app when you push new code
+registerSW({ 
+  immediate: true,
+  onRegistered(r) {
+    console.log('WhatsApp-style worker ready!', r);
+  },
+  onRegisterError(error) {
+    console.error('Service Worker registration failed:', error);
+  }
+});
+
 ReactGA.initialize("G-RWLWLNQM67"); 
 
 // Send initial pageview
