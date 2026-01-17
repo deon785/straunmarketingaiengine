@@ -294,6 +294,10 @@ function SocialAIMarketingEngine() {
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [showToolsPanel, setShowToolsPanel] = useState(false);
 
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
+    const [showInstallPrompt, setShowInstallPrompt] = useState(false);
+    const [hasBeenPrompted, setHasBeenPrompted] = useState(false);
+
     const [filters, setFilters] = useState({
     minPrice: '',
     maxPrice: '',
@@ -1398,6 +1402,34 @@ function SocialAIMarketingEngine() {
         }
     }, [searchCache]);
 
+    // PWA Install Prompt Logic
+    useEffect(() => {
+    // Listen for the beforeinstallprompt event
+    const handleBeforeInstallPrompt = (e) => {
+        // Prevent Chrome's automatic prompt
+        e.preventDefault();
+        // Store the event for later use
+        setDeferredPrompt(e);
+    };
+
+    // Check if already installed
+    const checkIfAlreadyInstalled = () => {
+        if (window.matchMedia('(display-mode: standalone)').matches ||
+            window.navigator.standalone === true) {
+        console.log('App already installed');
+        return true;
+        }
+        return false;
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // Clean up
+    return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+    }, []);
+
     // 🔔 REAL-TIME SEARCH ALERT MONITORING
     useEffect(() => {
         if (!user || !isProfileComplete || selectedMode !== 'buyer') return;
@@ -2066,7 +2098,8 @@ function SocialAIMarketingEngine() {
                 resultsCount: selectedMode === 'seller' ? prospects.length : productsFound.length
                 });
             }
-                        // Clear previous results
+            
+            // Clear previous results
             if (selectedMode === 'seller') {
                 setProductsFound([]);
                 await findProspects(sanitizedSearch);
@@ -2074,6 +2107,24 @@ function SocialAIMarketingEngine() {
                 setProspects([]);
                 await findProducts(sanitizedSearch);
             }
+
+            // ✅ ADD THIS: Show PWA install prompt after successful search results
+            if ((selectedMode === 'seller' && prospects.length > 0) || 
+                (selectedMode === 'buyer' && productsFound.length > 0)) {
+                
+                // Check if we haven't prompted this session yet
+                const hasPromptedThisSession = sessionStorage.getItem('pwaPrompted');
+                
+                if (!hasPromptedThisSession && deferredPrompt && !hasBeenPrompted) {
+                    // Wait 2 seconds so user can see results first
+                    setTimeout(() => {
+                        setShowInstallPrompt(true);
+                        setHasBeenPrompted(true);
+                        sessionStorage.setItem('pwaPrompted', 'true');
+                    }, 2000);
+                }
+            }
+
         } catch (error) {
             setError(error.message || 'Search failed');
         } finally {
@@ -2672,6 +2723,127 @@ function SocialAIMarketingEngine() {
             </div>
         );
     }
+
+    // PWA Install Prompt Component
+    const PWAInstallPrompt = () => {
+        if (!showInstallPrompt) return null;
+
+        const handleInstall = async () => {
+            if (!deferredPrompt) return;
+            
+            // Show the native install prompt
+            deferredPrompt.prompt();
+            
+            // Wait for user response
+            const { outcome } = await deferredPrompt.userChoice;
+            
+            // Track the result
+            if (typeof ReactGA !== 'undefined') {
+            ReactGA.event({
+                category: 'PWA',
+                action: 'Install Prompt',
+                label: outcome
+            });
+            }
+            
+            // Reset the deferred prompt
+            setDeferredPrompt(null);
+            setShowInstallPrompt(false);
+        };
+
+        const handleDismiss = () => {
+            setShowInstallPrompt(false);
+            // Don't show again for this session
+            sessionStorage.setItem('pwaPrompted', 'true');
+        };
+
+        // Detect iOS
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const isInStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+        return (
+            <div className="pwa-install-prompt-overlay">
+            <div className="pwa-install-prompt">
+                <button 
+                className="pwa-install-close" 
+                onClick={handleDismiss}
+                >
+                ×
+                </button>
+                
+                <div className="pwa-install-content">
+                <div className="pwa-install-icon">📱</div>
+                <h3>Install Our App!</h3>
+                <p>Get faster access, work offline, and receive notifications like WhatsApp</p>
+                
+                <div className="pwa-install-features">
+                    <div className="pwa-feature">
+                    <span>⚡</span>
+                    <span>Faster loading</span>
+                    </div>
+                    <div className="pwa-feature">
+                    <span>📶</span>
+                    <span>Works offline</span>
+                    </div>
+                    <div className="pwa-feature">
+                    <span>🔔</span>
+                    <span>Push notifications</span>
+                    </div>
+                    <div className="pwa-feature">
+                    <span>🏠</span>
+                    <span>Home screen icon</span>
+                    </div>
+                </div>
+                
+                {/* Show different button for iOS vs Android */}
+                {isIOS && !isInStandaloneMode ? (
+                    <>
+                    <div className="ios-install-instructions">
+                        <h4>📱 How to Install on iPhone/iPad:</h4>
+                        <ol>
+                        <li>Tap the <strong>Share</strong> button (📤) at the bottom</li>
+                        <li>Scroll down and select <strong>"Add to Home Screen"</strong></li>
+                        <li>Tap <strong>"Add"</strong> in the top right</li>
+                        <li>The app will appear on your home screen!</li>
+                        </ol>
+                        <p style={{ fontSize: '12px', marginTop: '10px' }}>
+                        ⚠️ Must use Safari browser. Chrome on iOS doesn't support PWA install.
+                        </p>
+                    </div>
+                    <button 
+                        className="pwa-dismiss-button"
+                        onClick={handleDismiss}
+                        style={{ marginTop: '15px' }}
+                    >
+                        Got it, I'll install manually
+                    </button>
+                    </>
+                ) : (
+                    <>
+                    <button 
+                        className="pwa-install-button"
+                        onClick={handleInstall}
+                    >
+                        📲 Install Now
+                    </button>
+                    
+                    <button 
+                        className="pwa-dismiss-button"
+                        onClick={handleDismiss}
+                    >
+                        Not Now
+                    </button>
+                    </>
+                )}
+                
+                <p className="pwa-install-note">
+                    Free to install • No app store needed
+                </p>
+                </div>
+            </div>
+            </div>
+        );
+    };
 
     // --- MAIN INTERFACE ---
     return (
@@ -4255,6 +4427,7 @@ function SocialAIMarketingEngine() {
                 </div>
             </div>
         )}
+        <PWAInstallPrompt />
      </div>
      
     );
