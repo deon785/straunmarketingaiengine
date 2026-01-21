@@ -14,6 +14,8 @@ import PullToRefreshWrapper from './PullToRefreshWrapper.jsx';
 
 import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
+import GlobalBackHandler from './GlobalBackHandler.jsx';
+import { NavigationProvider } from './NavigationContext.jsx';
 
 import PushNotificationHandler from './PushNotificationHandler.jsx';
 // --- LAZY LOADED COMPONENTS ---
@@ -377,63 +379,66 @@ function App() {
     >
       <AuthProvider>
         <Router>
-          <RefreshPersistenceWrapper>
-            <PullToRefreshWrapper>
-              <AnalyticsTracker />
-              <NotificationWatcher />
-              
-              {/* Fixed Header */}
-              <AppHeader />
-              
-              <div className="app">
-                <OfflineBanner />
+          <NavigationProvider>
+            <RefreshPersistenceWrapper>
+              <PullToRefreshWrapper>
+                <GlobalBackHandler />
+                <AnalyticsTracker />
+                <NotificationWatcher />
                 
-                {/* Main Content Area with proper spacing */}
-                <main>
-                  {/* The Suspense component handles the "Wait" while your 
-                    subsequent pages (Mode Selection, Search, Products) load.
-                  */}
-                  <Suspense fallback={
-                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-                      <div className="loading-spinner">Loading your experience...</div>
-                    </div>
-                  }>
-                    <Routes>
-                      {/* Stage 1: Auth */}
-                      <Route path="/" element={<Auth />} />
-                      
-                      {/* Stage 2 & 3: Mode Selection & Engine */}
-                      <Route path="/app" element={
-                        <ProtectedRoute>
-                          <SocialAIMarketingEngine />
-                        </ProtectedRoute>
-                      } />
-                      
-                      {/* Stage 4: Notifications/Other */}
-                      <Route path="/notifications" element={
-                        <ProtectedRoute>
-                          <NotificationsList />
-                        </ProtectedRoute>
-                      } />
+                {/* Fixed Header */}
+                <AppHeader />
+                
+                <div className="app">
+                  <OfflineBanner />
+                  
+                  {/* Main Content Area with proper spacing */}
+                  <main>
+                    {/* The Suspense component handles the "Wait" while your 
+                      subsequent pages (Mode Selection, Search, Products) load.
+                    */}
+                    <Suspense fallback={
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+                        <div className="loading-spinner">Loading your experience...</div>
+                      </div>
+                    }>
+                      <Routes>
+                        {/* Stage 1: Auth */}
+                        <Route path="/" element={<Auth />} />
+                        
+                        {/* Stage 2 & 3: Mode Selection & Engine */}
+                        <Route path="/app" element={
+                          <ProtectedRoute>
+                            <SocialAIMarketingEngine />
+                          </ProtectedRoute>
+                        } />
+                        
+                        {/* Stage 4: Notifications/Other */}
+                        <Route path="/notifications" element={
+                          <ProtectedRoute>
+                            <NotificationsList />
+                          </ProtectedRoute>
+                        } />
 
-                      <Route path="/privacy" element={<PrivacyPolicy />} />
-                      <Route path="/terms" element={<Terms />} />
-                      <Route path="/help" element={<HelpCenter />} />
-                      <Route path="/wishlist" element={<WishlistButton />} />
-                      <Route path="/reset-password" element={<ResetPassword />} />
-                      <Route path="/admin" element={<SimpleAdmin />} />
-                      
-                      <Route path="*" element={<Navigate to="/" replace />} />
-                    </Routes>
-                  </Suspense>
-                </main>
-                
-                <CookieBanner /> 
-                <FeedbackButton />
-                <PushNotificationHandler />
-              </div>
-             </PullToRefreshWrapper>
-          </RefreshPersistenceWrapper>
+                        <Route path="/privacy" element={<PrivacyPolicy />} />
+                        <Route path="/terms" element={<Terms />} />
+                        <Route path="/help" element={<HelpCenter />} />
+                        <Route path="/wishlist" element={<WishlistButton />} />
+                        <Route path="/reset-password" element={<ResetPassword />} />
+                        <Route path="/admin" element={<SimpleAdmin />} />
+                        
+                        <Route path="*" element={<Navigate to="/" replace />} />
+                      </Routes>
+                    </Suspense>
+                  </main>
+                  
+                  <CookieBanner /> 
+                  <FeedbackButton />
+                  <PushNotificationHandler />
+                </div>
+              </PullToRefreshWrapper>
+            </RefreshPersistenceWrapper>
+          </NavigationProvider>
         </Router>
       </AuthProvider>
     </Sentry.ErrorBoundary>

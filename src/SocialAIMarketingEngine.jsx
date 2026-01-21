@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate , useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import './App.css';
 
@@ -228,7 +228,22 @@ function getWordVariations(word) {
 }
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, loading: authLoading } = useAuth();
+
+    // ✅ FIRST: Initialize searchParams from URL
+    const [searchParams, setSearchParams] = useState(() => {
+        const params = new URLSearchParams(location.search);
+        return {
+        query: params.get('q') || '',
+        category: params.get('category') || '',
+        sort: params.get('sort') || 'recent',
+        page: parseInt(params.get('page')) || 1,
+        };
+    });
+
+    // ✅ NOW you can use searchParams.query
+    const [productSearch, setProductSearch] = useState(searchParams.query);
 
     useEffect(() => {
         initializeRateLimiter();
@@ -239,7 +254,6 @@ function SocialAIMarketingEngine() {
     const [isProfileComplete, setIsProfileComplete] = useState(false);
     
     // --- APP STATE ---
-    const [productSearch, setProductSearch] = useState('');
     const [prospects, setProspects] = useState([]);
     const [productsFound, setProductsFound] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -386,7 +400,7 @@ function SocialAIMarketingEngine() {
             // Don't crash the app - just log the error
         }
     }, [user]);
-
+ 
     const PushEnableButton = () => {
         const handleEnable = async () => {
             // 1. Ask browser for permission
@@ -1113,6 +1127,99 @@ function SocialAIMarketingEngine() {
         };
     }, []);
 
+    // ✅ Initialize search from URL when component mounts
+    useEffect(() => {
+        // If there's a search term in URL, update productSearch
+        if (searchParams.query && searchParams.query !== productSearch) {
+            setProductSearch(searchParams.query);
+        }
+    }, []); // Run only once on mount
+
+    // ✅ Update search when URL changes (back/forward navigation)
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const urlQuery = params.get('q') || '';
+        const urlPage = parseInt(params.get('page')) || 1;
+        const urlCategory = params.get('category') || '';
+        const urlSort = params.get('sort') || 'recent';
+        
+        if (urlQuery !== productSearch || 
+            urlCategory !== searchParams.category ||
+            urlSort !== searchParams.sort ||
+            urlPage !== searchParams.page) {
+            
+            setProductSearch(urlQuery);
+            setSearchParams({
+                query: urlQuery,
+                category: urlCategory,
+                sort: urlSort,
+                page: urlPage
+            });
+        }
+    }, [location.search]); 
+
+   // ✅ Update URL when search changes
+    useEffect(() => {
+        if (!isProfileComplete) return;
+        
+        const params = new URLSearchParams();
+        const hasSearch = productSearch.trim() !== '';
+        
+        if (hasSearch) params.set('q', productSearch);
+        if (searchParams.category) params.set('category', searchParams.category);
+        if (searchParams.sort !== 'recent') params.set('sort', searchParams.sort);
+        if (searchParams.page > 1) params.set('page', searchParams.page.toString());
+        
+        const currentParams = new URLSearchParams(location.search);
+        const currentQuery = currentParams.get('q') || '';
+        
+        // Only update if something actually changed
+        if (currentQuery !== productSearch || 
+            currentParams.get('category') !== searchParams.category ||
+            currentParams.get('sort') !== searchParams.sort ||
+            currentParams.get('page') !== (searchParams.page > 1 ? searchParams.page.toString() : null)) {
+            
+            // Use replaceState to avoid adding to history
+            window.history.replaceState({}, '', `${location.pathname}${hasSearch ? '?' + params.toString() : ''}`);
+        }
+    }, [productSearch, searchParams, location.pathname, location.search, isProfileComplete]);
+
+    // 🔥 REPLACE BOTH OF YOUR USEEFFECTS WITH THIS SINGLE ONE:
+    useEffect(() => {
+        const handleHashChange = () => {
+            if (window.location.hash !== '#wishlist' && showWishlist) {
+                // Hash changed from #wishlist to something else (user clicked back)
+                setShowWishlist(false);
+            }
+            if (window.location.hash === '#wishlist' && !showWishlist) {
+                // Hash changed to #wishlist (user clicked forward or typed URL)
+                setShowWishlist(true);
+            }
+        };
+        
+        const handlePopState = (event) => {
+            // Handle browser back/forward buttons
+            handleHashChange();
+            
+            // Restore previous state if needed (optional)
+            if (event.state && event.state.previousState) {
+                const { previousState } = event.state;
+                setProductSearch(previousState.productSearch);
+                setProspects(previousState.prospects);
+                setProductsFound(previousState.productsFound);
+                setSearchLoading(previousState.searchLoading);
+            }
+        };
+        
+        window.addEventListener('hashchange', handleHashChange);
+        window.addEventListener('popstate', handlePopState);
+        
+        return () => {
+            window.removeEventListener('hashchange', handleHashChange);
+            window.removeEventListener('popstate', handlePopState);
+        };
+    }, [showWishlist]);
+
     // Combined useEffect for initial data load
     useEffect(() => {
         if (user && !profileData) { 
@@ -1138,12 +1245,12 @@ function SocialAIMarketingEngine() {
     };
 
     useEffect(() => {
-    // Track initial page view
-    if (user && isProfileComplete) {
-        UserActivityTracker.trackActivity(user.id, 'page_view', {
-        page: selectedMode === 'seller' ? 'seller_dashboard' : 'buyer_marketplace'
-        });
-    }
+        // Track initial page view
+        if (user && isProfileComplete) {
+            UserActivityTracker.trackActivity(user.id, 'page_view', {
+            page: selectedMode === 'seller' ? 'seller_dashboard' : 'buyer_marketplace'
+            });
+        }
     }, [user, isProfileComplete, selectedMode]);
 
     // Auto-hide safety warning after 5 seconds
@@ -1404,30 +1511,30 @@ function SocialAIMarketingEngine() {
 
     // PWA Install Prompt Logic
     useEffect(() => {
-    // Listen for the beforeinstallprompt event
-    const handleBeforeInstallPrompt = (e) => {
-        // Prevent Chrome's automatic prompt
-        e.preventDefault();
-        // Store the event for later use
-        setDeferredPrompt(e);
-    };
+        // Listen for the beforeinstallprompt event
+        const handleBeforeInstallPrompt = (e) => {
+            // Prevent Chrome's automatic prompt
+            e.preventDefault();
+            // Store the event for later use
+            setDeferredPrompt(e);
+        };
 
-    // Check if already installed
-    const checkIfAlreadyInstalled = () => {
-        if (window.matchMedia('(display-mode: standalone)').matches ||
-            window.navigator.standalone === true) {
-        console.log('App already installed');
-        return true;
-        }
-        return false;
-    };
+        // Check if already installed
+        const checkIfAlreadyInstalled = () => {
+            if (window.matchMedia('(display-mode: standalone)').matches ||
+                window.navigator.standalone === true) {
+            console.log('App already installed');
+            return true;
+            }
+            return false;
+        };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // Clean up
-    return () => {
-        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+        // Clean up
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        };
     }, []);
 
     // 🔔 REAL-TIME SEARCH ALERT MONITORING
@@ -2090,6 +2197,21 @@ function SocialAIMarketingEngine() {
                 setError('Please complete your profile before searching.');
                 return;
             }
+
+            // Update URL with search term
+            const params = new URLSearchParams(location.search);
+            params.set('q', sanitizedSearch);
+            params.delete('page'); // Reset to page 1 on new search
+            
+            // Use pushState to add to history stack (for back button)
+            window.history.pushState({}, '', `${location.pathname}?${params.toString()}`);
+            
+            // Update search params state
+            setSearchParams(prev => ({
+            ...prev,
+            query: sanitizedSearch,
+            page: 1
+            }));
             
             if (user && isProfileComplete) {
                 await UserActivityTracker.trackActivity(user.id, 'search', {
@@ -2505,7 +2627,54 @@ function SocialAIMarketingEngine() {
         };
     }, [selectedMode, productSearch, findProspects, findProducts, fetchProducts]);
 
+    // ✅ Handle browser back/forward buttons
+    useEffect(() => {
+        const handlePopState = () => {
+            const params = new URLSearchParams(window.location.search);
+            const urlQuery = params.get('q') || '';
+            const urlPage = parseInt(params.get('page')) || 1;
+            
+            if (urlQuery !== productSearch) {
+            setProductSearch(urlQuery);
+            setSearchParams(prev => ({
+                ...prev,
+                query: urlQuery,
+                page: urlPage
+            }));
+            
+            // If there's a query and profile is complete, perform search
+            if (urlQuery.trim() && isProfileComplete) {
+                // Check cache first
+                const cacheKey = selectedMode === 'seller' 
+                ? `prospect_${urlQuery.toLowerCase().trim()}`
+                : urlQuery.toLowerCase().trim();
+                
+                if (searchCache[cacheKey]) {
+                if (selectedMode === 'seller') {
+                    setProspects(searchCache[cacheKey]);
+                } else {
+                    setProductsFound(searchCache[cacheKey]);
+                }
+                } else if (urlQuery.trim()) {
+                // Perform fresh search
+                if (selectedMode === 'seller') {
+                    findProspects(urlQuery);
+                } else {
+                    findProducts(urlQuery);
+                }
+                }
+            }
+            }
+        };
+        
+        window.addEventListener('popstate', handlePopState);
+        
+        return () => {
+            window.removeEventListener('popstate', handlePopState);
+        };
+    }, [productSearch, isProfileComplete, selectedMode, searchCache, findProspects, findProducts]);
 
+    // --- HANDLE SIGN OUT ---
     const handleSignOut = async () => {
         try {
             setSignOutLoading(true);
@@ -2926,6 +3095,12 @@ function SocialAIMarketingEngine() {
                                 productsFound: productsFound,
                                 searchLoading: searchLoading
                             });
+
+                            // 🔥 CRITICAL FIX: Add to browser history
+                            window.history.pushState({ 
+                                showWishlist: true 
+                            }, '', '#wishlist');
+
                             setShowWishlist(true);
                         }}
                         style={{
@@ -3424,6 +3599,7 @@ function SocialAIMarketingEngine() {
                             {/* Simple "Back" button in Wishlist view */}
                             <button 
                                 onClick={() => {
+                                    window.history.back();                                 
                                     setShowWishlist(false);
                                     setTimeout(() => {
                                     if (previousSearchState.productSearch !== undefined) {
@@ -3456,7 +3632,7 @@ function SocialAIMarketingEngine() {
                                 >
                                 ← Back to Search  
                             </button>
-                            <WishlistManager onBack={() => setShowWishlist(false)} />
+                            <WishlistManager onBack={() => window.history.back()} />
                         </div>
                         
                     ) : (

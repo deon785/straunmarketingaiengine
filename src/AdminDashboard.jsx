@@ -827,7 +827,7 @@ const AdminDashboard = () => {
         </>
       )}
 
-      {/* Users Tab */}
+      {/*USERS TAB - FIXED VERSION*/} 
       {activeTab === 'users' && (
         <div style={{ 
           background: 'white',
@@ -835,79 +835,364 @@ const AdminDashboard = () => {
           borderRadius: '10px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
         }}>
-          <h2 style={{ color: '#000', margin: '0 0 20px 0' }}>👥 User Management</h2>
+          <h2 style={{ color: '#000', margin: '0 0 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>👥 User Management ({stats.recentUsers.length})</span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <input
+                type="text"
+                placeholder="Search users..."
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  width: '200px'
+                }}
+                onChange={(e) => {
+                  setUserSearch(e.target.value);
+                }}
+              />
+              <select
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #dee2e6',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  background: 'white'
+                }}
+                onChange={(e) => setUserFilter(e.target.value)}
+                value={userFilter}
+              >
+                <option value="all">All Users</option>
+                <option value="active">Active (Recent)</option>
+                <option value="inactive">Inactive</option>
+                <option value="seller">Sellers</option>
+                <option value="buyer">Buyers</option>
+                <option value="setup_complete">Setup Complete</option>
+                <option value="setup_incomplete">Setup Incomplete</option>
+              </select>
+            </div>
+          </h2>
           
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f8f9fa' }}>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>User</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Role</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Location</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Joined</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Status</th>
-                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.recentUsers.map(user => (
-                  <tr key={user.user_id} style={{ borderBottom: '1px solid #dee2e6' }}>
-                    <td style={{ padding: '12px', color: '#000' }}>
-                      <div>
-                        <strong>{user.username || 'N/A'}</strong>
-                        <div style={{ fontSize: '12px', color: '#6c757d' }}>{user.user_id.substring(0, 12)}...</div>
-                      </div>
-                    </td>
-                    <td style={{ padding: '12px', color: '#000' }}>User</td>
-                    <td style={{ padding: '12px', color: '#000' }}>{user.location || 'N/A'}</td>
-                    <td style={{ padding: '12px', color: '#000' }}>{new Date(user.created_at).toLocaleDateString()}</td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{
-                        padding: '4px 8px',
-                        background: '#28a745',
-                        color: 'white',
-                        borderRadius: '4px',
-                        fontSize: '12px'
-                      }}>
-                        Active
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <div style={{ display: 'flex', gap: '5px' }}>
-                        <button 
-                          onClick={() => window.open(`/profile/${user.user_id}`, '_blank')}
-                          style={{ 
-                            padding: '4px 12px',
-                            background: '#0d6efd',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          View
-                        </button>
-                        <button 
-                          onClick={() => handleBanUser(user.user_id, 'Admin decision')}
-                          style={{ 
-                            padding: '4px 12px',
-                            background: '#dc3545',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Ban
-                        </button>
-                      </div>
-                    </td>
+          {stats.recentUsers.length === 0 ? (
+            <p style={{ color: '#6c757d', textAlign: 'center', padding: '40px' }}>
+              No users found
+            </p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#f8f9fa' }}>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>User Info</th>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Setup Status</th>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Activity Stats</th>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Last Activity</th>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Status</th>
+                    <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #dee2e6', color: '#000' }}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {stats.recentUsers
+                    .filter(user => {
+                      // Search filter
+                      const searchMatch = !userSearch || 
+                        (user.username && user.username.toLowerCase().includes(userSearch.toLowerCase())) ||
+                        (user.location && user.location.toLowerCase().includes(userSearch.toLowerCase()));
+                      
+                      // Status filter
+                      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+                      const isActiveRecently = user.last_activity_at && 
+                        new Date(user.last_activity_at) > fifteenMinutesAgo;
+                      
+                      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                      const isInactive = !user.last_activity_at || 
+                        new Date(user.last_activity_at) < sevenDaysAgo;
+                      
+                      const isSetupComplete = (user.is_seller && user.seller_setup_completed) || 
+                        (user.is_buyer && user.buyer_setup_completed);
+                      
+                      switch(userFilter) {
+                        case 'active': return isActiveRecently;
+                        case 'inactive': return isInactive;
+                        case 'seller': return user.is_seller;
+                        case 'buyer': return user.is_buyer;
+                        case 'setup_complete': return isSetupComplete;
+                        case 'setup_incomplete': return !isSetupComplete;
+                        default: return true;
+                      }
+                    })
+                    .map(user => {
+                      // Determine user type based on your schema
+                      const userType = user.is_seller && user.is_buyer ? 'Both' :
+                                      user.is_seller ? 'Seller' :
+                                      user.is_buyer ? 'Buyer' : 'Not Set';
+                      
+                      const isSetupComplete = (user.is_seller && user.seller_setup_completed) || 
+                        (user.is_buyer && user.buyer_setup_completed);
+                      
+                      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+                      const isActive = user.last_activity_at && 
+                        new Date(user.last_activity_at) > fifteenMinutesAgo;
+                      
+                      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                      const isInactive = !user.last_activity_at || 
+                        new Date(user.last_activity_at) < sevenDaysAgo;
+                      
+                      return (
+                        <tr key={user.user_id} style={{ 
+                          borderBottom: '1px solid #dee2e6',
+                          background: !user.is_active ? '#f8f9fa' : 'transparent'
+                        }}>
+                          <td style={{ padding: '12px', color: '#000' }}>
+                            <div>
+                              <strong style={{ display: 'block', marginBottom: '4px' }}>
+                                {user.username || 'Anonymous User'}
+                              </strong>
+                              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>
+                                ID: {user.user_id.substring(0, 8)}...
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '2px' }}>
+                                📍 {user.location || 'No location'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                                📞 {user.phone_number || 'No phone'}
+                              </div>
+                              {user.role && user.role !== 'user' && (
+                                <div style={{ 
+                                  display: 'inline-block',
+                                  marginTop: '4px',
+                                  padding: '2px 6px',
+                                  background: '#fef3c7',
+                                  color: '#92400e',
+                                  borderRadius: '4px',
+                                  fontSize: '10px',
+                                  fontWeight: 'bold'
+                                }}>
+                                  {user.role.toUpperCase()}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', color: '#000' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <span style={{
+                                padding: '4px 8px',
+                                background: userType === 'Seller' ? '#e0f2fe' :
+                                          userType === 'Buyer' ? '#dcfce7' :
+                                          userType === 'Both' ? '#fef3c7' : '#f3f4f6',
+                                color: userType === 'Seller' ? '#0369a1' :
+                                      userType === 'Buyer' ? '#166534' :
+                                      userType === 'Both' ? '#92400e' : '#6b7280',
+                                borderRadius: '4px',
+                                fontSize: '12px',
+                                fontWeight: 'bold',
+                                textAlign: 'center'
+                              }}>
+                                {userType}
+                              </span>
+                              
+                              <div style={{ fontSize: '11px', textAlign: 'center' }}>
+                                {isSetupComplete ? (
+                                  <span style={{ color: '#10b981' }}>✓ Setup Complete</span>
+                                ) : (
+                                  <span style={{ color: '#f59e0b' }}>⚠ Setup Incomplete</span>
+                                )}
+                              </div>
+                              
+                              {(user.is_seller || user.is_buyer) && (
+                                <div style={{ fontSize: '10px', color: '#6b7280', textAlign: 'center' }}>
+                                  {user.is_seller && <div>🛒 Seller</div>}
+                                  {user.is_buyer && <div>🔍 Buyer</div>}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', color: '#000' }}>
+                            <div style={{ fontSize: '12px' }}>
+                              <div style={{ marginBottom: '6px' }}>
+                                <span style={{ fontWeight: 'bold' }}>Searches:</span> {user.total_searches || 0}
+                              </div>
+                              <div style={{ marginBottom: '6px' }}>
+                                <span style={{ fontWeight: 'bold' }}>Contacts:</span> {user.total_contacts || 0}
+                              </div>
+                              <div style={{ 
+                                padding: '2px 6px',
+                                background: user.is_active ? '#dcfce7' : '#f3f4f6',
+                                color: user.is_active ? '#166534' : '#6b7280',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                textAlign: 'center'
+                              }}>
+                                {user.is_active ? 'Account Active' : 'Account Inactive'}
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', color: '#000' }}>
+                            <div style={{ fontSize: '12px' }}>
+                              <div style={{ marginBottom: '4px' }}>
+                                <strong>Joined:</strong> {new Date(user.created_at).toLocaleDateString()}
+                              </div>
+                              <div style={{ marginBottom: '4px' }}>
+                                <strong>Last Active:</strong> {user.last_activity_at ? 
+                                  new Date(user.last_activity_at).toLocaleDateString([], {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  }) : 
+                                  'Never'}
+                              </div>
+                              <div>
+                                <strong>Last Login:</strong> {user.last_sign_in_at ? 
+                                  new Date(user.last_sign_in_at).toLocaleDateString() : 
+                                  'Never'}
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <span style={{
+                                padding: '4px 8px',
+                                background: isActive ? '#28a745' : 
+                                          isInactive ? '#dc3545' : '#ffc107',
+                                color: 'white',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                textAlign: 'center',
+                                fontWeight: 'bold'
+                              }}>
+                                {isActive ? 'ACTIVE NOW' : 
+                                isInactive ? 'INACTIVE' : 'IDLE'}
+                              </span>
+                              
+                              {user.interests && user.interests.length > 0 && (
+                                <div style={{ fontSize: '10px', color: '#6b7280', maxWidth: '150px' }}>
+                                  <strong>Interests:</strong> {user.interests.slice(0, 2).join(', ')}
+                                  {user.interests.length > 2 && '...'}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              <button 
+                                onClick={() => {
+                                  // View user details modal
+                                  alert(`User Details:
+      ID: ${user.user_id}
+      Username: ${user.username || 'N/A'}
+      Location: ${user.location || 'N/A'}
+      Phone: ${user.phone_number || 'N/A'}
+      Role: ${user.role || 'user'}
+      Type: ${userType}
+      Searches: ${user.total_searches || 0}
+      Contacts: ${user.total_contacts || 0}
+      Active: ${user.is_active ? 'Yes' : 'No'}
+      Setup Complete: ${isSetupComplete ? 'Yes' : 'No'}
+      Interests: ${user.interests ? user.interests.join(', ') : 'None'}`);
+                                }}
+                                style={{ 
+                                  padding: '6px 12px',
+                                  background: '#0d6efd',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  width: '100%'
+                                }}
+                              >
+                                👁️ View Details
+                              </button>
+                              
+                              <button 
+                                onClick={() => {
+                                  const newStatus = !user.is_active;
+                                  if (window.confirm(`${newStatus ? 'Activate' : 'Deactivate'} this user?`)) {
+                                    supabase
+                                      .from('profiles')
+                                      .update({ is_active: newStatus })
+                                      .eq('user_id', user.user_id)
+                                      .then(() => {
+                                        fetchDashboardData();
+                                        alert(`User ${newStatus ? 'activated' : 'deactivated'} successfully`);
+                                      })
+                                      .catch(error => {
+                                        console.error('Error updating user:', error);
+                                        alert('Error updating user');
+                                      });
+                                  }
+                                }}
+                                style={{ 
+                                  padding: '6px 12px',
+                                  background: user.is_active ? '#dc3545' : '#28a745',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  width: '100%'
+                                }}
+                              >
+                                {user.is_active ? '🚫 Deactivate' : '✅ Activate'}
+                              </button>
+                              
+                              <button 
+                                onClick={() => {
+                                  const reason = prompt('Enter ban reason:', 'Violation of terms');
+                                  if (reason) {
+                                    handleBanUser(user.user_id, reason);
+                                  }
+                                }}
+                                style={{ 
+                                  padding: '6px 12px',
+                                  background: '#dc3545',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  width: '100%'
+                                }}
+                              >
+                                🚫 Ban User
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          
+          {/* Pagination */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px', gap: '10px' }}>
+            <button 
+              style={{ 
+                padding: '8px 16px',
+                background: '#f8f9fa',
+                border: '1px solid #dee2e6',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+              disabled
+            >
+              ← Previous
+            </button>
+            <span style={{ padding: '8px 16px', color: '#000' }}>Page 1</span>
+            <button 
+              style={{ 
+                padding: '8px 16px',
+                background: '#f8f9fa',
+                border: '1px solid #dee2e6',
+                borderRadius: '6px',
+                cursor: 'pointer'
+              }}
+            >
+              Next →
+            </button>
           </div>
         </div>
       )}
