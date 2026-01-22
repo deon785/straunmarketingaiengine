@@ -3,6 +3,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Add this as the FIRST script in head
+      window.__BUILD_VERSION__ = "2024-01-22-v2";
+      window.__BUILD_TIMESTAMP__ = "<?= new Date().toISOString() ?>";
+    </script>
     
     <!-- ✅ CORRECT VIEWPORT (keep this) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
