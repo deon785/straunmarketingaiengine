@@ -16,6 +16,7 @@ import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
 import GlobalBackHandler from './GlobalBackHandler.jsx';
 import { NavigationProvider } from './NavigationContext.jsx';
+import SellerDecision from './SellerDecision.jsx'; 
 
 import PushNotificationHandler from './PushNotificationHandler.jsx';
 // --- LAZY LOADED COMPONENTS ---
@@ -405,6 +406,8 @@ function App() {
                       <Routes>
                         {/* Stage 1: Auth */}
                         <Route path="/" element={<Auth />} />
+
+                        <Route path="/seller-decision" element={<SellerDecision />} />
                         
                         {/* Stage 2 & 3: Mode Selection & Engine */}
                         <Route path="/app" element={
@@ -425,6 +428,7 @@ function App() {
                         <Route path="/help" element={<HelpCenter />} />
                         <Route path="/wishlist" element={<WishlistButton />} />
                         <Route path="/reset-password" element={<ResetPassword />} />
+                        <Route path="/reset-password#*" element={<ResetPassword />} />
                         <Route path="/admin" element={<SimpleAdmin />} />
                         
                         <Route path="*" element={<Navigate to="/" replace />} />

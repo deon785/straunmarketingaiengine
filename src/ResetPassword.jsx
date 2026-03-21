@@ -9,46 +9,63 @@ const ResetPassword = () => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
     const [showPassword, setShowPassword] = useState(false);
-    const [accessToken, setAccessToken] = useState(null);
+    const [isValidToken, setIsValidToken] = useState(false);
     const navigate = useNavigate();
     const location = useLocation();
 
     useEffect(() => {
-        // Extract token from URL hash (Supabase puts it in the hash)
-        const hash = window.location.hash;
-        const params = new URLSearchParams(hash.substring(1));
-        const token = params.get('access_token');
-        const type = params.get('type');
-        
-        console.log('Reset password URL params:', { token, type, hash });
+        const handlePasswordResetRedirect = async () => {
+            try {
+                // Parse the hash fragment from the URL
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                const accessToken = hashParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token');
+                const type = hashParams.get('type');
 
-        if (token && type === 'recovery') {
-            setAccessToken(token);
-            // Set the session with the recovery token
-            supabase.auth.setSession({
-                access_token: token,
-                refresh_token: ''
-            }).then(({ data, error }) => {
-                if (error) {
-                    console.error('Error setting recovery session:', error);
+                console.log('Recovery URL params:', { type, hasAccessToken: !!accessToken });
+
+                if (type === 'recovery' && accessToken) {
+                    // Set the session with the recovery token
+                    const { data, error } = await supabase.auth.setSession({
+                        access_token: accessToken,
+                        refresh_token: refreshToken || ''
+                    });
+
+                    if (error) {
+                        console.error('Error setting session:', error);
+                        setMessage({ 
+                            type: 'error', 
+                            text: 'Invalid or expired reset link. Please request a new one.' 
+                        });
+                        setIsValidToken(false);
+                    } else {
+                        console.log('Session set successfully for password reset');
+                        setIsValidToken(true);
+                        
+                        // Clear the URL hash to clean up the URL
+                        window.history.replaceState(null, '', window.location.pathname);
+                    }
+                } else {
                     setMessage({ 
                         type: 'error', 
-                        text: 'Invalid or expired reset link. Please request a new one.' 
+                        text: 'Invalid reset link. Please request a new password reset.' 
                     });
-                } else {
-                    console.log('Recovery session set successfully');
+                    setIsValidToken(false);
                 }
-            });
-        } else {
-            setMessage({ 
-                type: 'error', 
-                text: 'Invalid reset link. Please request a new password reset.' 
-            });
-        }
+            } catch (error) {
+                console.error('Error in password reset redirect:', error);
+                setMessage({ 
+                    type: 'error', 
+                    text: 'Failed to process reset link. Please try again.' 
+                });
+                setIsValidToken(false);
+            }
+        };
+
+        handlePasswordResetRedirect();
     }, []);
 
     const validatePassword = (password) => {
-        // At least 6 characters
         return password.length >= 6;
     };
 
@@ -72,15 +89,8 @@ const ResetPassword = () => {
         setMessage({ type: '', text: '' });
         
         try {
-            // Get current session to ensure we're authenticated
-            const { data: sessionData } = await supabase.auth.getSession();
-            
-            if (!sessionData.session) {
-                throw new Error('No valid session. Please request a new reset link.');
-            }
-            
             // Update the password
-            const { error } = await supabase.auth.updateUser({
+            const { data, error } = await supabase.auth.updateUser({
                 password: password
             });
             
@@ -110,6 +120,11 @@ const ResetPassword = () => {
         }
     };
 
+    const requestNewReset = async () => {
+        // You can add functionality to request a new reset link here
+        navigate('/forgot-password');
+    };
+
     return (
         <div className="signup-page">
             <div className="auth-page-wrapper">
@@ -128,7 +143,7 @@ const ResetPassword = () => {
                                 Reset Password
                             </div>
                             <div style={{ color: '#666', fontSize: '16px', fontWeight: '400' }}>
-                                Enter your new password
+                                {isValidToken ? 'Enter your new password' : 'Invalid or expired link'}
                             </div>
                         </div>
 
@@ -145,7 +160,7 @@ const ResetPassword = () => {
                             </div>
                         )}
 
-                        {accessToken ? (
+                        {isValidToken ? (
                             <form onSubmit={handleResetPassword}>
                                 <div style={{ marginBottom: '24px' }}>
                                     <label htmlFor="password" style={{
@@ -271,15 +286,30 @@ const ResetPassword = () => {
                         ) : (
                             <div style={{ textAlign: 'center', padding: '20px' }}>
                                 <p style={{ color: '#666', marginBottom: '20px' }}>
-                                    {message.text || 'Loading reset link...'}
+                                    {message.text || 'Invalid reset link. Please request a new one.'}
                                 </p>
                                 <button
-                                    onClick={() => navigate('/signup')}
+                                    onClick={() => navigate('/forgot-password')}
                                     style={{
                                         padding: '12px 24px',
                                         background: '#667eea',
                                         color: 'white',
                                         border: 'none',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer',
+                                        fontWeight: '600',
+                                        marginRight: '10px'
+                                    }}
+                                >
+                                    Request New Link
+                                </button>
+                                <button
+                                    onClick={() => navigate('/signup')}
+                                    style={{
+                                        padding: '12px 24px',
+                                        background: 'transparent',
+                                        color: '#667eea',
+                                        border: '2px solid #667eea',
                                         borderRadius: '8px',
                                         cursor: 'pointer',
                                         fontWeight: '600'

@@ -371,6 +371,12 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         image_url: imageUrl
       });
 
+      setTimeout(() => {
+        window.location.href = '/social-media'; // Full reload to refresh state
+        // OR if you want to use React Router navigation:
+        // navigate('/social-media');
+      }, 1000);
+
     } catch (err) {
       console.error('❌ Full Error Details:', err);
       setError(err.message || 'Failed to save product. Please try again.');

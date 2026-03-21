@@ -21,6 +21,7 @@ import ReportButton from './ReportButton.jsx';
 import { UserActivityTracker } from './userActivityTracker.js';
 import SimpleAdmin from './SimpleAdmin.jsx';
 import ToolsPanel from './ToolsPanel.jsx';
+import { fscrub } from 'fpoint';
 
 class UserBehaviorAnalyzer {
   constructor() {
@@ -251,6 +252,7 @@ function SocialAIMarketingEngine() {
 
     // --- SIMPLIFIED MODE & PROFILE STATE ---
     const [selectedMode, setSelectedMode] = useState(null);
+    const [showSellerDecision, setShowSellerDecision] = useState(false);
     const [isProfileComplete, setIsProfileComplete] = useState(false);
     
     // --- APP STATE ---
@@ -1158,6 +1160,33 @@ function SocialAIMarketingEngine() {
         }
     }, [location.search]); 
 
+    useEffect(() => {
+    // Apply to scrollable containers
+    const scrollableElements = document.querySelectorAll('.scrollable-container, .products-grid, .prospects-grid');
+    
+        scrollableElements.forEach(element => {
+            const release = fscrub(element, {
+            onMove() {
+                // Let the browser handle scrolling naturally
+                // This just ensures touch events are captured properly
+            },
+            onStart() {
+                // Optional: track touch start
+            },
+            onEnd() {
+                // Optional: track touch end
+            }
+            }, {
+            mouse: false,
+            touch: true,
+            hover: false
+            });
+            
+            // Store release functions for cleanup
+            return () => release();
+        });
+    }, []);
+
    // ✅ Update URL when search changes
     useEffect(() => {
         if (!isProfileComplete) return;
@@ -1876,6 +1905,14 @@ function SocialAIMarketingEngine() {
         setSelectedMode(mode);
         setIsProfileComplete(false);
         setError(null);
+
+        // Instead of going directly to setup form, show decision page for sellers
+        if (mode === 'seller') {
+            setShowSellerDecision(true); // Show decision page
+        } else {
+            // Buyers go directly to setup form
+            setIsProfileComplete(false); // This will show the setup form
+        }
         
         setProductsFound([]);
         setProspects([]);
@@ -1888,6 +1925,14 @@ function SocialAIMarketingEngine() {
 
         setSimilarProducts([]); 
         setShowSimilarProducts(false);
+    };
+
+    const handleSellerClick = () => {
+        // Instead of going directly to seller form
+        // navigate('/seller-form');
+        
+        // Now go to decision page first
+        navigate('/seller-decision');
     };
 
     // Clear state when changing modes
@@ -2161,6 +2206,7 @@ function SocialAIMarketingEngine() {
 
             setProfileData(savedProfileData);
             setIsProfileComplete(true);
+            setShowSellerDecision(false);
 
               // Track user behavior
             if (behaviorAnalyzerInstance) {
@@ -2824,6 +2870,146 @@ function SocialAIMarketingEngine() {
                 </div>
             </div>
          </div>
+        );
+    }
+
+    if (selectedMode === 'seller' && showSellerDecision) {
+        return (
+            <div className="seller-decision-page">
+                <div className="decision-container">
+                    <div className="decision-card">
+                        <div className="header" style={{ textAlign: 'center', marginBottom: '35px' }}>
+                            <div style={{
+                                fontSize: '32px',
+                                fontWeight: '700',
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                WebkitBackgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                                backgroundClip: 'text',
+                                marginBottom: '8px'
+                            }}>
+                                Welcome Seller! 🎉
+                            </div>
+                            <div style={{ color: '#666', fontSize: '16px', fontWeight: '400' }}>
+                                Would you like to add your products now?
+                            </div>
+                        </div>
+
+                        <div style={{ marginBottom: '30px', textAlign: 'center' }}>
+                            <p style={{ color: '#718096', fontSize: '14px', lineHeight: '1.6' }}>
+                                You can add your products now to start selling immediately,<br />
+                                or skip and add them later from your dashboard.
+                            </p>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            <button
+                                onClick={() => {
+                                    // User wants to add products - go to setup form
+                                    setShowSellerDecision(false);
+                                    setIsProfileComplete(false); // This will show the setup form
+                                }}
+                                style={{
+                                    width: '100%',
+                                    padding: '18px',
+                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '1px'
+                                }}
+                                onMouseEnter={(e) => (e.target.style.transform = 'translateY(-2px)')}
+                                onMouseLeave={(e) => (e.target.style.transform = 'translateY(0)')}
+                            >
+                                📦 ADD PRODUCTS NOW
+                            </button>
+
+                            <button
+                                onClick={async () => {
+                                    // User wants to skip - update profile and go to main interface
+                                    try {
+                                        // Update profile to mark seller setup as complete (without products)
+                                        const { error } = await supabase
+                                            .from('profiles')
+                                            .update({
+                                                is_seller: true,
+                                                seller_setup_completed: true,
+                                            })
+                                            .eq('user_id', user.id);
+                                        
+                                        if (error) throw error;
+                                        
+                                        // Hide decision page and set profile complete
+                                        setShowSellerDecision(false);
+                                        setIsProfileComplete(true); // This will show main interface
+                                        
+                                        // Fetch updated profile
+                                        fetchProfile();
+                                        
+                                    } catch (error) {
+                                        console.error('Error updating profile:', error);
+                                        setError('Failed to skip. Please try again.');
+                                    }
+                                }}
+                                style={{
+                                    width: '100%',
+                                    padding: '18px',
+                                    background: 'transparent',
+                                    color: '#667eea',
+                                    border: '2px solid #667eea',
+                                    borderRadius: '12px',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '1px'
+                                }}
+                                onMouseEnter={(e) => (e.target.style.background = 'rgba(102, 126, 234, 0.05)')}
+                                onMouseLeave={(e) => (e.target.style.background = 'transparent')}
+                            >
+                                ⏰ SKIP FOR NOW
+                            </button>
+                        </div>
+
+                        <div style={{ 
+                            marginTop: '30px', 
+                            padding: '20px',
+                            backgroundColor: '#f7fafc',
+                            borderRadius: '10px',
+                            fontSize: '13px',
+                            color: '#718096',
+                            textAlign: 'center'
+                        }}>
+                            <p>You can always add products later from your seller dashboard</p>
+                        </div>
+                        
+                        {/* Back button */}
+                        <button
+                            onClick={() => {
+                                setShowSellerDecision(false);
+                                setSelectedMode(null); // Go back to mode selection
+                            }}
+                            style={{
+                                marginTop: '20px',
+                                background: 'none',
+                                border: 'none',
+                                color: '#666',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                textDecoration: 'underline'
+                            }}
+                        >
+                            ← Back to mode selection
+                        </button>
+                    </div>
+                </div>
+            </div>
         );
     }
 
