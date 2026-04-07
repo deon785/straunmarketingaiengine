@@ -1,4 +1,4 @@
-// public/sw.js - MINIMALIST VERSION (BEST FOR YOUR CASE)
+// public/sw.js - FIXED VERSION
 const CACHE_NAME = 'straun-static-v1';
 
 // Only cache essential static files
@@ -31,10 +31,17 @@ self.addEventListener('activate', event => {
 
 // Fetch - network first, Vercel handles updates
 self.addEventListener('fetch', event => {
-  // Skip API calls
-  if (event.request.url.includes('/api/') || 
-      event.request.url.includes('/supabase/')) {
-    return;
+  const url = event.request.url;
+  
+  // CRITICAL FIX: Skip ALL WebSocket connections and Supabase realtime
+  if (url.startsWith('ws://') || 
+      url.startsWith('wss://') ||
+      url.includes('/realtime/') ||
+      url.includes('supabase.co') ||
+      url.includes('/api/') || 
+      url.includes('/supabase/')) {
+    console.log('[SW] Skipping WebSocket/Supabase:', url);
+    return; // Let the browser handle it directly
   }
   
   event.respondWith(
