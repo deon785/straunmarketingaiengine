@@ -1,5 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react'; // Added Suspense & lazy
-
+import React, { useState, useEffect, Suspense, lazy, useRef, useTransition } from 'react'; // Added useTransition
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './App.css';
 import { supabase } from './lib/supabase';
@@ -19,8 +18,8 @@ import { NavigationProvider } from './NavigationContext.jsx';
 import SellerDecision from './SellerDecision.jsx'; 
 
 import PushNotificationHandler from './PushNotificationHandler.jsx';
+
 // --- LAZY LOADED COMPONENTS ---
-// These only load when the user navigates to them
 const Auth = lazy(() => import('./signup'));
 const SocialAIMarketingEngine = lazy(() => import('./SocialAIMarketingEngine.jsx'));
 const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
@@ -32,36 +31,130 @@ const WishlistButton = lazy(() => import('./WishlistButton.jsx'));
 const SimpleAdmin = lazy(() => import('./SimpleAdmin'));
 const ResetPassword = lazy(() => import('./ResetPassword.jsx'));
 
+// ============ LOADING COMPONENTS ============
+const PageLoadingSpinner = () => (
+  <div style={{
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '50vh',
+    gap: '16px'
+  }}>
+    <div className="loading-spinner" style={{
+      width: '48px',
+      height: '48px',
+      border: '4px solid var(--border-color)',
+      borderTopColor: 'var(--primary-color)',
+      borderRadius: '50%',
+      animation: 'spin 1s linear infinite'
+    }} />
+    <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>Loading...</p>
+  </div>
+);
+
+const FullPageLoader = () => (
+  <div style={{
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'var(--light-bg)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+    gap: '20px'
+  }}>
+    <div className="loading-spinner" style={{
+      width: '60px',
+      height: '60px',
+      border: '5px solid var(--border-color)',
+      borderTopColor: 'var(--primary-color)',
+      borderRadius: '50%',
+      animation: 'spin 1s linear infinite'
+    }} />
+    <h3 style={{ color: 'var(--text-primary)' }}>Loading your experience...</h3>
+    <p style={{ color: 'var(--text-secondary)' }}>Please wait while we prepare everything</p>
+  </div>
+);
+
+const ButtonLoadingSpinner = () => (
+  <span style={{
+    display: 'inline-block',
+    width: '16px',
+    height: '16px',
+    border: '2px solid rgba(255,255,255,0.3)',
+    borderTopColor: 'white',
+    borderRadius: '50%',
+    animation: 'spin 0.8s linear infinite',
+    marginRight: '8px'
+  }} />
+);
+
+// ============ subscribeToPush Function ============
 async function subscribeToPush(userId) {
-  const registration = await navigator.serviceWorker.ready;
+  if (!userId) {
+    console.error("No userId provided for push subscription");
+    return;
+  }
   
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: import.meta.env.VITE_VAPID_PUBLIC_KEY
-  });
+  if (!('PushManager' in window)) {
+    console.log("Push notifications not supported");
+    return;
+  }
+  
+  let registration;
+  try {
+    registration = await navigator.serviceWorker.ready;
+    if (!registration) {
+      console.error("Service worker not ready");
+      return;
+    }
+  } catch (err) {
+    console.error("Service worker error:", err);
+    return;
+  }
+  
+  try {
+    let subscription = await registration.pushManager.getSubscription();
+    
+    if (!subscription) {
+      const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+      if (!vapidKey) {
+        console.error("VAPID key missing");
+        return;
+      }
+      
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidKey
+      });
+    }
+    
+    const { error } = await supabase
+      .from('push_subscriptions')
+      .upsert({ 
+        user_id: userId,
+        subscription_json: subscription,
+        updated_at: new Date().toISOString()
+      });
 
-  const { error } = await supabase
-    .from('push_subscriptions')
-    .upsert({ 
-      id: userId, // Use the passed ID
-      subscription_json: subscription 
-    });
-
-  if (!error) console.log("Subscribed successfully!");
+    if (error) {
+      console.error("Error saving push subscription:", error);
+    } else {
+      console.log("✅ Push subscription saved");
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.log("Push notifications not supported");
+    } else {
+      console.error("Push subscription error:", error);
+    }
+  }
 }
-
-const TestAdmin = () => {
-  console.log('TestAdmin loaded');
-  return (
-    <div style={{ padding: '40px' }}>
-      <h1>Test Admin - No Auth</h1>
-      <p>If you see this, routing works.</p>
-      <button onClick={() => window.location.href = '/admin-test'}>
-        Try Admin Dashboard
-      </button>
-    </div>
-  );
-};
 
 // AnalyticsTracker component
 const AnalyticsTracker = () => {
@@ -76,43 +169,80 @@ const AnalyticsTracker = () => {
 
 const NotificationWatcher = () => {
   const { user } = useAuth();
-  
+  const [subscriptionAttempted, setSubscriptionAttempted] = useState(false);
+  const channelRef = useRef(null);
+  const pushAttempted = useRef(false);
+
+  useEffect(() => {
+    if (!user || subscriptionAttempted || pushAttempted.current) return;
+    
+    pushAttempted.current = true;
+    
+    const initPushSubscription = async () => {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        if (registration) {
+          await subscribeToPush(user.id);
+          console.log("✅ Push subscription completed");
+          setSubscriptionAttempted(true);
+        }
+      } catch (err) {
+        console.error("Push subscription failed:", err);
+        setSubscriptionAttempted(true);
+      }
+    };
+    
+    initPushSubscription();
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
 
-    // Trigger the Push Subscription when the user logs in
-    subscribeToPush().catch(err => console.error("Push subscription failed:", err));
-    
-    // Track notification access
-    if (userMonitor) {
-      userMonitor.logAction(user.id, 'notifications_view');
-    }
-    
-    const listen = async () => {
+    let isSubscribed = true;
+
+    const setupNotificationListener = async () => {
+      if (channelRef.current) {
+        await supabase.removeChannel(channelRef.current);
+      }
+
       const channel = supabase
-        .channel('schema-db-changes')
+        .channel(`notifications-${user.id}`)
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+          { 
+            event: 'INSERT', 
+            schema: 'public', 
+            table: 'notifications', 
+            filter: `user_id=eq.${user.id}` 
+          },
           (payload) => {
+            if (!isSubscribed) return;
+            
             const audio = new Audio('https://cdn.pixabay.com/audio/2025/01/24/audio_9e338872f2.mp3');
-            audio.play().catch(() => console.log("Sound will play after next user tap."));
+            audio.play().catch(() => console.log("Audio play failed"));
+            
             toast.success(payload.new.message, {
               icon: '🔔',
-              style: {
-                borderRadius: '8px',
-                background: '#333',
-                color: '#000000ff',
-              },
+              duration: 5000,
             });
           }
         )
         .subscribe();
 
-      return () => supabase.removeChannel(channel);
+      if (isSubscribed) {
+        channelRef.current = channel;
+      }
     };
-    
-    listen();
+
+    setupNotificationListener();
+
+    return () => {
+      isSubscribed = false;
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   }, [user]);
 
   return <Toaster position="top-right" />;
@@ -138,30 +268,82 @@ const OfflineBanner = () => {
 
   return (
     <div style={{
-      backgroundColor: '#b91c1c',
+      backgroundColor: '#dc2626',
       color: 'white',
-      padding: '10px',
+      padding: '8px',
       textAlign: 'center',
       position: 'fixed',
-      top: '4rem', // Start below the fixed header
+      top: '60px',
+      left: 0,
+      right: 0,
       width: '100%',
       zIndex: 999,
-      fontSize: '14px',
-      fontWeight: 'bold'
+      fontSize: '12px',
+      fontWeight: '500'
     }}>
-      📡 You are currently offline. Some features like AI generation and saving won't work.
+      📡 You are offline. Some features may be unavailable.
     </div>
   );
 };
 
-// ============ ProtectedRoute ============
+// ============ ProtectedRoute with Loading State ============
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
 
-  if (loading) return <div>Loading...</div>;
-  if (!user) return <Navigate to="/" replace />;
+  if (loading) return <FullPageLoader />;
+  
+  if (!user && location.pathname !== '/') {
+    return <Navigate to="/" replace />;
+  }
   
   return children;
+};
+
+const UpdateNotification = () => {
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    const handleUpdate = () => setUpdateAvailable(true);
+    window.addEventListener('app-update-ready', handleUpdate);
+    
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(registration => {
+        registration.addEventListener('updatefound', () => {
+          console.log('Update found');
+          setUpdateAvailable(true);
+        });
+      });
+    }
+    
+    return () => window.removeEventListener('app-update-ready', handleUpdate);
+  }, []);
+
+  if (!updateAvailable) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: '80px',
+      left: '20px',
+      right: '20px',
+      background: '#667eea',
+      color: 'white',
+      padding: '12px 20px',
+      borderRadius: '12px',
+      textAlign: 'center',
+      zIndex: 10000,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      cursor: 'pointer',
+      animation: 'slideUp 0.3s ease'
+    }}
+    onClick={() => {
+      setUpdateAvailable(false);
+      window.location.reload();
+    }}>
+      🔄 New version available! Click here to update.
+    </div>
+  );
 };
 
 // ============ AdminRoute ============
@@ -171,26 +353,46 @@ const AdminRoute = ({ children }) => {
   const [adminLoading, setAdminLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
+    
     const checkAdmin = async () => {
       if (!user) {
-        setAdminLoading(false);
+        if (isMounted) setAdminLoading(false);
         return;
       }
       
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-      
-      if (data?.role === 'admin') setIsAdmin(true);
-      setAdminLoading(false);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        
+        if (isMounted) {
+          if (data?.role === 'admin') {
+            setIsAdmin(true);
+          } else {
+            setIsAdmin(false);
+          }
+          setAdminLoading(false);
+        }
+      } catch (error) {
+        console.error("Admin check error:", error);
+        if (isMounted) {
+          setIsAdmin(false);
+          setAdminLoading(false);
+        }
+      }
     };
     
     checkAdmin();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
-  if (loading || adminLoading) return <div>Checking Permissions...</div>;
+  if (loading || adminLoading) return <FullPageLoader />;
   if (!user) return <Navigate to="/" replace />;
   if (!isAdmin) return <Navigate to="/app" replace />;
   
@@ -200,6 +402,7 @@ const AdminRoute = ({ children }) => {
 const FeedbackButton = () => {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { user } = useAuth();
 
   const handleSendFeedback = async () => {
@@ -208,6 +411,8 @@ const FeedbackButton = () => {
       return;
     }
 
+    setIsSubmitting(true);
+    
     try {
       const { error } = await supabase
         .from('feedback')
@@ -224,6 +429,8 @@ const FeedbackButton = () => {
     } catch (err) {
       console.error('Error submitting feedback:', err);
       alert('Sorry, there was an error submitting feedback.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -298,16 +505,22 @@ const FeedbackButton = () => {
             <div style={{ display: 'flex', gap: '10px' }}>
               <button 
                 onClick={handleSendFeedback}
+                disabled={isSubmitting}
                 style={{
                   background: '#007bff',
                   color: 'white',
                   border: 'none',
                   padding: '8px 16px',
                   borderRadius: '4px',
-                  cursor: 'pointer'
+                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                  opacity: isSubmitting ? 0.7 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}
               >
-                Send Feedback
+                {isSubmitting && <ButtonLoadingSpinner />}
+                {isSubmitting ? 'Sending...' : 'Send Feedback'}
               </button>
               <button 
                 onClick={() => setShowFeedback(false)}
@@ -342,7 +555,8 @@ const AppHeader = () => {
         justifyContent: 'space-between',
         height: '100%',
         padding: '0 1rem',
-        color: 'white'
+        color: 'white',
+        background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <span style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>
@@ -368,10 +582,22 @@ const AppHeader = () => {
 
 // ============ MAIN APP ============
 function App() {
-  // Initialize Sentry or other services
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+
   useEffect(() => {
+    // Simulate initial app loading
+    const timer = setTimeout(() => {
+      setIsInitialLoading(false);
+    }, 500);
+    
     console.log('App initialized');
+    
+    return () => clearTimeout(timer);
   }, []);
+
+  if (isInitialLoading) {
+    return <FullPageLoader />;
+  }
 
   return (
     <Sentry.ErrorBoundary
@@ -387,36 +613,24 @@ function App() {
                 <AnalyticsTracker />
                 <NotificationWatcher />
                 
-                {/* Fixed Header */}
                 <AppHeader />
                 
                 <div className="app">
                   <OfflineBanner />
                   
-                  {/* Main Content Area with proper spacing */}
                   <main>
-                    {/* The Suspense component handles the "Wait" while your 
-                      subsequent pages (Mode Selection, Search, Products) load.
-                    */}
-                    <Suspense fallback={
-                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-                        <div className="loading-spinner">Loading your experience...</div>
-                      </div>
-                    }>
+                    {/* Main Suspense for route-based lazy loading */}
+                    <Suspense fallback={<PageLoadingSpinner />}>
                       <Routes>
-                        {/* Stage 1: Auth */}
                         <Route path="/" element={<Auth />} />
-
                         <Route path="/seller-decision" element={<SellerDecision />} />
                         
-                        {/* Stage 2 & 3: Mode Selection & Engine */}
                         <Route path="/app" element={
                           <ProtectedRoute>
                             <SocialAIMarketingEngine />
                           </ProtectedRoute>
                         } />
                         
-                        {/* Stage 4: Notifications/Other */}
                         <Route path="/notifications" element={
                           <ProtectedRoute>
                             <NotificationsList />
@@ -428,7 +642,7 @@ function App() {
                         <Route path="/help" element={<HelpCenter />} />
                         <Route path="/wishlist" element={<WishlistButton />} />
                         <Route path="/reset-password" element={<ResetPassword />} />
-                        <Route path="/reset-password#*" element={<ResetPassword />} />
+                        <Route path="/reset-password#/*" element={<ResetPassword />} />
                         <Route path="/admin" element={<SimpleAdmin />} />
                         
                         <Route path="*" element={<Navigate to="/" replace />} />
@@ -439,6 +653,7 @@ function App() {
                   <CookieBanner /> 
                   <FeedbackButton />
                   <PushNotificationHandler />
+                  {/* <UpdateNotification /> */}
                 </div>
               </PullToRefreshWrapper>
             </RefreshPersistenceWrapper>
@@ -446,9 +661,10 @@ function App() {
         </Router>
       </AuthProvider>
     </Sentry.ErrorBoundary>
-    
-
   );
 }
 
 export default App;
+
+// Export loading components for use in other files
+export { PageLoadingSpinner, FullPageLoader, ButtonLoadingSpinner };

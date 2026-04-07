@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
       // 1. Get user's push subscription from database
       try {
         const { data: subscription, error: subError } = await supabase
-          .from('user_push_subscriptions')
+          .from('push_subscriptions')
           .select('subscription')
           .eq('user_id', notification.user_id)
           .single();
@@ -123,6 +123,7 @@ Deno.serve(async (req) => {
         const pushPayload = {
           title: 'StraunAI Notification',
           body: notification.message || 'You have a new notification',
+          action: 'subscribe',
           icon: '/pwa-192x192.png',
           badge: '/favicon.ico',
           data: {
@@ -188,6 +189,181 @@ Deno.serve(async (req) => {
           { 
             status: 200, 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        );
+      }
+    }
+
+    // ==================== HANDLE SUBSCRIBE REQUEST ====================
+    if (body.action === 'subscribe') {
+      console.log('📝 Processing subscribe request');
+      
+      const { subscription, userId, userAgent } = body;
+      
+      // Validate required fields
+      if (!subscription || !userId) {
+        console.error('❌ Missing required fields:', { hasSubscription: !!subscription, hasUserId: !!userId });
+        return new Response(
+          JSON.stringify({ 
+            error: 'Missing required fields', 
+            required: ['subscription', 'userId'],
+            received: { subscription: !!subscription, userId: !!userId }
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      
+      try {
+        // Check if subscription already exists
+        const { data: existing, error: checkError } = await supabase
+          .from('push_subscriptions')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        
+        if (checkError) {
+          console.error('Error checking existing subscription:', checkError);
+        }
+        
+        let result;
+        if (existing) {
+          // Update existing subscription
+          console.log('📝 Updating existing subscription for user:', userId);
+          result = await supabase
+            .from('push_subscriptions')
+            .update({
+              subscription: subscription,
+              user_agent: userAgent || 'Unknown',
+              updated_at: new Date().toISOString(),
+              is_active: true
+            })
+            .eq('user_id', userId);
+        } else {
+          // Insert new subscription
+          console.log('📝 Creating new subscription for user:', userId);
+          result = await supabase
+            .from('push_subscriptions')
+            .insert({
+              user_id: userId,
+              subscription: subscription,
+              user_agent: userAgent || 'Unknown',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              is_active: true
+            });
+        }
+        
+        if (result.error) {
+          console.error('❌ Database error:', result.error);
+          throw result.error;
+        }
+        
+        console.log('✅ Subscription saved successfully for user:', userId);
+        
+        // Send a welcome push notification immediately
+        try {
+          const welcomePayload = {
+            title: '🎉 Notifications Enabled!',
+            body: 'You will now receive real-time updates about matches, messages, and deals!',
+            icon: '/pwa-192x192.png',
+            badge: '/favicon.ico',
+            data: {
+              url: '/',
+              type: 'welcome',
+              timestamp: new Date().toISOString()
+            }
+          };
+          
+          await webpush.sendNotification(subscription, JSON.stringify(welcomePayload));
+          console.log('✅ Welcome notification sent');
+        } catch (welcomeError) {
+          console.log('⚠️ Could not send welcome notification:', welcomeError.message);
+          // Don't fail the subscription if welcome notification fails
+        }
+        
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            message: 'Successfully subscribed to push notifications',
+            userId: userId,
+            isNew: !existing,
+            timestamp: new Date().toISOString()
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+        
+      } catch (error) {
+        console.error('❌ Error in subscribe handler:', error);
+        
+        return new Response(
+          JSON.stringify({ 
+            error: 'Failed to save subscription',
+            message: error.message,
+            timestamp: new Date().toISOString()
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+    }
+
+    // ==================== HANDLE UNSUBSCRIBE REQUEST (Optional) ====================
+    if (body.action === 'unsubscribe') {
+      console.log('📝 Processing unsubscribe request');
+      
+      const { userId } = body;
+      
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing userId' }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      
+      try {
+        const { error } = await supabase
+          .from('push_subscriptions')
+          .update({ is_active: false })
+          .eq('user_id', userId);
+        
+        if (error) throw error;
+        
+        console.log('✅ User unsubscribed:', userId);
+        
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            message: 'Successfully unsubscribed from push notifications',
+            timestamp: new Date().toISOString()
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+        
+      } catch (error) {
+        console.error('❌ Error unsubscribing:', error);
+        
+        return new Response(
+          JSON.stringify({ 
+            error: 'Failed to unsubscribe',
+            message: error.message 
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           }
         );
       }

@@ -1,4 +1,4 @@
-// UserSettings.jsx
+// UserSettings.jsx - Dark Theme Version
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -41,7 +41,6 @@ const UserSettings = ({ user }) => {
       setError(null);
       setSuccess(null);
       
-      // 1. Get ALL user data from ALL tables
       const [
         { data: profileData, error: profileError },
         { data: productData, error: productError },
@@ -54,14 +53,11 @@ const UserSettings = ({ user }) => {
         supabase.from('feedback').select('*').eq('user_id', user.id)
       ]);
 
-      // Check for errors
       const errors = [profileError, productError, searchError, feedbackError].filter(e => e);
       if (errors.length > 0) {
         console.error('Export errors:', errors);
-        // Continue anyway with available data
       }
 
-      // 2. Combine all data
       const allUserData = {
         exported_at: new Date().toISOString(),
         user_id: user.id,
@@ -80,7 +76,6 @@ const UserSettings = ({ user }) => {
         }
       };
 
-      // 3. Create downloadable file
       const blob = new Blob([JSON.stringify(allUserData, null, 2)], {
         type: 'application/json'
       });
@@ -123,7 +118,6 @@ const UserSettings = ({ user }) => {
       
       console.log('Starting account deletion for user:', user.id);
       
-      // 1. Delete from ALL database tables (in transaction order)
       const deletionPromises = [
         supabase.from('feedback').delete().eq('user_id', user.id),
         supabase.from('searches').delete().or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`),
@@ -133,37 +127,36 @@ const UserSettings = ({ user }) => {
       
       const results = await Promise.all(deletionPromises);
       
-      // Check for errors
       const errors = results.filter(result => result.error).map(r => r.error);
       if (errors.length > 0) {
         console.error('Database deletion errors:', errors);
-        // Continue anyway - try to delete auth user
       }
       
-      // 2. Try to delete auth user via Edge Function first
+      // In handleDeleteAccount function, add more detailed logging
       try {
-        const { error: functionError } = await supabase.functions.invoke('delete-user', {
-          body: { userId: user.id }
-        });
-        
-        if (functionError) {
-          console.warn('Edge Function deletion warning:', functionError);
-        } else {
-          console.log('Auth user deleted via Edge Function');
-        }
+          console.log('Attempting to delete auth user via Edge Function...');
+          const { data: functionData, error: functionError } = await supabase.functions.invoke('delete-user', {
+              body: { userId: user.id }
+          });
+          
+          if (functionError) {
+              console.error('Edge Function error details:', functionError);
+              setError(`Auth deletion failed: ${functionError.message}. Please contact support.`);
+              return; // Stop here if auth deletion fails
+          }
+          
+          console.log('Auth user deleted successfully:', functionData);
+          
       } catch (funcError) {
-        console.warn('Edge Function error:', funcError);
-        // Fallback to admin API if function fails
+          console.error('Edge Function exception:', funcError);
+          setError(`Failed to delete auth account: ${funcError.message}`);
+          return;
       }
-      
-      // 3. Sign out and clear local data
       await supabase.auth.signOut();
       localStorage.clear();
       
-      // 4. Show success message
       setSuccess('✅ Account deleted successfully! Redirecting...');
       
-      // 5. Redirect to home page after delay
       setTimeout(() => {
         navigate('/', { replace: true });
         window.location.reload();
@@ -173,7 +166,6 @@ const UserSettings = ({ user }) => {
       console.error('Account deletion error:', err);
       setError(`❌ ${err.message || 'Failed to delete account. Please contact support: support@straun.ai'}`);
       
-      // If deletion partially succeeded, sign out anyway
       try {
         await supabase.auth.signOut();
         localStorage.clear();
@@ -194,7 +186,9 @@ const UserSettings = ({ user }) => {
     <div className="privacy-settings" style={{
       maxWidth: '800px',
       margin: '0 auto',
-      padding: '30px'
+      padding: '30px',
+      background: '#0a0a0a',  // Dark background for entire page
+      minHeight: '100vh'
     }}>
       {/* Error/Success messages at the TOP */}
       {(error || success) && (
@@ -209,16 +203,16 @@ const UserSettings = ({ user }) => {
         }}>
           {error && (
             <div style={{
-              backgroundColor: '#fee',
-              border: '1px solid #fcc',
-              color: '#c33',
+              backgroundColor: '#2a1212',
+              border: '1px solid #5c1a1a',
+              color: '#ff8a8a',
               padding: '15px 20px',
               borderRadius: '8px',
               marginBottom: '10px',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
             }}>
               <FontAwesomeIcon icon={faExclamationTriangle} />
               <div style={{ flex: 1 }}>
@@ -229,7 +223,7 @@ const UserSettings = ({ user }) => {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#c33',
+                  color: '#ff8a8a',
                   cursor: 'pointer',
                   fontSize: '16px'
                 }}
@@ -241,16 +235,16 @@ const UserSettings = ({ user }) => {
           
           {success && (
             <div style={{
-              backgroundColor: '#dfd',
-              border: '1px solid #ada',
-              color: '#373',
+              backgroundColor: '#0a2a1a',
+              border: '1px solid #1a5c2a',
+              color: '#8affaa',
               padding: '15px 20px',
               borderRadius: '8px',
               marginBottom: '10px',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
             }}>
               <FontAwesomeIcon icon={faCheckCircle} />
               <div style={{ flex: 1 }}>
@@ -261,7 +255,7 @@ const UserSettings = ({ user }) => {
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: '#373',
+                  color: '#8affaa',
                   cursor: 'pointer',
                   fontSize: '16px'
                 }}
@@ -276,7 +270,7 @@ const UserSettings = ({ user }) => {
       <h1 style={{
         fontSize: '32px',
         fontWeight: '700',
-        color: '#333',
+        color: '#ffffff',  // White text
         marginBottom: '30px',
         textAlign: 'center'
       }}>
@@ -284,15 +278,16 @@ const UserSettings = ({ user }) => {
       </h1>
 
       <div style={{
-        background: 'white',
+        background: '#1a1a1a',  // Dark card background
         borderRadius: '12px',
         padding: '30px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.08)'
+        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+        border: '1px solid #2a2a2a'
       }}>
         <h2 style={{
           fontSize: '24px',
           fontWeight: '600',
-          color: '#444',
+          color: '#e0e0e0',  // Light gray text
           marginBottom: '20px',
           display: 'flex',
           alignItems: 'center',
@@ -303,7 +298,7 @@ const UserSettings = ({ user }) => {
         </h2>
         
         <p style={{ 
-          color: '#666', 
+          color: '#b0b0b0',  // Light gray text
           marginBottom: '30px', 
           lineHeight: '1.6',
           fontSize: '16px'
@@ -314,22 +309,24 @@ const UserSettings = ({ user }) => {
         {/* Export Data Section */}
         <div style={{
           padding: '25px',
-          background: '#f8f9fa',
+          background: '#0f0f0f',  // Darker background
           borderRadius: '8px',
           marginBottom: '25px',
-          border: '1px solid #e9ecef'
+          border: '1px solid #2a2a2a'
         }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: '15px'
+            marginBottom: '15px',
+            flexWrap: 'wrap',
+            gap: '15px'
           }}>
             <div>
               <h3 style={{
                 fontSize: '18px',
                 fontWeight: '600',
-                color: '#333',
+                color: '#e0e0e0',  // Light gray text
                 marginBottom: '5px',
                 display: 'flex',
                 alignItems: 'center',
@@ -338,7 +335,7 @@ const UserSettings = ({ user }) => {
                 <FontAwesomeIcon icon={faDownload} style={{ color: '#667eea' }} />
                 Export My Data
               </h3>
-              <p style={{ color: '#666', fontSize: '14px' }}>
+              <p style={{ color: '#888888', fontSize: '14px' }}>  // Gray text
                 Get all your data in JSON format including profile, products, searches, and feedback.
               </p>
             </div>
@@ -347,7 +344,7 @@ const UserSettings = ({ user }) => {
               disabled={exportLoading}
               style={{
                 padding: '12px 24px',
-                background: '#667eea',
+                background: '#4361ee',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
@@ -361,7 +358,7 @@ const UserSettings = ({ user }) => {
                 transition: 'all 0.3s ease'
               }}
               onMouseEnter={(e) => !exportLoading && (e.target.style.background = '#5a6fd8')}
-              onMouseLeave={(e) => !exportLoading && (e.target.style.background = '#667eea')}
+              onMouseLeave={(e) => !exportLoading && (e.target.style.background = '#4361ee')}
             >
               {exportLoading ? (
                 <>
@@ -381,9 +378,9 @@ const UserSettings = ({ user }) => {
         {/* Delete Account Section */}
         <div style={{
           padding: '25px',
-          background: '#fff5f5',
+          background: '#1a0a0a',  // Dark red-tinted background
           borderRadius: '8px',
-          border: '1px solid #fed7d7'
+          border: '1px solid #5c1a1a'
         }}>
           <div style={{
             display: 'flex',
@@ -397,7 +394,7 @@ const UserSettings = ({ user }) => {
               <h3 style={{
                 fontSize: '18px',
                 fontWeight: '600',
-                color: '#c53030',
+                color: '#ff6b6b',  // Light red text
                 marginBottom: '10px',
                 display: 'flex',
                 alignItems: 'center',
@@ -406,11 +403,11 @@ const UserSettings = ({ user }) => {
                 <FontAwesomeIcon icon={faTrash} />
                 Delete My Account
               </h3>
-              <p style={{ color: '#666', fontSize: '14px', marginBottom: '15px' }}>
+              <p style={{ color: '#b0b0b0', fontSize: '14px', marginBottom: '15px' }}>
                 Permanently remove all your data from our systems. This includes:
               </p>
               <ul style={{
-                color: '#666',
+                color: '#b0b0b0',
                 fontSize: '14px',
                 paddingLeft: '20px',
                 marginBottom: '15px'
@@ -422,14 +419,14 @@ const UserSettings = ({ user }) => {
                 <li>Your account credentials</li>
               </ul>
               <div style={{
-                backgroundColor: '#feebc8',
+                backgroundColor: '#2a1a0a',
                 borderLeft: '4px solid #dd6b20',
                 padding: '12px 15px',
                 borderRadius: '4px',
                 marginBottom: '15px'
               }}>
                 <p style={{
-                  color: '#744210',
+                  color: '#ffaa66',
                   fontSize: '14px',
                   fontWeight: '600',
                   margin: 0
@@ -443,7 +440,7 @@ const UserSettings = ({ user }) => {
               disabled={loading}
               style={{
                 padding: '12px 24px',
-                background: '#c53030',
+                background: '#dc2626',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
@@ -458,7 +455,7 @@ const UserSettings = ({ user }) => {
                 minWidth: '150px'
               }}
               onMouseEnter={(e) => !loading && (e.target.style.background = '#b91c1c')}
-              onMouseLeave={(e) => !loading && (e.target.style.background = '#c53030')}
+              onMouseLeave={(e) => !loading && (e.target.style.background = '#dc2626')}
             >
               <FontAwesomeIcon icon={faTrash} />
               Delete Account
@@ -467,7 +464,7 @@ const UserSettings = ({ user }) => {
         </div>
       </div>
 
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal - Dark Theme */}
       {showConfirmModal && (
         <div style={{
           position: 'fixed',
@@ -475,7 +472,7 @@ const UserSettings = ({ user }) => {
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -483,17 +480,18 @@ const UserSettings = ({ user }) => {
           padding: '20px'
         }}>
           <div style={{
-            background: 'white',
+            background: '#1a1a1a',
             borderRadius: '12px',
             padding: '30px',
             maxWidth: '500px',
             width: '100%',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+            boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+            border: '1px solid #2a2a2a'
           }}>
             <h3 style={{
               fontSize: '22px',
               fontWeight: '600',
-              color: '#c53030',
+              color: '#ff6b6b',
               marginBottom: '20px',
               display: 'flex',
               alignItems: 'center',
@@ -504,17 +502,17 @@ const UserSettings = ({ user }) => {
             </h3>
             
             <div style={{
-              backgroundColor: '#fff5f5',
-              border: '1px solid #fed7d7',
+              backgroundColor: '#2a1212',
+              border: '1px solid #5c1a1a',
               borderRadius: '8px',
               padding: '20px',
               marginBottom: '25px'
             }}>
-              <p style={{ color: '#744210', marginBottom: '15px', fontWeight: '600' }}>
+              <p style={{ color: '#ffaa66', marginBottom: '15px', fontWeight: '600' }}>
                 This will permanently delete ALL your data including:
               </p>
               <ul style={{
-                color: '#744210',
+                color: '#ffaa66',
                 paddingLeft: '20px',
                 marginBottom: '15px'
               }}>
@@ -524,7 +522,7 @@ const UserSettings = ({ user }) => {
                 <li>Your feedback submissions</li>
                 <li>Your account credentials</li>
               </ul>
-              <p style={{ color: '#c53030', fontWeight: '600' }}>
+              <p style={{ color: '#ff6b6b', fontWeight: '600' }}>
                 ⚠️ This action cannot be undone!
               </p>
             </div>
@@ -532,11 +530,11 @@ const UserSettings = ({ user }) => {
             <div style={{ marginBottom: '25px' }}>
               <label style={{
                 display: 'block',
-                color: '#666',
+                color: '#e0e0e0',
                 marginBottom: '10px',
                 fontWeight: '500'
               }}>
-                Type <strong style={{ color: '#c53030' }}>DELETE</strong> to confirm:
+                Type <strong style={{ color: '#ff6b6b' }}>DELETE</strong> to confirm:
               </label>
               <input
                 type="text"
@@ -545,9 +543,11 @@ const UserSettings = ({ user }) => {
                 style={{
                   width: '100%',
                   padding: '12px 15px',
-                  border: '2px solid #e2e8f0',
+                  background: '#0a0a0a',
+                  border: '2px solid #2a2a2a',
                   borderRadius: '6px',
                   fontSize: '16px',
+                  color: '#ffffff',
                   transition: 'all 0.3s ease'
                 }}
                 placeholder="Type DELETE here"
@@ -568,8 +568,8 @@ const UserSettings = ({ user }) => {
                 disabled={isConfirming}
                 style={{
                   padding: '12px 24px',
-                  background: '#e2e8f0',
-                  color: '#4a5568',
+                  background: '#2a2a2a',
+                  color: '#e0e0e0',
                   border: 'none',
                   borderRadius: '6px',
                   cursor: isConfirming ? 'not-allowed' : 'pointer',
@@ -585,7 +585,7 @@ const UserSettings = ({ user }) => {
                 disabled={isConfirming || confirmText !== 'DELETE'}
                 style={{
                   padding: '12px 24px',
-                  background: confirmText === 'DELETE' ? '#c53030' : '#cbd5e0',
+                  background: confirmText === 'DELETE' ? '#dc2626' : '#2a2a2a',
                   color: 'white',
                   border: 'none',
                   borderRadius: '6px',
@@ -595,7 +595,7 @@ const UserSettings = ({ user }) => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  opacity: (isConfirming || confirmText !== 'DELETE') ? 0.7 : 1,
+                  opacity: (isConfirming || confirmText !== 'DELETE') ? 0.5 : 1,
                   transition: 'all 0.3s ease'
                 }}
               >

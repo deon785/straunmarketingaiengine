@@ -64,6 +64,54 @@
   </head>
   <body>
     <div id="root"></div>
+    
+    <!-- ✅ FIXED SERVICE WORKER REGISTRATION (NO AUTO-RELOAD LOOP) -->
+  <!-- REPLACE the entire service worker script with this SIMPLE version -->
+<script>
+  // SIMPLE Service Worker - NO AUTO-RELOADS
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function() {
+      navigator.serviceWorker.register('/sw.js')
+        .then(function(registration) {
+          console.log('✅ Service Worker registered');
+          
+          // DO NOT automatically check for updates
+          // DO NOT reload on controllerchange
+          // Let the user control when to update
+          
+          // Optional: Check for updates only when user navigates to settings
+          window.checkForUpdates = function() {
+            registration.update().then(() => {
+              console.log('Manual update check completed');
+            });
+          };
+        })
+        .catch(function(error) {
+          console.log('❌ Service Worker registration failed:', error);
+        });
+    });
+  }
+</script>
+
+  <!-- ✅ FIXED OFFLINE STATUS (no toast errors if function doesn't exist) -->
+  <script>
+    // Safe offline/online status without errors
+    window.addEventListener('online', function() {
+      console.log('📡 App is online');
+      // Safely show notification if function exists
+      if (window.showToastNotification && typeof window.showToastNotification === 'function') {
+        window.showToastNotification('✅ Back online!');
+      }
+    });
+    
+    window.addEventListener('offline', function() {
+      console.log('📡 App is offline');
+      if (window.showToastNotification && typeof window.showToastNotification === 'function') {
+        window.showToastNotification('⚠️ You are offline. Some features may be limited.');
+      }
+    });
+  </script>
+    
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

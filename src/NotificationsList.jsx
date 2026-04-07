@@ -4,11 +4,11 @@ import { supabase } from './lib/supabase';
 const NotificationsList = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState(null); // For expanded view on mobile
 
   // Function to send push notification
   const sendPushNotification = async (notification) => {
     try {
-      // Get user's push subscription from Supabase
       const { data: subscriptions, error } = await supabase
         .from('push_subscriptions')
         .select('subscription')
@@ -19,8 +19,6 @@ const NotificationsList = () => {
         return;
       }
       
-      // Send push notification to each subscription
-      // TODO: Create this backend endpoint
       for (const sub of subscriptions) {
         await fetch('/api/send-push', {
           method: 'POST',
@@ -42,7 +40,6 @@ const NotificationsList = () => {
   useEffect(() => {
     fetchNotifications();
 
-    // Setup Supabase real-time channel
     const channel = supabase
       .channel('notifications_changes')
       .on(
@@ -58,7 +55,6 @@ const NotificationsList = () => {
             setNotifications(prev => [payload.new, ...prev]);
             setLoading(false);
             
-            // Send push notification for unread notifications
             if (payload.new.status === 'unread') {
               sendPushNotification(payload.new);
             }
@@ -78,7 +74,6 @@ const NotificationsList = () => {
       )
       .subscribe();
 
-    // Pull-to-refresh listener
     const handlePullToRefresh = () => {
       console.log('🔄 Pull-to-refresh detected in NotificationsList');
       fetchNotifications();
@@ -126,231 +121,398 @@ const NotificationsList = () => {
 
   const unreadCount = notifications.filter(n => n.status === 'unread').length;
 
-  if (loading) return <p style={{ color: 'white', textAlign: 'center' }}>Loading...</p>;
+  if (loading) return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '400px',
+      color: '#666'
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
+        <p>Loading notifications...</p>
+      </div>
+    </div>
+  );
 
   return (
-    <div style={{ padding: '20px', color: 'white', maxWidth: '500px', margin: '0 auto' }}>
-      {/* UPDATED HEADER WITH UNREAD COUNT AND BUTTONS */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center',
-        borderBottom: '1px solid #444', 
-        paddingBottom: '10px',
-        marginBottom: '20px',
-        flexWrap: 'wrap',
-        gap: '10px'
+    <div style={{
+      padding: '30px 20px',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      minHeight: '100vh'
+    }}>
+      {/* MAIN CONTAINER - MUCH LARGER AND RESPONSIVE */}
+      <div style={{
+        maxWidth: '1200px',  // CHANGED: from 500px to 1200px (more than double!)
+        margin: '0 auto',
+        background: '#1a1a2e',
+        borderRadius: '20px',
+        overflow: 'hidden',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
       }}>
-        <h3 style={{ margin: 0 }}>
-          📥 Buyer Requests 
-          {unreadCount > 0 && (
-            <span style={{
-              backgroundColor: '#ff4757',
-              color: 'white',
-              borderRadius: '50%',
-              padding: '2px 8px',
-              fontSize: '12px',
-              marginLeft: '8px',
-              fontWeight: 'bold'
-            }}>
-              {unreadCount} new
-            </span>
-          )}
-        </h3>
         
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {unreadCount > 0 && (
-            <button 
-              onClick={markAllAsRead}
-              style={{
-                background: '#4361ee',
+        {/* HEADER SECTION - ENLARGED */}
+        <div style={{
+          background: 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)',
+          padding: '25px 30px',
+          borderBottom: '2px solid #e94560'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '20px'
+          }}>
+            <div>
+              <h2 style={{
+                margin: 0,
                 color: 'white',
-                border: 'none',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: '28px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '5px'
-              }}
-            >
-              <span>✓</span> Mark All Read
-            </button>
-          )}
-          <button 
-            onClick={fetchNotifications}
-            style={{
-              background: '#333',
-              color: 'white',
-              border: 'none',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <span>🔄</span> Refresh
-          </button>
-        </div>
-      </div>
-      
-      {notifications.length === 0 ? (
-        <div style={{ 
-          textAlign: 'center', 
-          padding: '40px 20px',
-          color: '#888'
-        }}>
-          <div style={{ fontSize: '48px', marginBottom: '10px' }}>
-            📭
-          </div>
-          <h4 style={{ color: '#ccc', marginBottom: '10px' }}>
-            No buyer requests yet
-          </h4>
-          <p>When buyers show interest in your products, you'll see notifications here.</p>
-        </div>
-      ) : (
-        notifications.map((n) => (
-          <div 
-            key={n.id} 
-            onClick={() => markAsRead(n.id)}
-            style={{ 
-              background: '#222', 
-              padding: '15px', 
-              borderRadius: '12px', 
-              marginBottom: '15px',
-              borderLeft: n.status === 'unread' ? '5px solid #25D366' : '5px solid #444',
-              cursor: 'pointer',
-              position: 'relative',
-              transition: 'all 0.2s ease',
-              ':hover': {
-                transform: 'translateY(-2px)',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-              }
-            }}
-          >
-            {/* 1. Header: Message & Unread Dot */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <p style={{ 
-                margin: 0, 
-                fontWeight: n.status === 'unread' ? 'bold' : 'normal', 
-                flex: 1,
-                color: n.status === 'unread' ? '#fff' : '#ccc'
+                gap: '12px'
               }}>
-                {n.message}
+                <span style={{ fontSize: '32px' }}>🔔</span>
+                Buyer Requests
+                {unreadCount > 0 && (
+                  <span style={{
+                    background: '#e94560',
+                    color: 'white',
+                    borderRadius: '30px',
+                    padding: '5px 15px',
+                    fontSize: '16px',
+                    fontWeight: 'bold'
+                  }}>
+                    {unreadCount} New
+                  </span>
+                )}
+              </h2>
+              <p style={{ margin: '8px 0 0 0', color: '#a0a0a0', fontSize: '14px' }}>
+                Customer inquiries and purchase requests
               </p>
-              {n.status === 'unread' && (
-                <span style={{ 
-                  backgroundColor: '#25D366', 
-                  width: '10px', 
-                  height: '10px', 
-                  borderRadius: '50%', 
-                  marginLeft: '10px',
-                  flexShrink: 0
-                }}></span>
-              )}
             </div>
-
-            {/* 2. Middle: Product Image & Phone */}
-            <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px' }}>
-              {n.product_image && (
-                <img 
-                  src={n.product_image} 
-                  alt="product" 
-                  style={{ 
-                    width: '60px', 
-                    height: '60px', 
-                    borderRadius: '8px', 
-                    objectFit: 'cover',
-                    border: '2px solid #333'
-                  }} 
-                />
+            
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              {unreadCount > 0 && (
+                <button 
+                  onClick={markAllAsRead}
+                  style={{
+                    background: '#e94560',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'transform 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                >
+                  <span>✓</span> Mark All Read
+                </button>
               )}
-              <div>
-                <small style={{ color: '#aaa', display: 'block' }}>Buyer Contact:</small>
-                <span style={{ color: '#25D366', fontWeight: 'bold', fontSize: '16px' }}>
-                  {n.buyer_phone}
-                </span>
-              </div>
-            </div>
-
-            {/* 3. Actions: Call & WhatsApp Buttons */}
-            <div style={{ display: 'flex', gap: '10px' }}>
               <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  window.open(`tel:${n.buyer_phone}`);
-                }}
-                style={{ 
-                  flex: 1, 
-                  padding: '10px', 
-                  borderRadius: '8px', 
-                  backgroundColor: '#3182ce', 
-                  color: 'white', 
-                  border: 'none', 
-                  cursor: 'pointer', 
+                onClick={fetchNotifications}
+                style={{
+                  background: '#2a2a4a',
+                  color: 'white',
+                  border: '1px solid #4a4a6a',
+                  padding: '10px 20px',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
                   fontWeight: 'bold',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px'
+                  gap: '8px',
+                  transition: 'transform 0.2s'
                 }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
               >
-                📞 Call
+                <span>🔄</span> Refresh
               </button>
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  window.open(`https://wa.me/${n.buyer_phone.replace(/\D/g, '')}`);
-                }}
-                style={{ 
-                  flex: 1, 
-                  padding: '10px', 
-                  borderRadius: '8px', 
-                  backgroundColor: '#25D366', 
-                  color: 'white', 
-                  border: 'none', 
-                  cursor: 'pointer', 
-                  fontWeight: 'bold',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px'
-                }}
-              >
-                💬 WhatsApp
-              </button>
-            </div>
-
-            {/* 4. Footer: Timestamp & Status */}
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: '15px', 
-              paddingTop: '10px',
-              borderTop: '1px solid #333'
-            }}>
-              <small style={{ color: '#666', fontSize: '11px' }}>
-                {new Date(n.created_at).toLocaleDateString()} • {new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-              </small>
-              <span style={{
-                background: n.status === 'unread' ? '#25D366' : '#666',
-                color: 'white',
-                padding: '2px 8px',
-                borderRadius: '10px',
-                fontSize: '10px',
-                fontWeight: 'bold'
-              }}>
-                {n.status === 'unread' ? 'NEW' : 'READ'}
-              </span>
             </div>
           </div>
-        ))
-      )}
+        </div>
+
+        {/* NOTIFICATIONS LIST - ENLARGED CARDS */}
+        <div style={{ padding: '30px' }}>
+          {notifications.length === 0 ? (
+            <div style={{
+              textAlign: 'center',
+              padding: '80px 40px',
+              background: '#16213e',
+              borderRadius: '16px'
+            }}>
+              <div style={{ fontSize: '64px', marginBottom: '20px' }}>
+                📭
+              </div>
+              <h3 style={{ color: '#fff', marginBottom: '10px', fontSize: '24px' }}>
+                No buyer requests yet
+              </h3>
+              <p style={{ color: '#888', fontSize: '16px', maxWidth: '400px', margin: '0 auto' }}>
+                When buyers show interest in your products, you'll see notifications here with their contact details.
+              </p>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }}>
+              {notifications.map((n) => (
+                <div 
+                  key={n.id} 
+                  style={{
+                    background: '#16213e',
+                    borderRadius: '16px',
+                    borderLeft: n.status === 'unread' ? `6px solid #25D366` : `6px solid #4a4a6a`,
+                    transition: 'all 0.3s ease',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <div 
+                    onClick={() => {
+                      if (n.status === 'unread') markAsRead(n.id);
+                      setExpandedId(expandedId === n.id ? null : n.id);
+                    }}
+                    style={{
+                      padding: '25px',
+                      cursor: 'pointer',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#1a1a3e'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = '#16213e'}
+                  >
+                    {/* Header Row */}
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '15px',
+                      marginBottom: '15px'
+                    }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          flexWrap: 'wrap',
+                          marginBottom: '8px'
+                        }}>
+                          <span style={{
+                            background: n.status === 'unread' ? '#25D366' : '#4a4a6a',
+                            padding: '4px 12px',
+                            borderRadius: '20px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            color: 'white'
+                          }}>
+                            {n.status === 'unread' ? '🟢 NEW REQUEST' : '📖 READ'}
+                          </span>
+                          <span style={{ color: '#888', fontSize: '13px' }}>
+                            {new Date(n.created_at).toLocaleDateString('en-US', {
+                              weekday: 'short',
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })} at {new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                          </span>
+                        </div>
+                        <p style={{
+                          margin: 0,
+                          color: '#fff',
+                          fontSize: '18px',
+                          lineHeight: '1.5',
+                          fontWeight: n.status === 'unread' ? '600' : '400'
+                        }}>
+                          {n.message}
+                        </p>
+                      </div>
+                      <div style={{ color: '#888', fontSize: '20px' }}>
+                        {expandedId === n.id ? '▲' : '▼'}
+                      </div>
+                    </div>
+
+                    {/* Quick Info Row (always visible) */}
+                    <div style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '20px',
+                      marginTop: '15px',
+                      paddingTop: '15px',
+                      borderTop: '1px solid #2a2a4a'
+                    }}>
+                      {n.product_image && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <img 
+                            src={n.product_image} 
+                            alt="product" 
+                            style={{
+                              width: '50px',
+                              height: '50px',
+                              borderRadius: '8px',
+                              objectFit: 'cover',
+                              border: '2px solid #4a4a6a'
+                            }} 
+                          />
+                          <span style={{ color: '#ccc', fontSize: '13px' }}>Product Image</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '20px' }}>📞</span>
+                        <div>
+                          <div style={{ color: '#888', fontSize: '11px' }}>Buyer Phone</div>
+                          <div style={{ color: '#25D366', fontWeight: 'bold', fontSize: '16px' }}>
+                            {n.buyer_phone}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* EXPANDED ACTION BUTTONS SECTION */}
+                  {expandedId === n.id && (
+                    <div style={{
+                      padding: '25px',
+                      background: '#0f0f2a',
+                      borderTop: '1px solid #2a2a4a'
+                    }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                        gap: '15px',
+                        marginBottom: '20px'
+                      }}>
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            window.open(`tel:${n.buyer_phone}`);
+                          }}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '10px',
+                            background: '#3182ce',
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            transition: 'transform 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                          📞 Call Now
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            window.open(`https://wa.me/${n.buyer_phone.replace(/\D/g, '')}`);
+                          }}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '10px',
+                            background: '#25D366',
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            transition: 'transform 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                          💬 WhatsApp Message
+                        </button>
+
+                        <button 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            navigator.clipboard.writeText(n.buyer_phone);
+                            alert('Phone number copied!');
+                          }}
+                          style={{
+                            padding: '14px',
+                            borderRadius: '10px',
+                            background: '#4a4a6a',
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '16px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            transition: 'transform 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                        >
+                          📋 Copy Number
+                        </button>
+                      </div>
+                      
+                      <div style={{
+                        background: '#1a1a3e',
+                        padding: '15px',
+                        borderRadius: '10px',
+                        marginTop: '10px'
+                      }}>
+                        <p style={{ margin: 0, color: '#ccc', fontSize: '14px', lineHeight: '1.6' }}>
+                          💡 <strong>Pro tip:</strong> Click the WhatsApp button to instantly message this buyer. 
+                          Introduce yourself and share product details to close the sale faster!
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* FOOTER STATS */}
+        {notifications.length > 0 && (
+          <div style={{
+            background: '#0f0f2a',
+            padding: '20px 30px',
+            borderTop: '1px solid #2a2a4a',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '15px'
+          }}>
+            <div style={{ color: '#888', fontSize: '14px' }}>
+              📊 Total requests: <strong style={{ color: '#fff' }}>{notifications.length}</strong>
+            </div>
+            <div style={{ color: '#888', fontSize: '14px' }}>
+              ✅ {notifications.filter(n => n.status === 'read').length} processed
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

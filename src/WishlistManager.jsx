@@ -121,7 +121,7 @@ export default function WishlistManager({ onBack }) {
             flexShrink: 0
           }}
         >
-          ← Back to Search
+          ← Back to Dashboard
         </button>
         <h3 style={{ color: 'white', margin: 0 }}>My Wishlist ({wishlistItems.length} items)</h3>
       </div>

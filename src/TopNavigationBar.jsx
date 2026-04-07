@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom'; // ADD: useNavigate
+import { Link, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faHeart,
@@ -7,7 +7,7 @@ import {
   faChevronUp,
   faBars,
   faTimes,
-  faCrown // ADD: crown icon for admin
+  faCrown
 } from '@fortawesome/free-solid-svg-icons';
 
 const TopNavigationBar = ({ 
@@ -20,14 +20,18 @@ const TopNavigationBar = ({
   onSettingsClick,
   isCollapsed = false,
   onToggleCollapse,
-  isAdmin, // This prop is already here
+  isAdmin,
+  isHidden = false, 
   appName = "Straun Marketing AI Engine"
 }) => {
   const [isVisible, setIsVisible] = useState(true);
   const navRef = useRef(null);
-  const navigate = useNavigate(); // ADD: for navigation
+  const navigate = useNavigate();
 
-  // COLLAPSED VIEW (Menu Only)
+  if (isHidden) {
+    return null; // Don't render anything
+  }
+
   if (isCollapsed || !isVisible) {
     return (
       <div 
@@ -65,17 +69,16 @@ const TopNavigationBar = ({
           </span>
         </button>
         
-        {/* ADD: Admin button in collapsed view */}
         {isAdmin && (
           <button
             onClick={() => navigate('/admin')}
             className="admin-button-collapsed"
             title="Admin Dashboard"
             style={{
-              background: 'rgba(255, 255, 255, 0.2)', // Match nav background
-              border: '1px solid rgba(255, 255, 255, 0.3)', // Subtle border
+              background: 'rgba(255, 255, 255, 0.2)',
+              border: '1px solid rgba(255, 255, 255, 0.3)',
               color: 'white',
-              padding: '6px 12px', // Match other buttons
+              padding: '6px 12px',
               borderRadius: '20px',
               cursor: 'pointer',
               fontSize: '14px',
@@ -84,17 +87,17 @@ const TopNavigationBar = ({
               justifyContent: 'center',
               gap: '6px',
               marginRight: '10px',
-              backdropFilter: 'blur(10px)', // Glass effect
+              backdropFilter: 'blur(10px)',
               transition: 'all 0.3s ease'
             }}
-           onMouseEnter={(e) => {
-            e.target.style.background = 'rgba(255, 255, 255, 0.4)'; // Slightly brighter
-            e.target.style.transform = 'scale(1.1)';
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = 'rgba(255, 255, 255, 0.3)'; // Back to original
-            e.target.style.transform = 'scale(1)';
-          }}
+            onMouseEnter={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.4)';
+              e.target.style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'rgba(255, 255, 255, 0.3)';
+              e.target.style.transform = 'scale(1)';
+            }}
           >
             <FontAwesomeIcon icon={faCrown} size="sm" />
           </button>
@@ -107,15 +110,16 @@ const TopNavigationBar = ({
           <span className={`mode-tag-small ${selectedMode}`}>
             {selectedMode === 'seller' ? 'SELLER' : 'BUYER'}
           </span>
-          <span className="location-small">
+          {/* REMOVED: location display */}
+          {/* <span className="location-small">
             📍 {profileData?.location?.split(',')[0] || 'No location'}
-          </span>
+          </span> */}
         </div>
       </div>
     );
   }
 
-  // FULL NAVBAR VIEW
+  // FULL NAVBAR VIEW - REMOVED LOCATION
   return (
     <header 
       className={`social-header ${isCollapsed ? 'collapsed-nav' : ''}`}
@@ -127,16 +131,14 @@ const TopNavigationBar = ({
     >
       <div className="header-content">
         <div className="header-top-row">
-          {/* CHANGED: Replace dynamic text with app name */}
           <h1 className="social-title">
-            {appName} {/* Now showing just the app name */}
+            {appName}
             <span className="user-mode">
               {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
             </span>
           </h1>
           
           <div className="header-actions">
-            {/* ADD: Admin button in full view - placed before wishlist */}
             {isAdmin && (
               <button
                 onClick={() => navigate('/admin')}
@@ -161,14 +163,14 @@ const TopNavigationBar = ({
                   transition: 'all 0.3s ease',
                   height: '36px'
                 }}
-             onMouseEnter={(e) => {
-              e.target.style.background = 'rgba(255, 255, 255, 0.4)'; // Slightly brighter
-              e.target.style.transform = 'scale(1.1)';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.background = 'rgba(255, 255, 255, 0.3)'; // Back to original
-              e.target.style.transform = 'scale(1)';
-            }}
+                onMouseEnter={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.4)';
+                  e.target.style.transform = 'scale(1.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.background = 'rgba(255, 255, 255, 0.3)';
+                  e.target.style.transform = 'scale(1)';
+                }}
               >
                 <FontAwesomeIcon icon={faCrown} size="sm" />
                 <span className="admin-text">Admin</span>
@@ -222,15 +224,12 @@ const TopNavigationBar = ({
               </div>
               <div className="user-details">
                 <div className="user-email">{user?.email || 'Unknown User'}</div>
-                <div className="user-location">
+                {/* REMOVED: location display */}
+                {/* <div className="user-location">
                   <span className="location-icon">📍</span>
                   {profileData?.location || 'No location set'}
-                </div>
-                <div className="user-profile-status">
-                  <span className="status-badge complete">
-                    ✓ {selectedMode === 'seller' ? 'Seller' : 'Buyer'} Setup Complete
-                  </span>
-                </div>
+                </div> */}
+                {/* REMOVED: Setup Complete badge */}
               </div>
             </div>
             <div className="user-mode-info">

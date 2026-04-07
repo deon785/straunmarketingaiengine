@@ -23,6 +23,16 @@ import SimpleAdmin from './SimpleAdmin.jsx';
 import ToolsPanel from './ToolsPanel.jsx';
 import { fscrub } from 'fpoint';
 
+import PriceAlertButton from './PriceAlertButton.jsx';
+import RecommendationsSection from './RecommendationsSection';
+import RecommendationEngine from './recommendationEngine';
+
+import DailyDeals from './DailyDeals';
+import ReferralProgram from './ReferralProgram';
+import UserDashboard from './UserDashboard';
+import ChatList from './ChatList';
+import PriceAlertDashboard from './PriceAlertDashboard';
+
 class UserBehaviorAnalyzer {
   constructor() {
     this.actions = new Map();
@@ -227,6 +237,21 @@ function getWordVariations(word) {
     
     return Array.from(variations).filter(v => v && v.length >= 2);
 }
+
+// Helper function to convert base64 to Uint8Array
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/\-/g, '+')
+        .replace(/_/g, '/');
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -299,6 +324,7 @@ function SocialAIMarketingEngine() {
     const [isNavbarHidden, setIsNavbarHidden] = useState(false);
     const [isReportButtonFloating, setIsReportButtonFloating] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
  
     const [limits, setLimits] = useState({});
     const [showSafetyWarning, setShowSafetyWarning] = useState(false);
@@ -314,6 +340,27 @@ function SocialAIMarketingEngine() {
     const [showInstallPrompt, setShowInstallPrompt] = useState(false);
     const [hasBeenPrompted, setHasBeenPrompted] = useState(false);
 
+    const userInitials = user?.email ? user.email.charAt(0).toUpperCase() : '?';
+    const userName = profileData?.username || user?.email?.split('@')[0] || 'User';
+    const userMode = selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode';
+    const [showPriceAlerts, setShowPriceAlerts] = useState(false);
+    const [lastViewedProduct, setLastViewedProduct] = useState(null);
+
+    // Add these missing state variables
+    const [pushLoading, setPushLoading] = useState(false);
+    const [pushEnabled, setPushEnabled] = useState(false);
+    const [hasAlert, setHasAlert] = useState(false);
+    const [alertPrice, setAlertPrice] = useState('');
+
+    const [showChat, setShowChat] = useState(false);
+    const [showChatList, setShowChatList] = useState(false);
+    const [selectedChat, setSelectedChat] = useState(null);
+    const [showDashboard, setShowDashboard] = useState(false);
+    const [showDailyDeals, setShowDailyDeals] = useState(false);
+    const [userReferralCount, setUserReferralCount] = useState(0);
+    const [currentProduct, setCurrentProduct] = useState(null);
+    const [currentPrice, setCurrentPrice] = useState(0);
+
     const [filters, setFilters] = useState({
     minPrice: '',
     maxPrice: '',
@@ -321,6 +368,29 @@ function SocialAIMarketingEngine() {
     sortBy: 'newest', // 'newest', 'price_low', 'price_high'
     category: '' // Optional: if you have categories
     });
+
+    const styles = {
+        modalOverlay: {
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.7)',
+            zIndex: 10000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+        },
+        modalContent: {
+            maxWidth: '500px',
+            width: '100%',
+            maxHeight: '90vh',
+            borderRadius: '12px',
+            overflow: 'hidden'
+        }
+    };
 
     // Calculate active filter count
     const activeFilterCount = Object.values(filters).filter(val => 
@@ -365,6 +435,74 @@ function SocialAIMarketingEngine() {
         }
     };
 
+    const loadReferralCount = async () => {
+        if (!user) return;
+        
+        const { data, error } = await supabase
+            .from('referrals')
+            .select('id', { count: 'exact' })
+            .eq('referrer_id', user.id)
+            .eq('status', 'completed');
+        
+        if (!error) {
+            setUserReferralCount(data?.length || 0);
+        }
+    };
+
+    // Toggle mobile menu
+    const toggleMobileMenu = () => {
+        setMobileMenuOpen(!mobileMenuOpen);
+        // Prevent body scroll when menu is open
+        if (!mobileMenuOpen) {
+            document.body.style.overflow = 'hidden';
+            document.body.style.position = 'fixed';
+            document.body.style.width = '100%';
+        } else {
+            document.body.style.overflow = '';
+            document.body.style.position = '';
+            document.body.style.width = '';
+        }
+    };
+
+    // Close menu on navigation
+    const handleNavigation = (action) => {
+        console.log('Navigate to:', action);
+        
+        switch(action) {
+            case 'home':
+                // Already on home, just close menu
+                break;
+            case 'profile':
+                // You can add profile view logic here
+                showToastNotification('Profile feature coming soon');
+                break;
+            case 'settings':
+                setShowSettings(true);
+                break;
+            case 'wishlist':
+                setPreviousSearchState({
+                    productSearch: productSearch,
+                    prospects: prospects,
+                    productsFound: productsFound,
+                    searchLoading: searchLoading
+                });
+                window.history.pushState({ showWishlist: true }, '', '#wishlist');
+                setShowWishlist(true);
+                break;
+            case 'switchMode':
+                handleSwitchMode();
+                break;
+            case 'signout':
+                handleSignOut();
+                break;
+            default:
+                break;
+        }
+        
+        // Close the menu
+        toggleMobileMenu();
+    };
+
    const fetchNotifications = useCallback(async () => {
         if (!user || !user.id) {
             console.log('No user for notifications fetch');
@@ -402,7 +540,7 @@ function SocialAIMarketingEngine() {
             // Don't crash the app - just log the error
         }
     }, [user]);
- 
+
     const PushEnableButton = () => {
         const handleEnable = async () => {
             // 1. Ask browser for permission
@@ -422,7 +560,461 @@ function SocialAIMarketingEngine() {
             🔔 Enable Push Notifications
             </button>
         );
+    };
+
+    // Enable push notifications even when browser is closed
+    const setupPushNotifications = async () => {
+    // Register service worker
+        if ('serviceWorker' in navigator) {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            
+            // Request permission
+            const permission = await Notification.requestPermission();
+            
+            if (permission === 'granted') {
+            // Subscribe to push
+            const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: 'YOUR_VAPID_PUBLIC_KEY'
+            });
+            
+            // Save to Supabase
+            await supabase.from('push_subscriptions').insert([{
+                user_id: user.id,
+                subscription: subscription,
+                device_info: navigator.userAgent
+            }]);
+            }
+        }
+    // Send push for:
+    // - New matches (instant)
+    // - Price drops on saved items
+    // - Daily digest of new products
+    // - When someone views your product
+    };
+
+    // Subscribe to push notifications using Supabase Edge Function
+    const subscribeToPush = async () => {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            showToastNotification('⚠️ Push notifications not supported');
+            return false;
+        }
+
+        try {
+            setPushLoading(true);
+            
+            const registration = await navigator.serviceWorker.ready;
+            const permission = await Notification.requestPermission();
+            
+            if (permission !== 'granted') {
+                showToastNotification('❌ Please allow notifications');
+                return false;
+            }
+
+            let subscription = await registration.pushManager.getSubscription();
+            
+            if (!subscription) {
+                // Use VAPID public key from environment
+                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                
+                subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+            }
+            
+            // Call your edge function
+            const response = await fetch('https://mmcwfoqajkfnohbonaqa.supabase.co/functions/v1/send-push-notifications', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'subscribe',
+                    subscription: subscription,
+                    userId: user.id,
+                    userAgent: navigator.userAgent
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok && result.success) {
+                showToastNotification('✅ Push notifications enabled!');
+                setPushEnabled(true);
+                return true;
+            }
+            
+        } catch (error) {
+            console.error('Push subscription error:', error);
+            showToastNotification('⚠️ Error enabling notifications');
+        } finally {
+            setPushLoading(false);
+        }
+        
+        return false;
+    };
+
+    // Send test notification using edge function
+    const sendTestNotification = async () => {
+        try {
+            const supabaseUrl = 'https://mmcwfoqajkfnohbonaqa.supabase.co';
+            const response = await fetch(`${supabaseUrl}/functions/v1/send-push-notifications`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    userId: user.id,
+                    title: '🎉 Welcome to StraunAI!',
+                    body: 'You will now receive real-time notifications about matches, messages, and deals!',
+                    icon: '/pwa-192x192.png',
+                    url: '/'
+                })
+            });
+            
+            if (response.ok) {
+                console.log('✅ Test notification sent');
+            }
+        } catch (error) {
+            console.error('Failed to send test notification:', error);
+        }
+    };
+    // Test push notification (for debugging)
+    const testPushNotification = async () => {
+        if (!('serviceWorker' in navigator)) {
+            console.log('Service Worker not supported');
+            return;
+        }
+        
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            
+            // Send a test notification via service worker
+            registration.showNotification('Test Notification', {
+                body: '✅ Push notifications are working!',
+                icon: '/pwa-192x192.png',
+                badge: '/pwa-192x192.png',
+                vibrate: [200, 100, 200],
+                data: { url: '/' }
+            });
+            
+            console.log('✅ Test notification sent');
+            showToastNotification('✅ Test notification sent! Check your notifications.');
+        } catch (error) {
+            console.error('❌ Test notification failed:', error);
+        }
+    };
+    
+    // Price Alert Functions
+    const setPriceAlert = async () => {
+        if (!alertPrice || alertPrice >= currentPrice) {
+            showToastNotification('⚠️ Alert price must be lower than current price');
+            return;
+        }
+        
+        const { error } = await supabase
+            .from('price_alerts')
+            .upsert({
+                user_id: user.id,
+                product_id: currentProduct?.id,
+                target_price: alertPrice,
+                current_price: currentPrice,
+                is_active: true
+            });
+        
+        if (!error) {
+            showToastNotification(`✅ Alert set! We'll notify you when price drops below $${alertPrice}`);
+            setHasAlert(true);
+        }
+    };
+
+    const removeAlert = async () => {
+        await supabase
+            .from('price_alerts')
+            .update({ is_active: false })
+            .eq('user_id', user.id)
+            .eq('product_id', currentProduct?.id);
+        
+        showToastNotification('Alert removed');
+        setHasAlert(false);
+    };
+
+    // Users can set alert when price drops below X
+    const priceAlertSystem = {
+        setup: async (productId, targetPrice) => {
+            await supabase.from('price_alerts').insert([{
+            user_id: user.id,
+            product_id: productId,
+            target_price: targetPrice,
+            is_active: true
+            }]);
+        },
+        
+        check: async () => {
+            // Cron job or trigger on price update
+            const { data: alerts } = await supabase
+            .from('price_alerts')
+            .select('*, products(*)')
+            .eq('is_active', true)
+            .lt('products.price', supabase.raw('target_price'));
+            
+            alerts.forEach(alert => {
+            sendNotification(alert.user_id, 
+                `💰 Price dropped! ${alert.products.name} now $${alert.products.price}`);
+            });
+        }
+    };
+
+    // AI-powered product recommendations
+    const recommendationEngine = {
+    basedOn: {
+        search_history: 'What they searched for',
+        viewed_products: 'What they clicked',
+        saved_items: 'What they wishlisted',
+        similar_users: 'Users with similar interests',
+        location: 'Nearby products',
+        season: 'Seasonal items'
+    },
+    
+    getRecommendations: async (userId) => {
+        // Get user's interests
+        const { data: profile } = await supabase
+        .from('profiles')
+        .select('interests, search_history, viewed_products')
+        .eq('user_id', userId)
+        .single();
+        
+        // Find products based on interests + behavior
+        const recommendations = await supabase
+        .from('products')
+        .select('*')
+        .or(`name.ilike.%${profile.interests.join('%')}%`)
+        .limit(20);
+        
+        return recommendations;
+    }
+    };
+
+    const handleProductClick = (product) => {
+        setLastViewedProduct(product);
+        // Track the view
+        const engine = new RecommendationEngine(user.id);
+        engine.trackBehavior(product.id, 'view');
+        // You can also navigate to product detail or show modal
+        showToastNotification(`Viewing: ${product.name}`);
+    };
+
+    // In-app messaging instead of just WhatsApp
+    const messagingSystem = {
+    features: {
+        real_time_chat: true,
+        read_receipts: true,
+        typing_indicator: true,
+        image_sharing: true,
+        quick_replies: true,
+        voice_notes: true
+    },
+    
+    setup: () => {
+        // Create messages table
+        // Create conversations table
+        // Real-time subscription for new messages
+        supabase
+        .channel('messages')
+        .on('postgres_changes', 
+            { event: 'INSERT', schema: 'public', table: 'messages' },
+            (payload) => {
+            showInAppChat(payload.new);
+            playNotificationSound();
+            }
+        )
+        .subscribe();
+    }
+    };
+
+    const flashSaleSystem = {
+        schedule: {
+            morning_deal: '9:00 AM - 11:00 AM',
+            lunch_deal: '12:00 PM - 2:00 PM',
+            evening_deal: '6:00 PM - 8:00 PM',
+            midnight_deal: '11:00 PM - 1:00 AM'
+        },
+        
+        features: {
+            countdown_timer: true,
+            limited_quantity: true,
+            exclusive_for_members: true,
+            share_to_unlock: true
+        }
+    };
+
+    const generateUniqueCode = (userId) => {
+        return userId.slice(0, 8) + Math.random().toString(36).substring(2, 8);
+    };
+
+    const getUserIdFromCode = (referralCode) => {
+        // This should decode the referral code back to user ID
+        // For now, return a placeholder or implement proper decoding
+        return referralCode?.slice(0, 8) || '';
+    };
+
+    const applyTheme = (theme) => {
+        if (theme === 'dark') {
+            document.body.classList.add('dark-theme');
+        } else {
+            document.body.classList.remove('dark-theme');
+        }
+        // Add other theme logic as needed
+    };
+
+    // Make sure fetchProducts is defined or add a placeholder
+    const fetchProductsForCache = async () => {
+        const { data } = await supabase.from('products').select('*').limit(100);
+        return data || [];
+    };
+
+    const showInAppChat = (message) => {
+        console.log('New message:', message);
+        showToastNotification(`New message from ${message.sender_id}`);
+    };
+
+    const referralSystem = {
+        rewards: {
+            referrer: {
+            '1 referral': '50 points',
+            '5 referrals': '100 points + Bronze badge',
+            '10 referrals': '500 points + Silver badge + Free promotion',
+            '50 referrals': 'Premium seller status for 1 month'
+            },
+            referee: {
+            signup_bonus: '25 points',
+            first_search: '10 points',
+            first_contact: '50 points'
+            }
+        },
+        
+        generateReferralLink: () => {
+            const code = generateUniqueCode(user.id);
+            return `https://straun.app/ref/${code}`;
+        },
+        
+        trackReferral: async (referralCode) => {
+            // Track signups from referral links
+            await supabase.from('referrals').insert([{
+            referrer_id: getUserIdFromCode(referralCode),
+            referred_user_id: user.id,
+            status: 'pending',
+            created_at: new Date()
+            }]);
+        }
+    };
+
+    const quickList = () => {
+        showToastNotification('Quick List feature coming soon');
+    };
+
+    const viewSearches = () => {
+        showToastNotification('Saved searches feature coming soon');
+    };
+
+    const viewAnalytics = () => {
+        showToastNotification('Analytics feature coming soon');
+    };
+
+    const smartReminders = {
+    types: {
+        abandoned_search: "Still looking for [product]? New listings available!",
+        inactive_user: "We miss you! Check out 5 new products in your area",
+        review_prompt: "How was your experience with [seller]? Leave a review!",
+        price_check: "Price of [product] dropped by 20% since you saved it",
+        restock_alert: "Back in stock! [product] is available again"
+    },
+    
+    scheduleReminders: () => {
+        // Check user inactivity (7 days no login)
+        // Check abandoned searches (searched but no contact)
+        // Check wishlist items that got price drops
+    }
+    };
+
+    const themeCustomization = {
+    themes: {
+        dark: '🌙 Dark',
+        light: '☀️ Light',
+        ocean: '🌊 Ocean Blue',
+        sunset: '🌅 Sunset Orange',
+        forest: '🌲 Forest Green'
+    },
+    
+    accentColors: ['#4361ee', '#f72585', '#4cc9f0', '#f8961e'],
+    
+    fontSizes: ['Small', 'Medium', 'Large'],
+    
+    savePreference: (theme) => {
+        localStorage.setItem('user_theme', theme);
+        applyTheme(theme);
+    }
+    };
+
+    // Use IndexedDB for offline storage
+    const offlineSupport = {
+        cacheProducts: async () => {
+            const products = await fetchProducts();
+            await idb.set('cached_products', products);
+        },
+        
+        syncWhenOnline: () => {
+            window.addEventListener('online', async () => {
+            // Sync saved items
+            const offlineActions = await idb.get('offline_actions');
+            for (const action of offlineActions) {
+                await syncAction(action);
+            }
+            });
+        },
+        
+        offlineSearch: (query) => {
+            const cached = idb.get('cached_products');
+            return filterProducts(cached, query);
+        }
+    };
+
+    const SocialShare = ({ product }) => {
+        const shareOptions = {
+            whatsapp: () => {
+            const text = `Check out ${product.name} on Straun Marketing! Only $${product.price}`;
+            window.open(`https://wa.me/?text=${encodeURIComponent(text)}`);
+            },
+            
+            facebook: () => {
+            FB.ui({
+                display: 'popup',
+                method: 'share',
+                href: `https://straun.app/product/${product.id}`
+            });
+            },
+            
+            twitter: () => {
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(
+                `Just found ${product.name} on Straun Marketing! Check it out:`
+            )}`);
+            },
+            
+            copyLink: () => {
+            navigator.clipboard.writeText(`https://straun.app/product/${product.id}`);
+            showToast('Link copied! Share with friends');
+            }
         };
+        
+        return (
+            <div className="social-share">
+            <h4>Share & Earn 50 points!</h4>
+            <button onClick={shareOptions.whatsapp}>📱 WhatsApp</button>
+            <button onClick={shareOptions.facebook}>📘 Facebook</button>
+            <button onClick={shareOptions.twitter}>🐦 Twitter</button>
+            <button onClick={shareOptions.copyLink}>🔗 Copy Link</button>
+            </div>
+        );
+    };
 
     const playNotificationSound = () => {
         const soundUrl = 'https://cdn.pixabay.com/download/audio/2023/11/07/audio_f558d7e0d3.mp3';
@@ -462,6 +1054,14 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---  
     const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
+        const engine = new RecommendationEngine(user.id);
+        await engine.trackBehavior(product?.id, 'contact');
+
+        await supabase.rpc('track_user_activity', {
+            p_user_id: user.id,
+            p_activity_type: 'contact',
+            p_metadata: { targetUserId: targetUserId, type: type }
+        });
      
         if (!smartLimiterInstance) {
             // Only initialize if not already done
@@ -683,6 +1283,15 @@ function SocialAIMarketingEngine() {
 
    // --- SAVE TO WISHLIST FUNCTION ---
     const saveToWishlist = async (item, itemType = 'product') => {
+        const engine = new RecommendationEngine(user.id);
+        await engine.trackBehavior(item.id, 'save');
+
+        await supabase.rpc('track_user_activity', {
+            p_user_id: user.id,
+            p_activity_type: 'save',
+            p_metadata: { itemName: item.name, itemType: itemType }
+        });
+
         // Behavior check
         if (!user) {
             alert('Please log in to save items to wishlist');
@@ -1129,6 +1738,186 @@ function SocialAIMarketingEngine() {
         };
     }, []);
 
+    const StatCard = ({ icon, label, value, unread }) => {
+        return (
+            <div className="stat-card" style={{
+                background: 'white',
+                borderRadius: '12px',
+                padding: '15px',
+                textAlign: 'center',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                flex: 1
+            }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>{icon}</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#333' }}>{value}</div>
+                <div style={{ fontSize: '14px', color: '#666' }}>{label}</div>
+                {unread && (
+                    <div style={{
+                        background: '#ff4444',
+                        color: 'white',
+                        borderRadius: '50%',
+                        width: '20px',
+                        height: '20px',
+                        fontSize: '12px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginTop: '5px'
+                    }}>
+                        {unread}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // Add ActivityFeed component
+    const ActivityFeed = ({ events }) => {
+        return (
+            <div className="activity-feed" style={{
+                background: 'white',
+                borderRadius: '12px',
+                padding: '15px',
+                marginTop: '15px'
+            }}>
+                <h4 style={{ margin: '0 0 10px 0' }}>Recent Activity</h4>
+                {events.map((event, idx) => (
+                    <div key={idx} style={{
+                        padding: '8px 0',
+                        borderBottom: idx < events.length - 1 ? '1px solid #eee' : 'none',
+                        fontSize: '14px',
+                        color: '#555'
+                    }}>
+                        • {event}
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    // Add QuickActions component
+    const QuickActions = ({ actions }) => {
+        return (
+            <div className="quick-actions" style={{
+                display: 'flex',
+                gap: '10px',
+                marginTop: '15px'
+            }}>
+                {actions.map((action, idx) => (
+                    <button
+                        key={idx}
+                        onClick={action.action}
+                        style={{
+                            flex: 1,
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            color: 'white',
+                            border: 'none',
+                            padding: '12px',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontWeight: 'bold'
+                        }}
+                    >
+                        {action.icon} {action.label}
+                    </button>
+                ))}
+            </div>
+        );
+    };
+
+    // Add Insights component
+    const Insights = ({ tips }) => {
+        return (
+            <div className="insights" style={{
+                background: '#f0f7ff',
+                borderRadius: '12px',
+                padding: '15px',
+                marginTop: '15px'
+            }}>
+                <h4 style={{ margin: '0 0 10px 0' }}>💡 Insights & Tips</h4>
+                {tips.map((tip, idx) => (
+                    <p key={idx} style={{ fontSize: '13px', color: '#555', margin: '5px 0' }}>
+                        • {tip}
+                    </p>
+                ))}
+            </div>
+        );
+    };
+
+    // Clean up on component unmount
+    useEffect(() => {
+    return () => {
+        document.body.style.overflow = '';
+    };
+    }, []);
+
+    // Close menu on escape key
+    useEffect(() => {
+        const handleEsc = (event) => {
+            if (event.key === 'Escape' && mobileMenuOpen) {
+            toggleMobileMenu();
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [mobileMenuOpen]);
+
+    // Register service worker on app load - FIXED VERSION
+    useEffect(() => {
+        const registerServiceWorker = async () => {
+            if (!('serviceWorker' in navigator)) {
+                console.log('Service Worker not supported');
+                return;
+            }
+            
+            try {
+                // Register the service worker
+                const registration = await navigator.serviceWorker.register('/sw.js');
+                console.log('✅ Service Worker registered with scope:', registration.scope);
+                
+                // Check for updates
+                registration.addEventListener('updatefound', () => {
+                    const newWorker = registration.installing;
+                    console.log('🔄 New service worker found:', newWorker);
+                    
+                    newWorker.addEventListener('statechange', () => {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            console.log('✨ New version available');
+                            showToastNotification('New version available! Refresh to update.');
+                        }
+                    });
+                });
+                
+                // Handle controller change
+                let refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (refreshing) return;
+                    refreshing = true;
+                    console.log('🔄 Service worker changed, refreshing...');
+                    window.location.reload();
+                });
+                
+                // Check if we should auto-subscribe to push
+                const hasPromptedForPush = localStorage.getItem('push_prompted');
+                if (!hasPromptedForPush && user && isProfileComplete) {
+                    // Wait a bit before asking for push permission
+                    setTimeout(async () => {
+                        const permission = await Notification.requestPermission();
+                        if (permission === 'granted') {
+                            localStorage.setItem('push_prompted', 'true');
+                            // Don't auto-subscribe, let user choose via button
+                        }
+                    }, 5000);
+                }
+                
+            } catch (error) {
+                console.error('❌ Service Worker registration failed:', error);
+            }
+        };
+        
+        registerServiceWorker();
+    }, [user, isProfileComplete]);
+
     // ✅ Initialize search from URL when component mounts
     useEffect(() => {
         // If there's a search term in URL, update productSearch
@@ -1136,6 +1925,12 @@ function SocialAIMarketingEngine() {
             setProductSearch(searchParams.query);
         }
     }, []); // Run only once on mount
+
+    useEffect(() => {
+        if (user) {
+            loadReferralCount();
+        }
+    }, [user]);
 
     // ✅ Update search when URL changes (back/forward navigation)
     useEffect(() => {
@@ -2228,6 +3023,16 @@ function SocialAIMarketingEngine() {
 
     // --- SIMPLIFIED SEARCH FUNCTION (LIKE PREVIOUS VERSION) ---
     const handleSearch = async () => {
+        const sanitizedSearch = sanitizeProductName(productSearch);
+        const engine = new RecommendationEngine(user.id);
+        await engine.trackBehavior(null, 'search', sanitizedSearch);
+
+        await supabase.rpc('track_user_activity', {
+                p_user_id: user.id,
+                p_activity_type: 'search',
+                p_metadata: { searchTerm: sanitizedSearch }
+        });
+
         setSearchLoading(true);
         setError(null);
         setShowSafetyWarning(false)
@@ -2777,6 +3582,41 @@ function SocialAIMarketingEngine() {
         return <SimpleAdmin />;
     }
 
+    const ChatSystem = ({ currentUserId, otherUserId, otherUserName, productId, productName, onClose }) => {
+        return (
+            <div style={{ padding: '20px' }}>
+                <h3>Chat with {otherUserName}</h3>
+                <p>Product: {productName}</p>
+                <div style={{
+                    height: '300px',
+                    background: '#f5f5f5',
+                    borderRadius: '8px',
+                    padding: '10px',
+                    margin: '10px 0',
+                    overflowY: 'auto'
+                }}>
+                    <p style={{ color: '#666', textAlign: 'center' }}>
+                        💬 Chat feature coming soon. Use WhatsApp to contact {otherUserName} directly.
+                    </p>
+                </div>
+                <button 
+                    onClick={onClose}
+                    style={{
+                        width: '100%',
+                        padding: '10px',
+                        background: '#667eea',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer'
+                    }}
+                >
+                    Close
+                </button>
+            </div>
+        );
+    };
+
     // --- SHOW MODE SELECTION IF NO MODE SELECTED ---
     if (!selectedMode) {
         const hasProfileData = profileData?.location && profileData?.phone_number;
@@ -3200,9 +4040,529 @@ function SocialAIMarketingEngine() {
         );
     };
 
+    // ============================================
+    // ENHANCED FULL-SCREEN DASHBOARD COMPONENT
+    // ============================================
+
+    const UserDashboard = ({ userId, userName, userEmail, selectedMode, onClose, pushEnabled, onEnablePush, pushLoading }) => {
+        const [activeTab, setActiveTab] = useState('overview');
+        const [notificationSettings, setNotificationSettings] = useState({
+            pushEnabled: pushEnabled || false,
+            emailNotifications: true,
+            matchAlerts: true,
+            priceDropAlerts: true,
+            messageAlerts: true
+        });
+
+        const handleTogglePush = async () => {
+            if (onEnablePush) {
+                const result = await onEnablePush();
+                if (result) {
+                    setNotificationSettings(prev => ({ ...prev, pushEnabled: true }));
+                }
+            } else {
+                setNotificationSettings(prev => ({ ...prev, pushEnabled: !prev.pushEnabled }));
+            }
+        };
+
+        const testPushNotification = async () => {
+            if (!('serviceWorker' in navigator)) {
+                alert('Push notifications not supported');
+                return;
+            }
+            
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                await registration.showNotification('Test Notification', {
+                    body: '✅ Push notifications are working!',
+                    icon: '/pwa-192x192.png',
+                    badge: '/pwa-192x192.png',
+                    vibrate: [200, 100, 200],
+                    data: { url: '/' }
+                });
+                alert('Test notification sent! Check your notifications.');
+            } catch (error) {
+                console.error('Test notification failed:', error);
+                alert('Failed to send test notification. Make sure notifications are enabled.');
+            }
+        };
+
+        return (
+            <div className="fullscreen-dashboard" style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: '#1e1e1e',  // Match social page background
+                zIndex: 20000,
+                overflow: 'auto',
+                animation: 'fadeIn 0.3s ease'
+            }}>
+                {/* Dashboard Header - Match social page gradient */}
+                <div style={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    padding: '20px',
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 100
+                }}>
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        maxWidth: '1200px',
+                        margin: '0 auto'
+                    }}>
+                        <div>
+                            <h1 style={{ margin: 0, fontSize: '24px' }}>📊 Dashboard</h1>
+                            <p style={{ margin: '5px 0 0', opacity: 0.9, fontSize: '14px' }}>
+                                Welcome back, {userName}!
+                            </p>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            style={{
+                                background: 'rgba(255,255,255,0.2)',
+                                border: 'none',
+                                color: 'white',
+                                fontSize: '24px',
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '50%',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
+
+                {/* Dashboard Content */}
+                <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                    {/* Tab Navigation */}
+                    <div style={{
+                        display: 'flex',
+                        gap: '10px',
+                        marginBottom: '20px',
+                        borderBottom: '2px solid #e0e0e0',
+                        paddingBottom: '10px',
+                        flexWrap: 'wrap'
+                    }}>
+                        {[
+                            { id: 'overview', icon: '📊', label: 'Overview' },
+                            { id: 'features', icon: '🎯', label: 'Features & Tools' },
+                            { id: 'settings', icon: '⚙️', label: 'Settings' }
+                        ].map(tab => (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveTab(tab.id)}
+                                style={{
+                                    padding: '10px 20px',
+                                    background: activeTab === tab.id ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'transparent',
+                                    color: activeTab === tab.id ? 'white' : '#666',
+                                    border: 'none',
+                                    borderRadius: '10px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                    fontSize: '14px',
+                                    transition: 'all 0.3s ease'
+                                }}
+                            >
+                                {tab.icon} {tab.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Overview Tab */}
+                    {activeTab === 'overview' && (
+                        <div>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                gap: '15px',
+                                marginBottom: '25px'
+                            }}>
+                                <StatCard icon="👀" label="Profile Views" value={156} />
+                                <StatCard icon="❤️" label="Product Saves" value={23} />
+                                <StatCard icon="💬" label="Messages" value={12} unread={3} />
+                                <StatCard icon="⭐" label="Rating" value="4.8" />
+                            </div>
+
+                            <ActivityFeed events={[
+                                "Someone viewed your iPhone listing",
+                                "Price dropped on saved item",
+                                "New match for 'Headphones'"
+                            ]} />
+
+                            <Insights tips={[
+                                "Listings with photos get 3x more views",
+                                "Respond within 5 minutes for best results",
+                                "Add detailed descriptions to build trust"
+                            ]} />
+                        </div>
+                    )}
+
+                    {/* Features & Tools Tab - When clicked, closes dashboard and opens feature */}
+                    {activeTab === 'features' && (
+                        <div>
+                            <h3 style={{ marginBottom: '20px', color: '#333' }}>🎯 Quick Actions</h3>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                                gap: '15px',
+                                marginBottom: '30px'
+                            }}>
+                                <QuickActionCard 
+                                    icon="📦" 
+                                    title="Quick List" 
+                                    description="Add a new product quickly"
+                                    onClick={() => {
+                                        onClose(); // Close dashboard
+                                        quickList(); // Execute action
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="🔍" 
+                                    title="Saved Searches" 
+                                    description="View your saved searches"
+                                    onClick={() => {
+                                        onClose();
+                                        viewSearches();
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="📊" 
+                                    title="Analytics" 
+                                    description="View your performance"
+                                    onClick={() => {
+                                        onClose();
+                                        viewAnalytics();
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="💬" 
+                                    title="Messages" 
+                                    description="Chat with buyers/sellers"
+                                    onClick={() => {
+                                        onClose();
+                                        setShowChatList(true);
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="🔥" 
+                                    title="Daily Deals" 
+                                    description="Check today's hot deals"
+                                    onClick={() => {
+                                        onClose();
+                                        setShowDailyDeals(true);
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="💰" 
+                                    title="Price Alerts" 
+                                    description="Manage your price alerts"
+                                    onClick={() => {
+                                        onClose();
+                                        setShowPriceAlerts(true);
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="🎁" 
+                                    title="Referral Program" 
+                                    description="Invite friends & earn rewards"
+                                    onClick={() => {
+                                        onClose();
+                                        // Open referral program
+                                        alert('Referral Program feature');
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="❤️" 
+                                    title="Wishlist" 
+                                    description="View your saved items"
+                                    onClick={() => {
+                                        // Store current state before showing wishlist
+                                        setPreviousSearchState({
+                                            productSearch: productSearch,
+                                            prospects: prospects,
+                                            productsFound: productsFound,
+                                            searchLoading: searchLoading
+                                        });
+                                        
+                                        // Close the dashboard
+                                        onClose();
+                                        
+                                        // Use setTimeout to ensure dashboard closes before showing wishlist
+                                        setTimeout(() => {
+                                            window.history.pushState({ showWishlist: true }, '', '#wishlist');
+                                            setShowWishlist(true);
+                                        }, 50);
+                                    }}
+                                />
+                                <QuickActionCard 
+                                    icon="🎯" 
+                                    title="More Features" 
+                                    description="Access advanced tools"
+                                    onClick={() => {
+                                        onClose();
+                                        setShowToolsPanel(true);
+                                    }}
+                                />
+                            </div>
+
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea15 0%, #764ba215 100%)',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                marginTop: '20px'
+                            }}>
+                                <h4 style={{ margin: '0 0 10px 0', color: '#667eea' }}>
+                                    📌 Current Mode: {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
+                                </h4>
+                                <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>
+                                    {selectedMode === 'seller' 
+                                        ? "You're in Seller Mode. List products and find customers interested in what you're selling."
+                                        : "You're in Buyer Mode. Search for products and connect with sellers in your area."}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Settings Tab */}
+                    {activeTab === 'settings' && (
+                        <div>
+                            <h3 style={{ marginBottom: '20px', color: '#333' }}>⚙️ Notification Settings</h3>
+                            
+                            <div style={{
+                                background: 'white',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                marginBottom: '20px',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+                                    <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '28px' }}>🔔</span>
+                                            <div>
+                                                <h4 style={{ margin: 0 }}>Push Notifications</h4>
+                                                <p style={{ margin: '5px 0 0', fontSize: '13px', color: '#666' }}>
+                                                    Receive alerts like WhatsApp even when you're not using the app
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <button
+                                            onClick={handleTogglePush}
+                                            disabled={pushLoading}
+                                            style={{
+                                                padding: '12px 24px',
+                                                background: notificationSettings.pushEnabled 
+                                                    ? 'linear-gradient(135deg, #4CAF50, #45a049)' 
+                                                    : 'linear-gradient(135deg, #667eea, #764ba2)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '25px',
+                                                cursor: pushLoading ? 'not-allowed' : 'pointer',
+                                                fontWeight: 'bold',
+                                                fontSize: '14px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '8px'
+                                            }}
+                                        >
+                                            {pushLoading ? (
+                                                <span>⏳ Enabling...</span>
+                                            ) : notificationSettings.pushEnabled ? (
+                                                <span>✅ Enabled</span>
+                                            ) : (
+                                                <span>🔔 Enable Notifications</span>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {notificationSettings.pushEnabled && (
+                                    <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #eee' }}>
+                                        <h5 style={{ margin: '0 0 10px 0' }}>Test Notifications</h5>
+                                        <button
+                                            onClick={testPushNotification}
+                                            style={{
+                                                padding: '10px 20px',
+                                                background: '#2196F3',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                                fontSize: '14px'
+                                            }}
+                                        >
+                                            📱 Send Test Notification
+                                        </button>
+                                        <p style={{ fontSize: '12px', color: '#666', marginTop: '10px' }}>
+                                            You'll receive notifications for: New matches, Price drops, Messages, Daily deals
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div style={{
+                                background: 'white',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                marginBottom: '20px',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}>
+                                <h4 style={{ margin: '0 0 15px 0' }}>Notification Preferences</h4>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={notificationSettings.matchAlerts} 
+                                            onChange={(e) => setNotificationSettings(prev => ({...prev, matchAlerts: e.target.checked}))} />
+                                        <span>🔍 New Match Alerts</span>
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={notificationSettings.priceDropAlerts} 
+                                            onChange={(e) => setNotificationSettings(prev => ({...prev, priceDropAlerts: e.target.checked}))} />
+                                        <span>💰 Price Drop Alerts</span>
+                                    </label>
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={notificationSettings.messageAlerts} 
+                                            onChange={(e) => setNotificationSettings(prev => ({...prev, messageAlerts: e.target.checked}))} />
+                                        <span>💬 Message Alerts</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                background: 'white',
+                                borderRadius: '12px',
+                                padding: '20px',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                            }}>
+                                <h4 style={{ margin: '0 0 15px 0' }}>Account Information</h4>
+                                <p><strong>Email:</strong> {userEmail}</p>
+                                <p><strong>Mode:</strong> {selectedMode === 'seller' ? 'Seller' : 'Buyer'}</p>
+                                <button
+                                    onClick={() => {
+                                        onClose();
+                                        setShowSettings(true);
+                                    }}
+                                    style={{
+                                        marginTop: '10px',
+                                        padding: '10px 20px',
+                                        background: '#667eea',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    Edit Profile Settings
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <style>{`
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                `}</style>
+            </div>
+        );
+    };
+
+    // Quick Action Card Component
+    const QuickActionCard = ({ icon, title, description, onClick, color }) => {
+        return (
+            <div
+                onClick={onClick}
+                style={{
+                    background: 'white',
+                    borderRadius: '12px',
+                    padding: '20px',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    textAlign: 'center'
+                }}
+                onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-5px)';
+                    e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
+                }}
+                onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                }}
+            >
+                <div style={{ fontSize: '40px', marginBottom: '10px' }}>{icon}</div>
+                <h4 style={{ margin: '0 0 5px 0', color: '#333' }}>{title}</h4>
+                <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>{description}</p>
+            </div>
+        );
+    };
+
     // --- MAIN INTERFACE ---
     return (
       <div className="social-media-page"> 
+
+        {/* MOBILE NAVIGATION */}
+        <div className="mobile-nav-container">
+            {/* Hamburger Menu Button */}
+            <button 
+                className="mobile-menu-button" 
+                onClick={toggleMobileMenu}
+                aria-label="Menu"
+            >
+                <span className="menu-icon">☰</span>
+            </button>
+
+            {/* Mobile Sidebar Navigation */}
+            <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
+                <div className="mobile-sidebar-header">
+                    <button className="close-menu" onClick={toggleMobileMenu}>✕</button>
+                    <div className="mobile-user-info">
+                        <div className="mobile-avatar">{userInitials}</div>
+                        <div className="mobile-user-details">
+                            <span className="mobile-user-name">{userName}</span>
+                            <span className="mobile-user-mode">{userMode}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <nav className="mobile-nav-items">
+                    <button onClick={() => { handleNavigation('home'); }}>
+                        🏠 Home
+                    </button>
+                    <button onClick={() => { handleNavigation('profile'); }}>
+                        👤 Profile
+                    </button>
+                    <button onClick={() => { handleNavigation('settings'); }}>
+                        ⚙️ Settings
+                    </button>
+                    <button onClick={() => { handleNavigation('wishlist'); }}>
+                        ❤️ Wishlist
+                    </button>
+                    <button onClick={() => { handleNavigation('switchMode'); }}>
+                        🔄 Switch Mode
+                    </button>
+                    <button onClick={() => { handleNavigation('signout'); }}>
+                        🚪 Sign Out
+                    </button>
+                </nav>
+            </div>
+            
+            {/* Overlay */}
+            {mobileMenuOpen && <div className="mobile-overlay" onClick={toggleMobileMenu}></div>}
+        </div>
 
         {showSettings && (
             <div className="settings-modal-overlay">
@@ -3225,7 +4585,7 @@ function SocialAIMarketingEngine() {
             user={user}
             selectedMode={selectedMode}
             profileData={profileData}
-            signOutLoading={signOutLoading}
+            loading={signOutLoading} 
             onSwitchMode={handleSwitchMode}
             onSignOut={handleSignOut}
             onSettingsClick={() => setShowSettings(true)}
@@ -3240,81 +4600,6 @@ function SocialAIMarketingEngine() {
              
         <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : ''} ${isNavbarHidden ? 'has-hidden-nav' : ''}`}>
             <div className="app-container">
-                {/* 🎯 More Features Button - ABOVE Wishlist Button */}
-                {!showWishlist && !showToolsPanel && (
-                    <button
-                        onClick={() => setShowToolsPanel(true)}
-                        style={{
-                            position: 'fixed',
-                            bottom: '150px',
-                            right: '20px',
-                            backgroundColor: '#4CAF50',
-                            color: 'white',
-                            border: 'none',
-                            padding: '12px 16px',
-                            borderRadius: '50px',
-                            fontWeight: 'bold',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                            zIndex: 1001, // Higher than wishlist button
-                            transition: 'all 0.3s ease',
-                        }}
-                        title="Open advanced features and tools"
-                    >
-                        <span style={{ fontSize: '18px' }}>🎯</span>
-                        More Features
-                    </button>
-                )}
-
-                {/* Floating "Saved Searches" Button - Only shown when NOT in wishlist view */}
-                {!showWishlist && !showToolsPanel && (
-                    <button
-                        onClick={() => {
-                            setPreviousSearchState({
-                                productSearch: productSearch,
-                                prospects: prospects,
-                                productsFound: productsFound,
-                                searchLoading: searchLoading
-                            });
-
-                            // 🔥 CRITICAL FIX: Add to browser history
-                            window.history.pushState({ 
-                                showWishlist: true 
-                            }, '', '#wishlist');
-
-                            setShowWishlist(true);
-                        }}
-                        style={{
-                            position: 'fixed',
-                            bottom: '80px',
-                            right: '20px',
-                            backgroundColor: '#7209b7',
-                            color: 'white',
-                            border: 'none',
-                            padding: '12px 16px',
-                            borderRadius: '50px',
-                            fontWeight: 'bold',
-                            fontSize: '14px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: '8px',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                            zIndex: 1000,
-                            transition: 'all 0.3s ease',
-                        }}
-                        title="View your saved items"
-                    >
-                        <span style={{ fontSize: '18px' }}>📋</span>
-                        View My Wishlist  🧾
-                    </button>
-                )}
 
                 {/* Tools Panel Modal Overlay */}
                 {showToolsPanel && (
@@ -3391,28 +4676,12 @@ function SocialAIMarketingEngine() {
                     >
                         🔔
                         {unreadCount > 0 && (
-                            <div style={{
-                                position: 'absolute',
-                                top: '-5px',
-                                right: '-10px',
-                                backgroundColor: '#ff3b30',
-                                color: 'white',
-                                borderRadius: '50%',
-                                width: '18px',
-                                height: '18px',
-                                fontSize: '11px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontWeight: 'bold',
-                                border: '2px solid #000'
-                            }}>
+                            <div className="notification-badge">
                                 {unreadCount > 9 ? '9+' : unreadCount}
                             </div>
                         )}
                     </button>
                 
-
                     {showNotifications && (
                         <div className="notification-dropdown">
                             <div className="notification-header">
@@ -3443,6 +4712,131 @@ function SocialAIMarketingEngine() {
                         </div>
                     )}
                 </div>
+
+                {/* ===== FLOATING BUTTONS - PROPER ORDER ===== */}
+                
+                {/* 1. DASHBOARD BUTTON - Top (Highest) */}
+                {!showWishlist && !showToolsPanel && !showDashboard && (
+                    <button
+                        onClick={() => setShowDashboard(true)}
+                        style={{
+                            position: 'fixed',
+                            bottom: '135px',
+                            right: '20px',
+                            backgroundColor: '#FF9800',
+                            color: 'white',
+                            border: 'none',
+                            padding: '14px 20px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '15px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+                            zIndex: 1000,
+                            transition: 'all 0.3s ease',
+                        }}
+                        title="Open Dashboard - Access all features"
+                    >
+                        <span style={{ fontSize: '20px' }}>📊</span>
+                        Dashboard
+                    </button>
+                )}
+
+                 {/* 2. REPORT BUTTON - Below Dashboard with equal spacing */}
+                <div style={{
+                    position: 'fixed',
+                    bottom: '75px', 
+                    right: '20px',
+                    zIndex: 1000,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '5px'
+                }}>
+                    <ReportButton 
+                        targetUserId={user?.id}
+                        floating={true}
+                        style={{
+                            backgroundColor: '#ff3b30',
+                            color: 'white',
+                            border: 'none',
+                            padding: '14px 20px',
+                            borderRadius: '50px',
+                            fontWeight: 'bold',
+                            fontSize: '15px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '10px',
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+                        }}
+                    />
+                </div>
+
+                {/* 4. FILTER BUTTON - Left side */}
+                <button 
+                    className={`filter-icon-mobile ${activeFilterCount > 0 ? 'active' : ''}`}
+                    onClick={() => setShowFilterModal(true)}
+                    title="Filter Results"
+                    style={{
+                        position: 'fixed',
+                        bottom: '140px',
+                        left: '20px',
+                        background: activeFilterCount > 0 ? '#4CAF50' : '#667eea',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '55px',
+                        height: '55px',
+                        fontSize: '24px',
+                        cursor: 'pointer',
+                        zIndex: 1000,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                >
+                    🔍
+                    {activeFilterCount > 0 && (
+                        <span style={{
+                            position: 'absolute',
+                            top: '-5px',
+                            right: '-5px',
+                            background: '#ff3b30',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '22px',
+                            height: '22px',
+                            fontSize: '12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            border: '2px solid white'
+                        }}>
+                            {activeFilterCount}
+                        </span>
+                    )}
+                </button>
+
+                {showDashboard && (
+                    <UserDashboard 
+                        userId={user?.id}
+                        userName={userName}
+                        userEmail={user?.email}
+                        selectedMode={selectedMode}
+                        onClose={() => setShowDashboard(false)}
+                        pushEnabled={pushEnabled}
+                        onEnablePush={subscribeToPush}
+                        pushLoading={pushLoading}
+                    />
+                )}
   
                 <main className="social-main-content">
                     <div className="search-section-card">
@@ -3511,54 +4905,8 @@ function SocialAIMarketingEngine() {
                             </div>
 
                         </div>
-                    </div>
 
-                    {/* Mobile Filter Icon Button */}
-                    <button 
-                        className={`filter-icon-mobile ${activeFilterCount > 0 ? 'active' : ''}`}
-                        onClick={() => setShowFilterModal(true)}
-                        title="Filter Results"
-                        style={{
-                            position: 'fixed',
-                            bottom: '140px',
-                            left: '20px',
-                            background: activeFilterCount > 0 ? '#4CAF50' : '#667eea',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '60px',
-                            height: '60px',
-                            fontSize: '24px',
-                            cursor: 'pointer',
-                            zIndex: 1000,
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}
-                    >
-                        🔍
-                        {activeFilterCount > 0 && (
-                            <span style={{
-                                position: 'absolute',
-                                top: '-5px',
-                                right: '-5px',
-                                background: '#ff3b30',
-                                color: 'white',
-                                borderRadius: '50%',
-                                width: '24px',
-                                height: '24px',
-                                fontSize: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontWeight: 'bold',
-                                border: '2px solid white'
-                            }}>
-                                {activeFilterCount}
-                            </span>
-                        )}
-                    </button>
+                    </div>
 
                     <div className="filter-container">
                         <button 
@@ -3675,6 +5023,7 @@ function SocialAIMarketingEngine() {
                         </div>
                     </div>
 
+
                     {error && (
                         <div className="error-alert">
                             <span className="error-icon">⚠️</span>
@@ -3781,45 +5130,78 @@ function SocialAIMarketingEngine() {
                             />
                         </div>
                     ) : showWishlist ? (
-                        <div style={{ width: '100%', padding: '1rem' }}>
-                            {/* Simple "Back" button in Wishlist view */}
-                            <button 
-                                onClick={() => {
-                                    window.history.back();                                 
-                                    setShowWishlist(false);
-                                    setTimeout(() => {
-                                    if (previousSearchState.productSearch !== undefined) {
-                                        setProductSearch(previousSearchState.productSearch);
-                                    }
-                                    if (previousSearchState.prospects !== undefined) {
-                                        setProspects(previousSearchState.prospects);
-                                    }
-                                    if (previousSearchState.productsFound !== undefined) {
-                                        setProductsFound(previousSearchState.productsFound);
-                                    }
-                                    if (previousSearchState.searchLoading !== undefined) {
-                                        setSearchLoading(previousSearchState.searchLoading);
-                                    }
-                                    }, 100);
-                                }}
-                                style={{
-                                    background: 'var(--primary-color)',
-                                    color: 'white',
-                                    border: 'none',
-                                    padding: '10px 16px',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    fontSize: '14px',
+                        <div style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: '#121212',
+                            zIndex: 20000,
+                            overflow: 'auto',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                padding: '20px',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100
+                            }}>
+                                <div style={{
                                     display: 'flex',
+                                    justifyContent: 'space-between',
                                     alignItems: 'center',
-                                    gap: '8px',
-                                    marginBottom: '20px'
-                                }}
-                                >
-                                ← Back to Search  
-                            </button>
-                            <WishlistManager onBack={() => window.history.back()} />
+                                    maxWidth: '1200px',
+                                    margin: '0 auto'
+                                }}>
+                                    <h1 style={{ margin: 0, fontSize: '24px' }}>❤️ My Wishlist</h1>
+                                    <button
+                                        onClick={() => {
+                                            window.history.back();
+                                            setShowWishlist(false);
+                                            setTimeout(() => {
+                                                if (previousSearchState.productSearch !== undefined) {
+                                                    setProductSearch(previousSearchState.productSearch);
+                                                }
+                                                if (previousSearchState.prospects !== undefined) {
+                                                    setProspects(previousSearchState.prospects);
+                                                }
+                                                if (previousSearchState.productsFound !== undefined) {
+                                                    setProductsFound(previousSearchState.productsFound);
+                                                }
+                                                if (previousSearchState.searchLoading !== undefined) {
+                                                    setSearchLoading(previousSearchState.searchLoading);
+                                                }
+                                            }, 100);
+                                        }}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.2)',
+                                            border: 'none',
+                                            color: 'white',
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                                <WishlistManager onBack={() => {
+                                    window.history.back();
+                                    setShowWishlist(false);
+                                }} />
+                            </div>
                         </div>
+
                         
                     ) : (
                     
@@ -4307,6 +5689,48 @@ function SocialAIMarketingEngine() {
                                                             </button>
                                                               
                                                         </div>
+
+                                                        <PriceAlertButton 
+                                                            product={p}
+                                                            userId={user?.id}
+                                                            onAlertSet={(set) => {
+                                                                if (set) {
+                                                                    showToastNotification(`✅ Price alert set for ${p.name}`);
+                                                                }
+                                                            }}
+                                                        />
+
+                                                        {/* Chat Button */}
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedChat({
+                                                                    otherUserId: p.seller_id,
+                                                                    otherUserName: p.seller?.username || 'Seller',
+                                                                    productId: p.id,
+                                                                    productName: p.name
+                                                                });
+                                                                setShowChat(true);
+                                                            }}
+                                                            style={{
+                                                                width: '100%',
+                                                                backgroundColor: '#667eea',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                padding: '10px',
+                                                                borderRadius: '8px',
+                                                                fontWeight: 'bold',
+                                                                fontSize: '14px',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '8px'
+                                                            }}
+                                                        >
+                                                            <span>💬</span>
+                                                            Message Seller
+                                                        </button>
+
                                                     </div>
                                                 </div>
                                             ))}
@@ -4444,60 +5868,25 @@ function SocialAIMarketingEngine() {
                                                 </div>
                                             </div>
                                         )}
-                                    
+
                                 </div>
                             )}
                         </div>
+                        
                     )}
+
+                    {/* Recommendations Section - Show when there are results */}
+                    {(productsFound.length > 0 || prospects.length > 0) && user && (
+                        <RecommendationsSection 
+                            userId={user.id}
+                            currentProductId={lastViewedProduct?.id}
+                            onProductClick={handleProductClick}
+                        />
+                    )}
+
                 </main>
 
-                {/* Floating Actions Container */}
-                <div
-                style={{
-                    position: 'fixed',
-                    bottom: '20px',
-                    right: '20px',
-                    zIndex: 1000,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: '10px'
-                }}
-                >
                 
-                {/* Report Button */}
-                <ReportButton 
-                    targetUserId={user?.id}
-                    floating={isReportButtonFloating}
-                    style={{
-                    backgroundColor: '#ff3b30',
-                    color: 'white',
-                    border: 'none',
-                    padding: '12px 16px',
-                    borderRadius: '50px',
-                    fontWeight: 'bold',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                    transition: 'all 0.3s ease',
-                    }}
-                />
-                
-                {/* Label for Report Button */}
-                <span style={{ 
-                    fontSize: '12px', 
-                    color: '#666', 
-                    background: 'rgba(255,255,255,0.9)', 
-                    padding: '4px 8px', 
-                    borderRadius: '4px' 
-                }}>
-                    Report Issue
-                </span>
-                </div>
             <footer className="app-footer">
             <div className="footer-content">
                 {/* CORRECT: Use Link from react-router-dom properly */}
@@ -4790,7 +6179,58 @@ function SocialAIMarketingEngine() {
             </div>
         )}
         <PWAInstallPrompt />
-     </div>
+       
+        <div className="mobile-nav-container">
+        {/* Hamburger Menu Button - Only visible on mobile */}
+        <button 
+            className="mobile-menu-button" 
+            onClick={toggleMobileMenu}
+            aria-label="Menu"
+        >
+            <span className="menu-icon">☰</span>
+        </button>
+
+        </div>
+
+        {/* Chat List Modal */}
+        {showChatList && (
+            <div style={styles.modalOverlay} onClick={() => setShowChatList(false)}>
+                <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+                    <ChatList
+                        userId={user?.id}
+                        onSelectChat={(chat) => {
+                            setSelectedChat({
+                                otherUserId: chat.otherUserId,
+                                otherUserName: chat.otherUser?.username,
+                                productId: chat.product_id,
+                                productName: chat.product?.name
+                            });
+                            setShowChatList(false);
+                            setShowChat(true);
+                        }}
+                        onClose={() => setShowChatList(false)}
+                    />
+                </div>
+            </div>
+        )}
+
+        {/* Chat Modal */}
+        {showChat && selectedChat && (
+            <div style={styles.modalOverlay} onClick={() => setShowChat(false)}>
+                <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+                    <ChatSystem
+                        currentUserId={user?.id}
+                        otherUserId={selectedChat.otherUserId}
+                        otherUserName={selectedChat.otherUserName}
+                        productId={selectedChat.productId}
+                        productName={selectedChat.productName}
+                        onClose={() => setShowChat(false)}
+                    />
+                </div>
+            </div>
+        )}
+
+    </div>
      
     );
     

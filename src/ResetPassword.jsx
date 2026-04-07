@@ -1,3 +1,4 @@
+// Add this to your ResetPassword.jsx component
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
@@ -10,10 +11,14 @@ const ResetPassword = () => {
     const [message, setMessage] = useState({ type: '', text: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [isValidToken, setIsValidToken] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(true);
     const navigate = useNavigate();
     const location = useLocation();
 
     useEffect(() => {
+        // Mark that we're on reset password page to prevent any redirects
+        sessionStorage.setItem('onResetPage', 'true');
+        
         const handlePasswordResetRedirect = async () => {
             try {
                 // Parse the hash fragment from the URL
@@ -59,10 +64,21 @@ const ResetPassword = () => {
                     text: 'Failed to process reset link. Please try again.' 
                 });
                 setIsValidToken(false);
+            } finally {
+                setIsProcessing(false);
+                // Clear the flag after processing
+                setTimeout(() => {
+                    sessionStorage.removeItem('onResetPage');
+                }, 5000);
             }
         };
 
         handlePasswordResetRedirect();
+        
+        // Cleanup function
+        return () => {
+            sessionStorage.removeItem('onResetPage');
+        };
     }, []);
 
     const validatePassword = (password) => {
@@ -101,12 +117,20 @@ const ResetPassword = () => {
                 text: '✅ Password reset successfully! Redirecting to login...' 
             });
             
-            // Sign out to clear the recovery session
-            await supabase.auth.signOut();
-            
-            // Redirect to login after 2 seconds
-            setTimeout(() => {
-                navigate('/signup');
+            // Wait a moment before signing out and redirecting
+            setTimeout(async () => {
+                try {
+                    // Sign out to clear the recovery session
+                    await supabase.auth.signOut();
+                } catch (signOutError) {
+                    console.error('Error signing out:', signOutError);
+                }
+                
+                // Clear the reset page flag
+                sessionStorage.removeItem('onResetPage');
+                
+                // Redirect to login page
+                navigate('/'); // Changed to your login route
             }, 2000);
             
         } catch (error) {
@@ -120,10 +144,22 @@ const ResetPassword = () => {
         }
     };
 
-    const requestNewReset = async () => {
-        // You can add functionality to request a new reset link here
-        navigate('/forgot-password');
-    };
+    // Show loading state while processing token
+    if (isProcessing) {
+        return (
+            <div className="signup-page">
+                <div className="auth-page-wrapper">
+                    <div className="auth-container">
+                        <div className="auth-card">
+                            <div style={{ textAlign: 'center', padding: '40px' }}>
+                                <div>Verifying reset link...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="signup-page">
@@ -191,6 +227,7 @@ const ResetPassword = () => {
                                                 fontSize: '16px',
                                                 border: '2px solid #e2e8f0',
                                                 transition: 'all 0.3s ease',
+                                                outline: 'none'
                                             }}
                                         />
                                     </div>
@@ -225,6 +262,7 @@ const ResetPassword = () => {
                                                 fontSize: '16px',
                                                 border: '2px solid #e2e8f0',
                                                 transition: 'all 0.3s ease',
+                                                outline: 'none'
                                             }}
                                         />
                                     </div>
@@ -277,8 +315,6 @@ const ResetPassword = () => {
                                         marginTop: '10px',
                                         opacity: loading ? 0.7 : 1
                                     }}
-                                    onMouseEnter={(e) => !loading && (e.target.style.transform = 'translateY(-2px)')}
-                                    onMouseLeave={(e) => !loading && (e.target.style.transform = 'translateY(0)')}
                                 >
                                     {loading ? 'Resetting...' : 'RESET PASSWORD'}
                                 </button>
@@ -304,7 +340,7 @@ const ResetPassword = () => {
                                     Request New Link
                                 </button>
                                 <button
-                                    onClick={() => navigate('/signup')}
+                                    onClick={() => navigate('/')}
                                     style={{
                                         padding: '12px 24px',
                                         background: 'transparent',

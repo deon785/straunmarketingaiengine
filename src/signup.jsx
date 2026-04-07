@@ -13,7 +13,8 @@ import {
   faSpinner,
   faEye,
   faEyeSlash,
-  faCheck 
+  faCheck,
+  faGift
 } from '@fortawesome/free-solid-svg-icons';
 
 const Auth = () => {
@@ -25,7 +26,20 @@ const Auth = () => {
   const [isSignUp, setIsSignUp] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [referralCode, setReferralCode] = useState(null);
+  const [showReferralBonus, setShowReferralBonus] = useState(false);
   const navigate = useNavigate();
+
+  // Get referral code from URL on component mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const ref = urlParams.get('ref');
+    if (ref) {
+      setReferralCode(ref.toUpperCase());
+      setShowReferralBonus(true);
+      console.log('📢 Referral code detected:', ref);
+    }
+  }, []);
 
   // Helper function to store user in localStorage
   const storeUserInLocalStorage = (userData) => {
@@ -40,6 +54,115 @@ const Auth = () => {
       localStorage.setItem('user', JSON.stringify(userToStore));
       console.log('✅ User stored in localStorage:', userToStore.email);
     }
+  };
+
+  // Handle referral points awarding
+  const processReferral = async (userId, referralCodeValue) => {
+    try {
+      console.log('🎁 Processing referral for user:', userId, 'Code:', referralCodeValue);
+      
+      // Find the referrer using the referral code
+      const { data: referrer, error: referrerError } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('referral_code', referralCodeValue)
+        .single();
+      
+      if (referrerError) {
+        console.log('No referrer found with code:', referralCodeValue);
+        return;
+      }
+      
+      console.log('✅ Referrer found:', referrer.user_id);
+      
+      // Create referral record
+      const { error: referralError } = await supabase
+        .from('referrals')
+        .insert({
+          referrer_id: referrer.user_id,
+          referred_user_id: userId,
+          referral_code: referralCodeValue,
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          points_earned: 50
+        });
+      
+      if (referralError) {
+        console.error('Error creating referral record:', referralError);
+        return;
+      }
+      
+      console.log('✅ Referral record created');
+      
+      // Award points to referrer (50 points)
+      const { error: referrerRewardError } = await supabase
+        .from('referral_rewards')
+        .insert({
+          user_id: referrer.user_id,
+          referral_id: null, // Will be updated after we get the ID
+          points_earned: 50,
+          reward_type: 'referral'
+        });
+      
+      if (referrerRewardError) {
+        console.error('Error awarding referrer points:', referrerRewardError);
+      } else {
+        console.log('✅ Awarded 50 points to referrer');
+        
+        // Send notification to referrer
+        await supabase
+          .from('notifications')
+          .insert({
+            user_id: referrer.user_id,
+            message: '🎉 Someone signed up using your referral link! You earned 50 points!',
+            link_type: 'dashboard'
+          });
+      }
+      
+      // Award bonus to new user (25 points)
+      const { error: newUserRewardError } = await supabase
+        .from('referral_rewards')
+        .insert({
+          user_id: userId,
+          referral_id: null,
+          points_earned: 25,
+          reward_type: 'signup_bonus'
+        });
+      
+      if (newUserRewardError) {
+        console.error('Error awarding new user bonus:', newUserRewardError);
+      } else {
+        console.log('✅ Awarded 25 bonus points to new user');
+      }
+      
+      setMessage({
+        text: '🎉 You received 25 bonus points from a referral!',
+        type: 'success'
+      });
+      
+    } catch (error) {
+      console.error('Error processing referral:', error);
+    }
+  };
+
+  // Generate unique referral code for new user
+  const generateReferralCode = async (userId, email) => {
+    const base = email.split('@')[0].substring(0, 6).toUpperCase();
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const code = `${base}${random}`;
+    
+    const { error } = await supabase
+      .from('profiles')
+      .update({ referral_code: code })
+      .eq('user_id', userId);
+    
+    if (error) {
+      console.error('Error setting referral code:', error);
+    } else {
+      console.log('✅ Referral code generated:', code);
+    }
+    
+    return code;
   };
 
   // Input validation
@@ -60,17 +183,14 @@ const Auth = () => {
       return false;
     }
 
-    // Check terms agreement for sign up
     if (isSignUp && !agreedToTerms) {
       setMessage({ text: 'You must agree to Terms of Service and Privacy Policy', type: 'error' });
       return false;
     }
 
     if (isSignUp && phone) {
-      // Clean phone number
       const cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
       const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-      
       if (!phoneRegex.test(cleanedPhone)) {
         setMessage({ text: 'Please enter a valid phone number', type: 'error' });
         return false;
@@ -85,9 +205,10 @@ const Auth = () => {
     setMessage({ text: '', type: '' });
     setPhone('');
     setAgreedToTerms(false);
+    setShowReferralBonus(false);
   };
   
-  // Handle Sign Up
+  // Handle Sign Up with Referral Integration
   const handleSignUp = async (e) => {
     e.preventDefault();
     setMessage({ text: '', type: '' });
@@ -97,11 +218,11 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      // Clean phone number if provided
       const cleanedPhone = phone ? phone.replace(/[\s\-\(\)\.]/g, '') : null;
       
-      console.log('Attempting signup with:', { email, phone: cleanedPhone });
+      console.log('Attempting signup with:', { email, phone: cleanedPhone, referralCode });
       
+      // Create user account
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -119,17 +240,16 @@ const Auth = () => {
       console.log("[SignUp] Signup successful, user ID:", authData.user?.id);
 
       if (authData.user) {
-        // Try to create profile if user was created
+        // Create or update profile
         try {
-          // First check if profile already exists
           const { data: existingProfile, error: checkError } = await supabase
             .from('profiles')
             .select('user_id')
             .eq('user_id', authData.user.id)
             .single();
 
-          // If no profile exists, create one
           if (checkError && checkError.code === 'PGRST116') {
+            // Create new profile
             const { error: insertError } = await supabase
               .from('profiles')
               .insert([
@@ -142,27 +262,23 @@ const Auth = () => {
 
             if (insertError) {
               console.error('Profile creation error:', insertError);
-              // Don't throw - profile creation is secondary
             } else {
               console.log('✅ Profile created successfully');
             }
           } else if (existingProfile) {
-            console.log('✅ Profile already exists, updating...');
-            const { error: updateError } = await supabase
-              .from('profiles')
-              .update({
-                email: email,
-                phone_number: cleanedPhone || null,
-              })
-              .eq('user_id', authData.user.id);
-
-            if (updateError) {
-              console.error('Profile update error:', updateError);
-            }
+            console.log('✅ Profile already exists');
           }
+          
+          // Generate referral code for new user
+          await generateReferralCode(authData.user.id, email);
+          
+          // Process referral if there's a referral code
+          if (referralCode) {
+            await processReferral(authData.user.id, referralCode);
+          }
+          
         } catch (profileError) {
-          console.error('Profile creation/update failed:', profileError);
-          // Continue anyway - profile can be updated later
+          console.error('Profile creation failed:', profileError);
         }
 
         // Check if email confirmation is required
@@ -176,25 +292,24 @@ const Auth = () => {
           return;
         }
 
-        // Check if email needs confirmation
         if (authData.user.confirmed_at === null) {
           setMessage({
-            text: 'Please check your email to confirm your account!',
+            text: referralCode 
+              ? '📧 Please check your email to confirm your account! Your referral bonus will be activated after confirmation.'
+              : '📧 Please check your email to confirm your account!',
             type: 'success',
           });
           
-          // Clear form
           setEmail('');
           setPassword('');
           setPhone('');
           setAgreedToTerms(false);
           
-          // Optionally switch to sign in mode
           setTimeout(() => {
             setIsSignUp(false);
           }, 3000);
         } else {
-          // User is confirmed, try to sign in immediately
+          // Auto sign in
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email,
             password,
@@ -211,26 +326,22 @@ const Auth = () => {
           } else {
             storeUserInLocalStorage(signInData);
             setMessage({
-              text: 'Account created successfully! Redirecting...',
+              text: referralCode 
+                ? '🎉 Account created successfully! You received 25 bonus points from a referral!'
+                : 'Account created successfully! Redirecting...',
               type: 'success',
             });
             
             setTimeout(() => {
               navigate('/app', { replace: true });
-            }, 1000);
+            }, 1500);
           }
         }
-      } else {
-        setMessage({
-          text: 'Signup failed. Please try again.',
-          type: 'error',
-        });
       }
       
     } catch (error) {
       console.error('Sign up error:', error);
       
-      // Handle specific error cases
       if (error.message && error.message.includes('already registered')) {
         setMessage({
           text: 'Email already registered. Please sign in instead.',
@@ -250,34 +361,6 @@ const Auth = () => {
           text: 'Password must be at least 6 characters long.',
           type: 'error',
         });
-      } else if (error.message && error.message.includes('Invalid email')) {
-        setMessage({
-          text: 'Please enter a valid email address.',
-          type: 'error',
-        });
-      } else if (error.message && error.message.includes('profiles')) {
-        setMessage({
-          text: 'Account created! There was an issue setting up your profile.',
-          type: 'info',
-        });
-        // Still try to sign in if account was created
-        setTimeout(async () => {
-          try {
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email,
-              password,
-            });
-            
-            if (!signInError && signInData) {
-              storeUserInLocalStorage(signInData);
-              navigate('/app', { replace: true });
-            } else {
-              setIsSignUp(false);
-            }
-          } catch (signInErr) {
-            setIsSignUp(false);
-          }
-        }, 1000);
       } else {
         setMessage({
           text: error.message || 'Sign up failed. Please try again.',
@@ -308,34 +391,23 @@ const Auth = () => {
     setLoading(true);
 
     try {
-      console.log('Attempting signin with:', { email });
-      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      if (error) {
-        console.error('Supabase signin error:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      console.log('Sign in successful:', data);
-
-      // ✅ STORE USER IN LOCALSTORAGE
       storeUserInLocalStorage(data);
-
       setMessage({
         text: 'Login successful! Redirecting...',
         type: 'success',
       });
       
-      // Clear form
       setEmail('');
       setPassword('');
       setAgreedToTerms(false);
       
-      // Redirect
       setTimeout(() => {
         navigate('/app', { replace: true });
       }, 500);
@@ -343,7 +415,6 @@ const Auth = () => {
     } catch (error) {
       console.error('Sign in error:', error);
       
-      // Handle specific error cases
       if (error.message === 'Invalid login credentials') {
         setMessage({
           text: 'Invalid email or password',
@@ -352,11 +423,6 @@ const Auth = () => {
       } else if (error.message && error.message.includes('Email not confirmed')) {
         setMessage({
           text: 'Please confirm your email address first.',
-          type: 'error',
-        });
-      } else if (error.message && error.message.includes('User not found')) {
-        setMessage({
-          text: 'No account found with this email.',
           type: 'error',
         });
       } else {
@@ -372,55 +438,43 @@ const Auth = () => {
 
   const handleForgotPassword = async () => {
     if (!email) {
-        setMessage({ text: 'Please enter your email to reset password', type: 'error' });
-        return;
+      setMessage({ text: 'Please enter your email to reset password', type: 'error' });
+      return;
     }
     
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-        setMessage({ text: 'Please enter a valid email address', type: 'error' });
-        return;
+      setMessage({ text: 'Please enter a valid email address', type: 'error' });
+      return;
     }
     
     try {
-        setLoading(true);
-        setMessage({ text: '', type: '' });
-        
-        console.log('Sending password reset to:', email);
-        
-        // IMPORTANT: Use the exact URL of your deployed app
-        const resetUrl = `${window.location.origin}/reset-password`;
-        console.log('Reset URL:', resetUrl);
-        
-        const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: resetUrl,
-        });
-        
-        if (error) {
-            console.error('Password reset error:', error);
-            throw error;
-        }
-        
-        console.log('Password reset email sent:', data);
-        
-        setMessage({ 
-            text: '📧 Password reset email sent! Check your inbox (and spam folder).', 
-            type: 'success' 
-        });
-        
-        // Clear email field
-        setEmail('');
-        
+      setLoading(true);
+      
+      const resetUrl = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: resetUrl,
+      });
+      
+      if (error) throw error;
+      
+      setMessage({ 
+        text: '📧 Password reset email sent! Check your inbox (and spam folder).', 
+        type: 'success' 
+      });
+      
+      setEmail('');
+      
     } catch (error) {
-        console.error('Forgot password error:', error);
-        setMessage({ 
-            text: error.message || 'Failed to send reset email. Please try again.', 
-            type: 'error' 
-        });
+      console.error('Forgot password error:', error);
+      setMessage({ 
+        text: error.message || 'Failed to send reset email. Please try again.', 
+        type: 'error' 
+      });
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
-};
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -431,29 +485,38 @@ const Auth = () => {
     }
   };
 
-  // Toggle password visibility
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
 
-  // Helper function to get field background color
-  const getFieldBackground = (value) => {
-    return value ? '#000000ff' : '#000000ff';
-  };
-
-  // Helper function to get field border color
-  const getFieldBorderColor = (value) => {
-    return value ? '#000000ff' : '#000000ff';
-  };
-
-  // Handle checkbox change
-  const handleCheckboxChange = (e) => {
-    setAgreedToTerms(e.target.checked);
-  };
-
- return (
+  return (
     <div className="signup-page">
       
+      {/* Referral Bonus Banner */}
+      {showReferralBonus && isSignUp && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'linear-gradient(135deg, #667eea, #764ba2)',
+          color: 'white',
+          padding: '12px 24px',
+          borderRadius: '50px',
+          fontSize: '14px',
+          fontWeight: '600',
+          zIndex: 1000,
+          boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          animation: 'slideDown 0.5s ease'
+        }}>
+          <FontAwesomeIcon icon={faGift} />
+          🎁 You were referred! Get 25 bonus points on signup!
+        </div>
+      )}
+
       <div className="auth-page-wrapper">
         <div className="auth-container">
           <div className="auth-card">
@@ -488,7 +551,6 @@ const Auth = () => {
             )}
 
             <form onSubmit={handleSubmit}>
-              {/* Hidden fields to prevent autofill issues */}
               <div style={{ display: 'none' }}>
                 <input type="text" name="username" autoComplete="username" />
                 <input type="password" name="current-password" autoComplete="current-password" />
@@ -643,7 +705,6 @@ const Auth = () => {
                     }}
                   />
                   
-                  {/* SHOW/HIDE PASSWORD BUTTON */}
                   <button
                     type="button"
                     onClick={togglePasswordVisibility}
@@ -667,8 +728,6 @@ const Auth = () => {
                       transition: 'all 0.3s ease',
                       opacity: loading ? 0.5 : 1
                     }}
-                    onMouseEnter={(e) => !loading && (e.target.style.background = password ? 'rgba(102, 126, 234, 0.1)' : 'rgba(153, 153, 153, 0.1)')}
-                    onMouseLeave={(e) => !loading && (e.target.style.background = 'transparent')}
                   >
                     <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} />
                     {showPassword ? 'Hide' : 'Show'}
@@ -690,9 +749,9 @@ const Auth = () => {
                 }}>
                   <input 
                     type="checkbox" 
-                    id="terms"  // Changed from privacy to terms
+                    id="terms"
                     checked={agreedToTerms}
-                    onChange={handleCheckboxChange}
+                    onChange={(e) => setAgreedToTerms(e.target.checked)}  // ✅ Fixed
                     disabled={loading}
                     style={{ 
                       cursor: loading ? 'not-allowed' : 'pointer', 
@@ -718,22 +777,15 @@ const Auth = () => {
                     I agree to the{" "}
                     <Link 
                       to="/terms" 
-                      style={{ 
-                        color: '#667eea', 
-                        fontWeight: '600',
-                        marginLeft: '4px'
-                      }}
+                      style={{ color: '#667eea', fontWeight: '600' }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       Terms of Service
                     </Link>{" "}
                     and{" "}
                     <Link 
-                      to="/privacy"  // Fixed: from /privacy-policy to /privacy
-                      style={{ 
-                        color: '#667eea', 
-                        fontWeight: '600'
-                      }}
+                      to="/privacy"
+                      style={{ color: '#667eea', fontWeight: '600' }}
                       onClick={(e) => e.stopPropagation()}
                     >
                       Privacy Policy
@@ -764,8 +816,6 @@ const Auth = () => {
                   marginTop: '10px',
                   opacity: loading || (isSignUp && !agreedToTerms) ? 0.7 : 1
                 }}
-                onMouseEnter={(e) => !loading && agreedToTerms && (e.target.style.transform = 'translateY(-2px)')}
-                onMouseLeave={(e) => !loading && agreedToTerms && (e.target.style.transform = 'translateY(0)')}
               >
                 {loading ? (
                   <>
@@ -811,8 +861,6 @@ const Auth = () => {
                   textTransform: 'uppercase',
                   opacity: loading ? 0.5 : 1
                 }}
-                onMouseEnter={(e) => !loading && (e.target.style.background = 'rgba(102, 126, 234, 0.1)')}
-                onMouseLeave={(e) => !loading && (e.target.style.background = 'none')}
               >
                 {isSignUp ? 'SIGN IN' : 'SIGN UP'}
               </button>
@@ -834,8 +882,6 @@ const Auth = () => {
                     transition: 'all 0.3s ease',
                     opacity: loading ? 0.5 : 1
                   }}
-                  onMouseEnter={(e) => !loading && (e.target.style.background = 'rgba(113, 128, 150, 0.1)')}
-                  onMouseLeave={(e) => !loading && (e.target.style.background = 'none')}
                 >
                   Forgot password?
                 </button>
@@ -859,27 +905,9 @@ const Auth = () => {
       }}>
         <p>&copy; 2025 Straun Marketing AI Engine. All rights reserved.</p>
         <div style={{ marginTop: '2px' }}>
-          <Link 
-            to="/privacy" 
-            style={{ 
-              color: '#48bb78', 
-              textDecoration: 'none',
-              margin: '0 8px'
-            }}
-          >
-            Privacy
-          </Link>
+          <Link to="/privacy" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px' }}>Privacy</Link>
           <span style={{ color: '#666' }}>|</span>
-          <Link 
-            to="/terms" 
-            style={{ 
-              color: '#48bb78', 
-              textDecoration: 'none',
-              margin: '0 8px'
-            }}
-          >
-            Terms
-          </Link>
+          <Link to="/terms" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px' }}>Terms</Link>
         </div>
       </footer>
     </div>

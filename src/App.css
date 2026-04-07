@@ -2145,81 +2145,100 @@ body.modal-open {
   z-index: 2;
 }
 
-/* NOTIFICATION DROPDOWN - IMPROVED FOR MOBILE */
+/* ENLARGED NOTIFICATION DROPDOWN - LIKE A PROPER DIALOG */
 .notification-dropdown {
   position: absolute;
-  top: 100% !important;
+  top: 100%;
   right: 0;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  width: 350px;
-  max-height: 500px; /* Increased from 400px */
-  overflow-y: auto;
+  border-radius: 20px;
+  width: 450px;
+  max-width: calc(100vw - 40px);
+  max-height: 70vh;
+  overflow: hidden;
   box-shadow: var(--shadow-xl);
   z-index: 1002;
   pointer-events: auto;
   animation: slideIn 0.3s ease-out;
+  display: flex;
+  flex-direction: column;
 }
 
+/* Notification Header - Sticky */
 .notification-header {
-  padding: 15px 20px;
+  padding: 18px 24px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--light-bg);
+  background: var(--card-bg);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+  backdrop-filter: blur(10px);
 }
 
 .notification-header h4 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: 1.2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notification-header h4::before {
+  content: "🔔";
+  font-size: 1.2rem;
 }
 
 .mark-all-read-btn {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border-radius: var(--border-radius-sm);
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  border: none;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 30px;
   font-size: 0.85rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .mark-all-read-btn:hover {
-  background: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 /* NOTIFICATION LIST - IMPROVED SCROLLING */
 .notification-list {
-  max-height: 400px; /* Increased from 300px */
+  flex: 1;
   overflow-y: auto;
-  padding: 5px;
+  padding: 8px 12px;
+  max-height: 500px;
 }
 
 /* INDIVIDUAL NOTIFICATION ITEMS - MORE READABLE */
 .notification-item {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+  border-radius: 16px;
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
-  min-height: 80px; /* Ensure minimum height for readability */
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  background: var(--light-bg);
+  border: 1px solid var(--border-color);
 }
 
 .notification-item:hover {
   background: var(--light-bg);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-color);
 }
 
 .notification-item.unread {
@@ -2247,12 +2266,13 @@ body.modal-open {
 
 /* NOTIFICATION CONTENT - BETTER TYPOGRAPHY */
 .notification-message {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   color: var(--text-primary);
-  font-size: 0.95rem;
-  line-height: 1.4;
+  font-size: 1rem;
+  line-height: 1.5;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  font-weight: 500;
   padding-right: 10px;
 }
 
@@ -2311,21 +2331,186 @@ body.modal-open {
   outline-offset: -2px;
 }
 
-/* ===== NEW NOTIFICATION TOAST (OPTIONAL) ===== */
+.notification-item.unread::before {
+  display: none;
+}
+
+.notification-product-info {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin: 12px 0;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+}
+
+.notification-product-image {
+  width: 60px;
+  height: 60px;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 2px solid var(--primary-color);
+}
+
+.notification-buyer-contact {
+  flex: 1;
+}
+
+.notification-buyer-contact .label {
+  font-size: 11px;
+  color: var(--text-light);
+  margin-bottom: 4px;
+}
+
+.notification-buyer-contact .phone {
+  font-size: 18px;
+  font-weight: bold;
+  color: #25D366;
+}
+
+/* Action Buttons Container */
+.notification-actions {
+  display: flex;
+  gap: 12px;
+  margin: 15px 0 10px;
+  flex-wrap: wrap;
+}
+
+.notification-call-btn,
+.notification-whatsapp-btn,
+.notification-copy-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.notification-call-btn {
+  background: #3182ce;
+  color: white;
+}
+
+.notification-call-btn:hover {
+  background: #2c5282;
+  transform: translateY(-2px);
+}
+
+.notification-whatsapp-btn {
+  background: #25D366;
+  color: white;
+}
+
+.notification-whatsapp-btn:hover {
+  background: #128C7E;
+  transform: translateY(-2px);
+}
+
+.notification-copy-btn {
+  background: #4a4a6a;
+  color: white;
+}
+
+.notification-copy-btn:hover {
+  background: #2a2a4a;
+  transform: translateY(-2px);
+}
+
+/* Footer with timestamp and status */
+.notification-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
+}
+
+.notification-time {
+  font-size: 0.75rem;
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.notification-status-badge {
+  background: var(--primary-color);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.notification-status-badge.read {
+  background: #666;
+}
+
+/* Empty state - enlarged */
+.notification-empty {
+  padding: 60px 30px;
+  text-align: center;
+  color: var(--text-light);
+  font-size: 1rem;
+}
+
+.notification-empty .empty-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  opacity: 0.5;
+}
+
+.notification-empty h4 {
+  font-size: 1.2rem;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+
+.notification-empty p {
+  font-size: 0.9rem;
+}
+
+/* Pro tip section */
+.notification-pro-tip {
+  background: rgba(37, 211, 102, 0.1);
+  border-left: 4px solid #25D366;
+  padding: 12px 16px;
+  margin-top: 15px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Animation for new notifications */
+.notification-button.has-new {
+  animation: pulse-glow 2s infinite;
+}
+
+/* Toast notification for new alerts */
 .notification-toast {
   position: fixed;
   top: 100px;
   right: 20px;
-  background: var(--card-bg);
-  color: var(--text-primary);
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  color: white;
   padding: 15px 20px;
-  border-radius: var(--border-radius-md);
+  border-radius: 16px;
   box-shadow: var(--shadow-lg);
   z-index: 1003;
   animation: slideInRight 0.3s ease-out;
-  border-left: 4px solid var(--primary-color);
   max-width: 350px;
   word-wrap: break-word;
+  font-weight: 500;
 }
 
 /* Add to existing button styles */
@@ -3104,6 +3289,278 @@ img {
   font-style: italic;
 }
 
+/* ===== MOBILE VERTICAL NAVIGATION BAR ===== */
+.mobile-nav-container {
+  display: none; /* Hidden by default, shown on mobile */
+}
+
+/* Mobile Menu Button - Fixed position */
+.mobile-menu-button {
+  position: fixed;
+  top: 15px;
+  left: 15px;
+  z-index: 1001;
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  border: none;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  color: white;
+}
+
+.mobile-menu-button:hover {
+  transform: scale(1.05);
+}
+
+.mobile-menu-button:active {
+  transform: scale(0.95);
+}
+
+/* Mobile Sidebar */
+.mobile-sidebar {
+  position: fixed;
+  top: 0;
+  left: -280px;
+  width: 280px;
+  height: 100vh;
+  background: var(--card-bg);
+  z-index: 1002;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.mobile-sidebar.open {
+  left: 0;
+}
+
+/* Mobile Sidebar Header */
+.mobile-sidebar-header {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  padding: 20px;
+  position: relative;
+  color: white;
+}
+
+.close-menu {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 20px;
+  width: 35px;
+  height: 35px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-menu:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(90deg);
+}
+
+.mobile-user-info {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.mobile-avatar {
+  width: 50px;
+  height: 50px;
+  background: white;
+  color: var(--primary-color);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 20px;
+}
+
+.mobile-user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mobile-user-name {
+  font-weight: bold;
+  font-size: 16px;
+  color: white;
+}
+
+.mobile-user-mode {
+  font-size: 12px;
+  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Mobile Navigation Items */
+.mobile-nav-items {
+  flex: 1;
+  padding: 20px 0;
+}
+
+.mobile-nav-items button {
+  width: 100%;
+  padding: 15px 20px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 16px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-nav-items button:hover {
+  background: rgba(67, 97, 238, 0.1);
+  padding-left: 25px;
+}
+
+.mobile-nav-items button:active {
+  background: rgba(67, 97, 238, 0.2);
+}
+
+/* Overlay */
+.mobile-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: fadeIn 0.3s ease;
+}
+
+/* Full Screen Dashboard Styles */
+.fullscreen-dashboard {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1e1e1e;
+}
+
+.fullscreen-dashboard button {
+    transition: all 0.3s ease;
+}
+
+.fullscreen-dashboard button:active {
+    transform: scale(0.98);
+}
+
+/* Quick Action Cards */
+.quick-action-card {
+    transition: all 0.3s ease;
+}
+
+/* Scrollbar styling */
+.fullscreen-dashboard::-webkit-scrollbar {
+    width: 8px;
+}
+
+.fullscreen-dashboard::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.fullscreen-dashboard::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.fullscreen-dashboard::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+
+/* Show mobile navigation only on mobile devices */
+@media (max-width: 768px) {
+  .mobile-nav-container {
+    display: block;
+  }
+  
+  /* Hide the original navbar on mobile */
+  .social-header {
+    display: none !important;
+  }
+  
+  /* Adjust main content to account for fixed menu button */
+  .main-content-wrapper {
+    padding-top: 20px !important;
+  }
+  
+  .app-container {
+    padding-top: 60px !important;
+  }
+  
+  /* Adjust notification container position */
+  .notification-container {
+    top: 15px;
+    right: 15px;
+  }
+  
+  .notification-button {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+}
+
+/* For tablets, you might want to keep both or show hamburger */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .mobile-nav-container {
+    display: none;
+  }
+  
+  /* Keep original navbar but make it more compact */
+  .social-header {
+    padding: 0.5rem !important;
+  }
+  
+  .social-header .header-content {
+    gap: 1rem !important;
+  }
+  
+  .user-info-card {
+    min-width: auto !important;
+  }
+  
+  .user-email {
+    max-width: 150px !important;
+  }
+}
+
 /* Bottom sheet animation */
 @keyframes slideUp {
     from {
@@ -3318,6 +3775,32 @@ img {
     to { transform: rotate(360deg); }
 }
 
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.daily-deals-card:hover {
+    animation: pulse 0.5s ease;
+}
+
+/* Toast animation */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
 @media (max-width: 480px) {
     .upload-area {
         padding: 10px;
@@ -3335,10 +3818,11 @@ img {
 }
 
 /* ===== MOBILE OPTIMIZATIONS ===== */
+/* ===== RESPONSIVE FOR MOBILE ===== */
 @media (max-width: 768px) {
   .notification-container {
-    top: 70px; /* Adjusted for mobile navbar */
-    right: 10px;
+    top: 70px;
+    right: 15px;
   }
   
   .notification-button {
@@ -3349,47 +3833,17 @@ img {
   
   .notification-dropdown {
     position: fixed !important;
-    top: 70px !important; /* Below mobile navbar */
-    right: 10px !important;
-    left: 10px !important; /* Take most of the screen width */
+    top: 75px !important;
+    right: 15px !important;
+    left: 15px !important;
     width: auto !important;
-    max-width: calc(100vw - 20px);
-    max-height: 70vh; /* Use viewport height for better mobile experience */
-    border-radius: 16px;
-    box-shadow: var(--shadow-xl);
+    max-width: calc(100vw - 30px);
+    max-height: 75vh;
+    border-radius: 20px;
   }
   
   .notification-header {
-    padding: 15px;
-  }
-  
-  .notification-item {
-    padding: 15px;
-    min-height: 75px; /* Slightly smaller on mobile */
-  }
-  
-  .notification-message {
-    font-size: 0.9rem;
-    line-height: 1.3;
-  }
-  
-  .notification-time {
-    font-size: 0.75rem;
-  }
-  
-  /* Improve touch targets on mobile */
-  .notification-item {
-    padding-left: 20px; /* Make room for unread dot */
-  }
-  
-  .notification-item.unread::before {
-    left: 8px;
-  }
-}
-
-@media (max-width: 480px) {
-  .notification-dropdown {
-    max-height: 60vh; /* Smaller on very small screens */
+    padding: 15px 18px;
   }
   
   .notification-header h4 {
@@ -3397,21 +3851,101 @@ img {
   }
   
   .mark-all-read-btn {
-    padding: 5px 10px;
-    font-size: 0.8rem;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+  }
+  
+  .notification-list {
+    padding: 8px;
+    max-height: 400px;
   }
   
   .notification-item {
-    padding: 12px 15px;
-    min-height: 70px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  
+  .notification-message {
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  
+  .notification-product-image {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .notification-buyer-contact .phone {
+    font-size: 16px;
+  }
+  
+  .notification-actions {
+    gap: 8px;
+  }
+  
+  .notification-call-btn,
+  .notification-whatsapp-btn,
+  .notification-copy-btn {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+  
+  .notification-time {
+    font-size: 0.7rem;
+  }
+  
+  .notification-toast {
+    top: 80px;
+    right: 15px;
+    left: 15px;
+    max-width: none;
+    font-size: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .notification-dropdown {
+    max-height: 70vh;
+  }
+  
+  .notification-list {
+    max-height: 350px;
+  }
+  
+  .notification-item {
+    padding: 12px 14px;
   }
   
   .notification-message {
     font-size: 0.85rem;
   }
+  
+  .notification-product-info {
+    gap: 10px;
+    padding: 10px;
+  }
+  
+  .notification-product-image {
+    width: 45px;
+    height: 45px;
+  }
+  
+  .notification-buyer-contact .phone {
+    font-size: 14px;
+  }
+  
+  .notification-actions {
+    flex-direction: column;
+  }
+  
+  .notification-call-btn,
+  .notification-whatsapp-btn,
+  .notification-copy-btn {
+    width: 100%;
+  }
 }
 
-/* ===== DARK MODE ADJUSTMENTS ===== */
+/* Dark mode adjustments */
 @media (prefers-color-scheme: dark) {
   .notification-dropdown {
     background: var(--card-bg);
@@ -3419,11 +3953,37 @@ img {
   }
   
   .notification-item.unread {
-    background-color: rgba(67, 97, 238, 0.12);
+    background: linear-gradient(135deg, rgba(67, 97, 238, 0.12), rgba(114, 9, 183, 0.08));
   }
   
   .notification-item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .notification-dropdown,
+  .notification-item,
+  .notification-button,
+  .mark-all-read-btn {
+    animation: none;
+    transition: none;
+  }
+  
+  .notification-button.has-new {
+    animation: none;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .notification-dropdown {
+    border: 2px solid var(--text-primary);
+  }
+  
+  .notification-item.unread {
+    border-left: 4px solid var(--text-primary);
   }
 }
 

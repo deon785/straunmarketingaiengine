@@ -67,11 +67,22 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-9c635cec'], (function (workbox) { 'use strict';
+define(['./workbox-81166fe3'], (function (workbox) { 'use strict';
 
   importScripts("/push-sw.js");
   self.skipWaiting();
   workbox.clientsClaim();
+
+  /**
+   * The precacheAndRoute() method efficiently caches and responds to
+   * requests for URLs in the manifest.
+   * See https://goo.gl/S9QRab
+   */
+  workbox.precacheAndRoute([{
+    "url": "registerSW.js",
+    "revision": "3ca0b8505b4bec776b69afdba2768812"
+  }], {});
+  workbox.cleanupOutdatedCaches();
   workbox.registerRoute(/^https:\/\/.*\.supabase\.co\/.*/i, new workbox.NetworkFirst({
     "cacheName": "supabase-api",
     "networkTimeoutSeconds": 10,
