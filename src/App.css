@@ -54,6 +54,15 @@
     position: relative;
 }
 
+html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 70px;
+    height: 100%;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+}
+
 body {
     min-height: 100vh;
     display: flex;
@@ -62,6 +71,17 @@ body {
     color: var(--text-primary);
     margin: 0;
     padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch !important;
+    position: relative;
+    height: 100%;
+}
+
+#root {
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch !important;
 }
 
 body.navbar-hidden {
@@ -70,12 +90,6 @@ body.navbar-hidden {
 
 body.nav-collapsed {
     padding-top: 0 !important;
-}
-
-/* Add this right after your body styles */
-html, body, #root {
-    background: var(--light-bg) !important;
-    background-color: var(--light-bg) !important;
 }
 
 /* Ensure mode selection screen background is transparent */
@@ -3490,6 +3504,29 @@ img {
 
 .fullscreen-dashboard::-webkit-scrollbar-thumb:hover {
     background: #555;
+}
+
+/* ===== SCROLLABLE CONTAINERS FIX ===== */
+.main-content-wrapper,
+.social-main-content,
+.results-section,
+.prospects-grid,
+.products-grid,
+.search-results,
+.activity-list,
+.notification-list,
+.deals-grid,
+.filter-modal-content,
+.settings-modal {
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* Fix for Daily Deals grid scrolling */
+.deals-grid {
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
 }
 
 @keyframes slideUp {

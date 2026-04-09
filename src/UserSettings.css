@@ -1,22 +1,22 @@
-/* UserSettings.css */
+/* UserSettings.css - Dark Theme Version */
 
 /* Main container */
 .privacy-settings {
   padding: 25px;
-  background: #ffffff;
+  background: #0a0a0a;
   border-radius: 12px;
   margin: 20px auto;
   max-width: 800px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  border: 1px solid #2a2a2a;
 }
 
 /* Title */
 .privacy-settings h3 {
-  color: #1f2937;
+  color: #ffffff;
   margin-bottom: 25px;
   padding-bottom: 15px;
-  border-bottom: 2px solid #3b82f6;
+  border-bottom: 2px solid #4361ee;
   font-size: 24px;
   font-weight: 700;
 }
@@ -31,7 +31,7 @@
 
 /* Export button */
 .export-btn {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, #4361ee 0%, #3a56d4 100%);
   color: white;
   border: none;
   padding: 14px 28px;
@@ -40,7 +40,7 @@
   font-weight: 600;
   font-size: 16px;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 4px 12px rgba(67, 97, 238, 0.3);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -49,8 +49,8 @@
 
 .export-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
-  background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+  box-shadow: 0 6px 16px rgba(67, 97, 238, 0.4);
+  background: linear-gradient(135deg, #5a6fd8 0%, #4a5ec8 100%);
 }
 
 .export-btn:active:not(:disabled) {
@@ -96,34 +96,34 @@
 
 /* Info section */
 .privacy-info {
-  background: #f8fafc;
+  background: #1a1a1a;
   padding: 20px;
   border-radius: 10px;
-  border-left: 4px solid #3b82f6;
+  border-left: 4px solid #4361ee;
   margin-top: 20px;
 }
 
 .privacy-info p {
   margin: 10px 0;
-  color: #4b5563;
+  color: #b0b0b0;
   line-height: 1.6;
   font-size: 15px;
 }
 
 .privacy-info strong {
-  color: #1f2937;
+  color: #ffffff;
   font-weight: 600;
 }
 
 /* Warning note */
 .warning-note {
-  color: #dc2626 !important;
+  color: #ff6b6b !important;
   font-weight: 600;
   margin-top: 20px !important;
   padding: 12px;
-  background: #fef2f2;
+  background: #2a1212;
   border-radius: 8px;
-  border: 1px solid #fecaca;
+  border: 1px solid #5c1a1a;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -136,12 +136,12 @@
 
 /* Messages */
 .error-message {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #2a1212;
+  color: #ff8a8a;
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
-  border: 1px solid #fecaca;
+  border: 1px solid #5c1a1a;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -154,12 +154,12 @@
 }
 
 .success-message {
-  background: #f0fdf4;
-  color: #16a34a;
+  background: #0a2a1a;
+  color: #8affaa;
   padding: 15px;
   border-radius: 8px;
   margin-bottom: 20px;
-  border: 1px solid #bbf7d0;
+  border: 1px solid #1a5c2a;
   display: flex;
   align-items: center;
   gap: 10px;
