@@ -58,9 +58,7 @@ html {
     scroll-behavior: smooth;
     scroll-padding-top: 70px;
     height: 100%;
-    overflow: hidden;
-    position: fixed;
-    width: 100%;
+   
 }
 
 body {
@@ -72,15 +70,17 @@ body {
     margin: 0;
     padding: 0;
     overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch !important;
-    position: relative;
+    overflow-y: auto;  /* ✅ Allow vertical scrolling */
+    -webkit-overflow-scrolling: touch !important;  /* ✅ Smooth iOS/Android scrolling */
+    position: relative;  /* ✅ Changed from 'fixed' to 'relative' */
     height: 100%;
 }
 
 #root {
-    height: 100%;
-    overflow-y: auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-y: visible;  /* ✅ Let body handle scrolling */
     -webkit-overflow-scrolling: touch !important;
 }
 
@@ -3527,6 +3527,33 @@ img {
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
+}
+
+/* ===== SAMSUNG BROWSER SCROLLING FIXES ===== */
+* {
+    -webkit-tap-highlight-color: transparent;  /* Removes flash on tap */
+}
+
+/* Force scrolling containers to work */
+.main-content-wrapper,
+.social-main-content,
+.results-section {
+    overflow-y: visible !important;
+    overflow-x: visible !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* Ensure grids scroll properly on Samsung */
+.prospects-grid,
+.products-grid {
+    overflow-y: visible !important;
+    min-height: auto !important;
+}
+
+/* Fix for Samsung's weird scroll behavior */
+.social-main-content {
+    flex: 1 0 auto;
+    min-height: 0;  /* Important for flex scrolling */
 }
 
 @keyframes slideUp {

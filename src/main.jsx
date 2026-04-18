@@ -8,15 +8,23 @@ import ReactGA from "react-ga4";
 // COMPLETELY DISABLE automatic service worker updates
 if (import.meta.env.PROD) {
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js')
-        .then(registration => {
-          console.log('✅ SW registered:', registration.scope);
-        })
-        .catch(err => {
-          console.log('❌ SW registration failed:', err);
-        });
-    });
+    // Use a synchronous check and immediate Promise handling
+    const registerSW = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js');
+        console.log('✅ SW registered:', registration.scope);
+      } catch (err) {
+        // This catches the rejection immediately
+        console.log('❌ SW registration failed:', err.message);
+        // Prevent Sentry from reporting this as an error
+        if (err && err.preventDefault) {
+          err.preventDefault();
+        }
+      }
+    };
+    
+    // Register immediately, not waiting for load
+    registerSW();
   }
 }
 
@@ -31,6 +39,18 @@ Sentry.init({
   tracesSampleRate: 1.0,
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1.0,
+  // ADD THIS SECTION to ignore SW errors
+  ignoreErrors: [
+    'ServiceWorker registration failed',
+    'navigator.serviceWorker.register',
+    'Failed to register a ServiceWorker',
+    'Error: rejected at wrsparams.serviceWorkers.navigator.serviceWorker.register'
+  ],
+  // Also blacklist URLs if needed
+  denyUrls: [
+    /registerSW/i,
+    /serviceWorker/i
+  ]
 });
 
 // Render App

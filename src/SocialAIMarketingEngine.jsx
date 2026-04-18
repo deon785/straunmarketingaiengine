@@ -31,6 +31,7 @@ import DailyDeals from './DailyDeals';
 import ReferralProgram from './ReferralProgram';
 import UserDashboard from './UserDashboard';
 import ChatList from './ChatList';
+import ChatSystem from './ChatSystem.jsx';
 import PriceAlertDashboard from './PriceAlertDashboard';
 
 class UserBehaviorAnalyzer {

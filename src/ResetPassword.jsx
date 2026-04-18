@@ -16,7 +16,11 @@ const ResetPassword = () => {
     const location = useLocation();
 
     useEffect(() => {
-        // Mark that we're on reset password page to prevent any redirects
+        // Set the flag HERE, not at component top level
+        if (window.location.hash.includes('access_token')) {
+            sessionStorage.setItem('passwordResetMode', 'true');
+        }
+        
         sessionStorage.setItem('onResetPage', 'true');
         
         const handlePasswordResetRedirect = async () => {

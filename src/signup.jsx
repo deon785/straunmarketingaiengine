@@ -30,8 +30,21 @@ const Auth = () => {
   const [showReferralBonus, setShowReferralBonus] = useState(false);
   const navigate = useNavigate();
 
+  useEffect(() => {
+      // Clear reset mode when not on reset page
+      if (!window.location.pathname.includes('/reset-password')) {
+          sessionStorage.removeItem('passwordResetMode');
+      }
+  }, []);
+
   // Get referral code from URL on component mount
   useEffect(() => {
+
+    if (sessionStorage.getItem('passwordResetMode') === 'true') {
+        console.log('Password reset mode - ignoring auth changes');
+        return;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const ref = urlParams.get('ref');
     if (ref) {

@@ -13,12 +13,12 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const [loading, setLoading] = useState(true);
     const [shareLoading, setShareLoading] = useState(false);
     const [recentReferrals, setRecentReferrals] = useState([]);
+    const [showShareModal, setShowShareModal] = useState(false);
 
     useEffect(() => {
         loadReferralData();
         loadLeaderboard();
         
-        // Subscribe to new referrals
         const subscription = supabase
             .channel('referral-updates')
             .on('postgres_changes', {
@@ -34,9 +34,31 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
         return () => supabase.removeChannel(subscription);
     }, [userId]);
 
+    const handleShareClick = () => {
+        setShowShareModal(true);
+    };
+
+    const shareViaWhatsApp = () => {
+        const link = getReferralLink();
+        const message = encodeURIComponent(`🎁 Join me on Straun Marketing! Use my referral link to get bonus points on signup! Also, by using my link, your products could be featured in Daily Deals! 🚀\n\n${link}`);
+        window.open(`https://wa.me/?text=${message}`, '_blank');
+        setShowShareModal(false);
+    };
+
+    const shareViaSMS = () => {
+        const link = getReferralLink();
+        const message = encodeURIComponent(`Join Straun Marketing! Use my referral link to get bonus points on signup: ${link}`);
+        window.open(`sms:?body=${message}`, '_blank');
+        setShowShareModal(false);
+    };
+
+    const copyLinkToClipboard = () => {
+        copyToClipboard(getReferralLink());
+        setShowShareModal(false);
+    };
+
     const loadReferralData = async () => {
         try {
-            // Get or create referral code in profiles
             let { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('referral_code')
@@ -44,14 +66,12 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 .single();
             
             if (profileError && profileError.code === 'PGRST116') {
-                // Profile doesn't exist yet
                 console.log('Profile not found');
             }
             
             let currentCode = profile?.referral_code;
             
             if (!currentCode) {
-                // Generate and save referral code to profiles
                 currentCode = generateReferralCode();
                 await supabase
                     .from('profiles')
@@ -61,7 +81,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
             setReferralCode(currentCode);
             
-            // Get referral stats
             const { data: referrals, error: referralsError } = await supabase
                 .from('referrals')
                 .select('*')
@@ -69,7 +88,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
             if (referralsError) throw referralsError;
             
-            // Get points from referral_rewards
             const { data: rewards, error: rewardsError } = await supabase
                 .from('referral_rewards')
                 .select('points_earned')
@@ -77,27 +95,17 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
             if (rewardsError) throw rewardsError;
             
-            // Get rank from leaderboard view
-            const { data: leaderboardData, error: leaderboardError } = await supabase
-                .from('referral_leaderboard')
-                .select('rank')
-                .eq('referrer_id', userId)
-                .single();
-            
-            if (leaderboardError && leaderboardError.code !== 'PGRST116') {
-                console.log('Leaderboard error:', leaderboardError);
-            }
-            
             const completedReferrals = referrals?.filter(r => r.status === 'completed') || [];
+            
+            const userRank = leaderboard.findIndex(l => l.referrer_id === userId) + 1;
             
             setStats({
                 total: referrals?.length || 0,
                 completed: completedReferrals.length,
                 points: rewards?.reduce((sum, r) => sum + r.points_earned, 0) || 0,
-                rank: leaderboardData?.rank || 0
+                rank: userRank || 0
             });
             
-            // Get recent referrals with user details
             const { data: recent } = await supabase
                 .from('referrals')
                 .select(`
@@ -121,7 +129,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const loadLeaderboard = async () => {
         const { data } = await supabase
             .from('referral_leaderboard')
-            .select('username, total_referrals, total_points, rank')
+            .select('referrer_id, username, total_referrals, total_points, rank')
             .order('rank', { ascending: true })
             .limit(20);
         
@@ -135,7 +143,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     };
 
     const getReferralLink = () => {
-        return `${window.location.origin}/signup?ref=${referralCode}`;
+        return `${window.location.origin}/?ref=${referralCode}`;
     };
 
     const shareReferral = async () => {
@@ -202,7 +210,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 <p style={styles.subtitle}>Invite friends and earn rewards!</p>
             </div>
 
-            {/* Stats Cards */}
             <div style={styles.statsGrid}>
                 <div style={styles.statCard}>
                     <div style={styles.statValue}>{stats.total}</div>
@@ -222,7 +229,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 </div>
             </div>
 
-            {/* Referral Link Section */}
             <div style={styles.referralSection}>
                 <label style={styles.label}>Your Referral Code:</label>
                 <div style={styles.codeContainer}>
@@ -251,15 +257,56 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 </div>
                 
                 <button 
-                    onClick={shareReferral}
+                    onClick={handleShareClick}
                     style={styles.shareButton}
-                    disabled={shareLoading}
                 >
-                    {shareLoading ? 'Sharing...' : '📤 Share Referral Link'}
+                    📤 Invite Friend & Boost Your Products
                 </button>
             </div>
 
-            {/* Milestone Progress */}
+            {/* Share Modal */}
+            {showShareModal && (
+                <div style={styles.modalOverlay} onClick={() => setShowShareModal(false)}>
+                    <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                        <div style={styles.modalHeader}>
+                            <h3>📢 Invite a Friend</h3>
+                            <button style={styles.modalClose} onClick={() => setShowShareModal(false)}>×</button>
+                        </div>
+                        <div style={styles.modalBody}>
+                            <p style={styles.modalMessage}>
+                                🎉 <strong>Get your products featured in Daily Deals!</strong>
+                            </p>
+                            <p style={styles.modalSubmessage}>
+                                When you invite friends who sign up using your referral link, 
+                                your products get priority placement in Daily Deals. 
+                                More referrals = Higher visibility!
+                            </p>
+                            
+                            <div style={styles.shareOptions}>
+                                <button 
+                                    onClick={shareViaWhatsApp}
+                                    style={{...styles.shareOptionBtn, background: '#25D366'}}
+                                >
+                                    <span style={styles.shareIcon}>💚</span> WhatsApp
+                                </button>
+                                <button 
+                                    onClick={shareViaSMS}
+                                    style={{...styles.shareOptionBtn, background: '#34B7F1'}}
+                                >
+                                    <span style={styles.shareIcon}>💬</span> SMS
+                                </button>
+                                <button 
+                                    onClick={copyLinkToClipboard}
+                                    style={{...styles.shareOptionBtn, background: '#667eea'}}
+                                >
+                                    <span style={styles.shareIcon}>🔗</span> Copy Link
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {nextMilestone && (
                 <div style={styles.milestoneSection}>
                     <div style={styles.milestoneHeader}>
@@ -278,7 +325,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 </div>
             )}
 
-            {/* Recent Referrals */}
             {recentReferrals.length > 0 && (
                 <div style={styles.recentSection}>
                     <h4 style={styles.sectionTitle}>📋 Recent Referrals</h4>
@@ -296,7 +342,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 </div>
             )}
 
-            {/* Reward Tiers */}
             <div style={styles.tiersSection}>
                 <h4 style={styles.sectionTitle}>🏆 Reward Tiers</h4>
                 <div style={styles.tiersGrid}>
@@ -333,7 +378,6 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 </div>
             </div>
 
-            {/* Leaderboard */}
             {leaderboard.length > 0 && (
                 <div style={styles.leaderboardSection}>
                     <h4 style={styles.sectionTitle}>📊 Referral Leaderboard</h4>
@@ -600,7 +644,104 @@ const styles = {
         borderRadius: '50%',
         animation: 'spin 1s linear infinite',
         margin: '0 auto 15px'
+    },
+    modalOverlay: {
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(0, 0, 0, 0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10000,
+        animation: 'fadeIn 0.3s ease'
+    },
+    modalContent: {
+        background: 'white',
+        borderRadius: '16px',
+        maxWidth: '400px',
+        width: '90%',
+        overflow: 'hidden',
+        animation: 'slideUp 0.3s ease'
+    },
+    modalHeader: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '15px 20px',
+        borderBottom: '1px solid #eee',
+        background: 'linear-gradient(135deg, #667eea, #764ba2)',
+        color: 'white'
+    },
+    modalClose: {
+        background: 'none',
+        border: 'none',
+        fontSize: '24px',
+        cursor: 'pointer',
+        color: 'white'
+    },
+    modalBody: {
+        padding: '20px'
+    },
+    modalMessage: {
+        fontSize: '16px',
+        marginBottom: '10px',
+        color: '#333'
+    },
+    modalSubmessage: {
+        fontSize: '13px',
+        color: '#666',
+        marginBottom: '20px',
+        lineHeight: '1.5'
+    },
+    shareOptions: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px'
+    },
+    shareOptionBtn: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '10px',
+        padding: '14px',
+        border: 'none',
+        borderRadius: '10px',
+        fontSize: '16px',
+        fontWeight: 'bold',
+        color: 'white',
+        cursor: 'pointer',
+        transition: 'transform 0.2s'
+    },
+    shareIcon: {
+        fontSize: '20px'
     }
 };
+
+// Add keyframes animation
+const styleSheet = document.createElement("style");
+styleSheet.textContent = `
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    @keyframes slideUp {
+        from {
+            opacity: 0;
+            transform: translateY(50px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+`;
+document.head.appendChild(styleSheet);
 
 export default ReferralProgram;
