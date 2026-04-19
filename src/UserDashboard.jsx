@@ -395,6 +395,18 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
 
     return (
         <div style={styles.container}>
+            {/* Top navigation bar with back button */}
+            <div style={styles.topNavBar}>
+                <button 
+                    onClick={onBackToSocial || (() => navigate('/app'))} 
+                    style={styles.backNavButton}
+                >
+                    ← Back to Search
+                </button>
+                <div style={styles.navSpacer}></div>
+            </div>
+
+            {/* Remove the extra container div - start directly with backButtonTop */}
             {activeTab !== 'overview' && (
                 <button onClick={handleBack} style={styles.backButtonTop}>
                     ← Back to Overview
@@ -522,11 +534,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                         <WishlistManager onBack={() => setActiveTab('overview')} />
                     </div>
                 )}
-
-                <WishlistManager 
-                onBack={() => setShowWishlistModal(false)}
-                onBackToSearch={onBackToSocial}  // Optional separate handler
-                />
 
                 {activeTab === 'orders' && selectedMode === 'buyer' && (
                     <div style={styles.ordersSection}>
@@ -833,7 +840,7 @@ const styles = {
         padding: '20px'
     },
     tipsSection: {
-        background: '#000000',
+        background: 'var(--card-bg)',  // ✅ Changed from '#000000'
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid var(--border-color)'
@@ -845,9 +852,9 @@ const styles = {
     },
     tipItem: {
         fontSize: '13px',
-        color: '#e0e0e0',  // Light gray text
+        color: 'var(--text-primary)',  // ✅ Changed from '#e0e0e0'
         padding: '8px 12px',
-        background: '#111111',  // Slightly lighter than black for each tip
+        background: 'var(--light-bg)',  // ✅ Changed from '#111111'
         borderRadius: '8px',
         margin: '2px 0'
     },
@@ -881,7 +888,7 @@ const styles = {
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: '#121212',
+        backgroundColor: 'var(--card-bg)',  // ✅ Changed from '#121212'
         zIndex: 20000,
         overflow: 'auto',
         padding: '20px'
@@ -1018,7 +1025,37 @@ const styles = {
         borderRadius: '8px',
         cursor: 'pointer',
         fontSize: '14px'
-    }
+    },
+    topNavBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '20px',
+    paddingBottom: '10px',
+    borderBottom: '1px solid var(--border-color)',
+    position: 'sticky',
+    top: '70px',
+    background: 'var(--card-bg)',
+    zIndex: 100,
+    backdropFilter: 'blur(10px)'
+    },
+    backNavButton: {
+        background: 'transparent',
+        border: '1px solid var(--border-color)',
+        color: 'var(--text-primary)',
+        padding: '8px 16px',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        transition: 'all 0.2s ease',
+        fontWeight: '500'
+    },
+    navSpacer: {
+        flex: 1
+    },
 };
 
 export default UserDashboard;

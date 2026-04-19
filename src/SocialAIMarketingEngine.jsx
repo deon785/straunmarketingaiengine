@@ -292,8 +292,7 @@ function SocialAIMarketingEngine() {
     
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
-    const [profileLoading, setProfileLoading] = useState(false);
-    
+    const [profileLoading, setProfileLoading] = useState(false); 
     const [showSettings, setShowSettings] = useState(false);
     
     // Add these to your state declarations
@@ -317,6 +316,8 @@ function SocialAIMarketingEngine() {
     const [items, setItems] = useState([]);
 
     const [searchCache, setSearchCache] = useState({});
+    const [showSavedSearches, setShowSavedSearches] = useState(false);
+    const [userSavedSearches, setUserSavedSearches] = useState([]);
 
     const [currentPage, setCurrentPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
@@ -359,6 +360,8 @@ function SocialAIMarketingEngine() {
     const [showDashboard, setShowDashboard] = useState(false);
     const [showDailyDeals, setShowDailyDeals] = useState(false);
     const [userReferralCount, setUserReferralCount] = useState(0);
+
+    const [showReferralProgram, setShowReferralProgram] = useState(false);
     const [currentProduct, setCurrentProduct] = useState(null);
     const [currentPrice, setCurrentPrice] = useState(0);
 
@@ -471,15 +474,32 @@ function SocialAIMarketingEngine() {
         
         switch(action) {
             case 'home':
-                // Already on home, just close menu
+                // Close all modals and return to main view
+                setShowWishlist(false);
+                setShowDashboard(false);
+                setShowDailyDeals(false);
+                setShowReferralProgram(false);
+                setShowPriceAlerts(false);
+                setShowSavedSearches(false);
+                setShowToolsPanel(false);
+                setShowChatList(false);
+                setShowChat(false);
+                setShowSettings(false);
+                setProductSearch('');  // Clear search
+                // Scroll to top
+                window.scrollTo({ top: 0, behavior: 'smooth' });
                 break;
-            case 'profile':
-                // You can add profile view logic here
-                showToastNotification('Profile feature coming soon');
+                
+            case 'search':
+                // Focus the search input
+                setTimeout(() => {
+                    const searchInput = document.querySelector('.search-input-large');
+                    if (searchInput) {
+                        searchInput.focus();
+                    }
+                }, 100);
                 break;
-            case 'settings':
-                setShowSettings(true);
-                break;
+                
             case 'wishlist':
                 setPreviousSearchState({
                     productSearch: productSearch,
@@ -490,12 +510,47 @@ function SocialAIMarketingEngine() {
                 window.history.pushState({ showWishlist: true }, '', '#wishlist');
                 setShowWishlist(true);
                 break;
+                
+            case 'dashboard':
+                setShowDashboard(true);
+                break;
+                
+            case 'deals':
+                setShowDailyDeals(true);
+                break;
+                
+            case 'messages':
+                setShowChatList(true);
+                break;
+                
+            case 'alerts':
+                setShowPriceAlerts(true);
+                break;
+                
+            case 'referrals':
+                setShowReferralProgram(true);
+                break;
+                
+            case 'profile':
+                showToastNotification('Profile feature coming soon');
+                break;
+                
+            case 'settings':
+                setShowSettings(true);
+                break;
+                
             case 'switchMode':
                 handleSwitchMode();
                 break;
+                
+            case 'admin':
+                navigate('/admin');
+                break;
+                
             case 'signout':
                 handleSignOut();
                 break;
+                
             default:
                 break;
         }
@@ -909,18 +964,6 @@ function SocialAIMarketingEngine() {
         }
     };
 
-    const quickList = () => {
-        showToastNotification('Quick List feature coming soon');
-    };
-
-    const viewSearches = () => {
-        showToastNotification('Saved searches feature coming soon');
-    };
-
-    const viewAnalytics = () => {
-        showToastNotification('Analytics feature coming soon');
-    };
-
     const smartReminders = {
     types: {
         abandoned_search: "Still looking for [product]? New listings available!",
@@ -1034,6 +1077,42 @@ function SocialAIMarketingEngine() {
         } catch (beepErr) {
         console.log('Browser beep also failed');
         }
+    };
+
+    const fetchSavedSearches = useCallback(async () => {
+        if (!user) return;
+        
+        try {
+            const { data, error } = await supabase
+                .from('saved_searches')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+            
+            if (!error && data) {
+                setUserSavedSearches(data);
+            }
+        } catch (error) {
+            console.error('Error fetching saved searches:', error);
+        }
+    }, [user]);
+
+    const deleteSavedSearchItem = async (searchId) => {
+        const { error } = await supabase
+            .from('saved_searches')
+            .delete()
+            .eq('id', searchId);
+        
+        if (!error) {
+            setUserSavedSearches(prev => prev.filter(s => s.id !== searchId));
+            showToastNotification('✅ Saved search removed');
+        }
+    };
+
+    const runSavedSearchItem = (searchTerm) => {
+        setShowSavedSearches(false);
+        setProductSearch(searchTerm);
+        setTimeout(() => handleSearch(), 100);
     };
 
     const markAsRead = async (notificationId) => {
@@ -2688,6 +2767,84 @@ function SocialAIMarketingEngine() {
             ensureBasicProfile();
         }
     }, [user, profileData]);
+
+    useEffect(() => {
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        let reconnectTimeout;
+        let isConnected = false;
+
+        const connectRealtime = async () => {
+            try {
+                // Check if we already have an active connection
+                if (isConnected) return;
+                
+                console.log('📡 Establishing real-time connection...');
+                
+                // Create a health check channel
+                const healthChannel = supabase.channel('health-check');
+                
+                healthChannel
+                    .on('system', { event: 'disconnect' }, () => {
+                        console.log('⚠️ Real-time connection lost');
+                        isConnected = false;
+                        
+                        // Show subtle notification (optional - only once)
+                        if (reconnectAttempts === 0) {
+                            showToastNotification('Reconnecting to server...');
+                        }
+                    })
+                    .on('system', { event: 'reconnect' }, () => {
+                        console.log('✅ Real-time connection restored');
+                        isConnected = true;
+                        reconnectAttempts = 0;
+                        showToastNotification('Connected to server');
+                    })
+                    .subscribe((status) => {
+                        if (status === 'SUBSCRIBED') {
+                            console.log('✅ Real-time health check active');
+                            isConnected = true;
+                            reconnectAttempts = 0;
+                        }
+                    });
+                
+                // Clean up old channel after a delay
+                setTimeout(() => {
+                    supabase.removeChannel(healthChannel);
+                }, 30000);
+                
+            } catch (error) {
+                console.error('❌ Real-time connection error:', error);
+                
+                // Exponential backoff reconnection
+                if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
+                    
+                    reconnectTimeout = setTimeout(() => {
+                        reconnectAttempts++;
+                        connectRealtime();
+                    }, delay);
+                } else {
+                    console.log('📡 Max reconnection attempts reached. Will retry on next page refresh.');
+                }
+            }
+        };
+        
+        // Start connection only if user is logged in and profile is complete
+        if (user && isProfileComplete) {
+            connectRealtime();
+        }
+        
+        // Cleanup
+        return () => {
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+            isConnected = false;
+        };
+    }, [user, isProfileComplete, showToastNotification]);
+
     
     const [previousSearchState, setPreviousSearchState] = useState({
         productSearch: '',
@@ -4218,31 +4375,15 @@ function SocialAIMarketingEngine() {
                                 gap: '15px',
                                 marginBottom: '30px'
                             }}>
-                                <QuickActionCard 
-                                    icon="📦" 
-                                    title="Quick List" 
-                                    description="Add a new product quickly"
-                                    onClick={() => {
-                                        onClose(); // Close dashboard
-                                        quickList(); // Execute action
-                                    }}
-                                />
+                                
                                 <QuickActionCard 
                                     icon="🔍" 
                                     title="Saved Searches" 
                                     description="View your saved searches"
                                     onClick={() => {
                                         onClose();
-                                        viewSearches();
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="📊" 
-                                    title="Analytics" 
-                                    description="View your performance"
-                                    onClick={() => {
-                                        onClose();
-                                        viewAnalytics();
+                                        fetchSavedSearches();  // Load saved searches
+                                        setShowSavedSearches(true);
                                     }}
                                 />
                                 <QuickActionCard 
@@ -4277,9 +4418,8 @@ function SocialAIMarketingEngine() {
                                     title="Referral Program" 
                                     description="Invite friends & earn rewards"
                                     onClick={() => {
-                                        onClose();
-                                        // Open referral program
-                                        alert('Referral Program feature');
+                                        onClose();  // Close dashboard
+                                        setShowReferralProgram(true);  // Show referral component
                                     }}
                                 />
                                 <QuickActionCard 
@@ -4530,6 +4670,7 @@ function SocialAIMarketingEngine() {
             <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
                 <div className="mobile-sidebar-header">
                     <button className="close-menu" onClick={toggleMobileMenu}>✕</button>
+                    {/* App name removed from here - only user info */}
                     <div className="mobile-user-info">
                         <div className="mobile-avatar">{userInitials}</div>
                         <div className="mobile-user-details">
@@ -4540,29 +4681,42 @@ function SocialAIMarketingEngine() {
                 </div>
                 
                 <nav className="mobile-nav-items">
-                    <button onClick={() => { handleNavigation('home'); }}>
+                    <button onClick={() => { handleNavigation('home'); toggleMobileMenu(); }}>
                         🏠 Home
                     </button>
-                    <button onClick={() => { handleNavigation('profile'); }}>
-                        👤 Profile
+
+                    <button onClick={() => { handleNavigation('dashboard'); toggleMobileMenu(); }}>
+                        📊 Dashboard
                     </button>
-                    <button onClick={() => { handleNavigation('settings'); }}>
-                        ⚙️ Settings
-                    </button>
-                    <button onClick={() => { handleNavigation('wishlist'); }}>
+                    
+                    <button onClick={() => { handleNavigation('wishlist'); toggleMobileMenu(); }}>
                         ❤️ Wishlist
                     </button>
-                    <button onClick={() => { handleNavigation('switchMode'); }}>
+                                        
+                    <button onClick={() => { handleNavigation('deals'); toggleMobileMenu(); }}>
+                        🔥 Daily Deals
+                    </button>
+                                        
+                    <div className="mobile-nav-divider"></div>
+                    
+                    <button onClick={() => { handleNavigation('settings'); toggleMobileMenu(); }}>
+                        ⚙️ Settings
+                    </button>
+                    
+                    <button onClick={() => { handleNavigation('switchMode'); toggleMobileMenu(); }}>
                         🔄 Switch Mode
                     </button>
-                    <button onClick={() => { handleNavigation('signout'); }}>
+                    
+                    <div className="mobile-nav-divider"></div>
+                             
+                    <button onClick={() => { handleNavigation('signout'); toggleMobileMenu(); }} className="signout-btn">
                         🚪 Sign Out
                     </button>
                 </nav>
             </div>
             
             {/* Overlay */}
-            {mobileMenuOpen && <div className="mobile-overlay" onClick={toggleMobileMenu}></div>}
+        {mobileMenuOpen && <div className="mobile-overlay" onClick={toggleMobileMenu}></div>}
         </div>
 
         {showSettings && (
@@ -4580,23 +4734,42 @@ function SocialAIMarketingEngine() {
         )}  
 
        <div className="page-wrapper">
-        <header className={`social-header ${isNavCollapsed ? 'collapsed-nav' : ''} ${isNavbarHidden ? 'hidden' : ''}`}>
-        {/* Top Navigation */}
-        <TopNavigationBar 
-            user={user}
-            selectedMode={selectedMode}
-            profileData={profileData}
-            loading={signOutLoading} 
-            onSwitchMode={handleSwitchMode}
-            onSignOut={handleSignOut}
-            onSettingsClick={() => setShowSettings(true)}
-            onToggleCollapse={toggleNavCollapse}
-            isCollapsed={isNavCollapsed}
-            isHidden={isNavbarHidden}
-            isAdmin={isAdmin}
-            appName="Straun Marketing Engine" 
-        />
-        </header>
+            <header className="social-header" style={{
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                padding: '15px 20px',
+                position: 'sticky',
+                top: 0,
+                zIndex: 1000,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+            }}>
+                <button 
+                    className="mobile-menu-button" 
+                    onClick={toggleMobileMenu}
+                    aria-label="Menu"
+                    style={{
+                        background: 'rgba(255,255,255,0.2)',
+                        border: 'none',
+                        color: 'white',
+                        fontSize: '24px',
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                >
+                    ☰
+                </button>
+                <div style={{ color: 'white', fontWeight: 'bold', fontSize: '18px' }}>
+                    Straun Marketing
+                </div>
+                <div style={{ width: '40px' }}></div> {/* Spacer to center the app name */}
+            </header>
+
         <div className="navbar-spacer"></div>
              
         <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : ''} ${isNavbarHidden ? 'has-hidden-nav' : ''}`}>
@@ -5101,9 +5274,359 @@ function SocialAIMarketingEngine() {
                     )}
                     
                     <div className="separator"></div>
-            
-                    {/* Tools Panel or Wishlist or Main Interface */}
-                    {showToolsPanel ? (
+
+                    {showPriceAlerts ? (
+                        <div style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: '#121212',
+                            zIndex: 20000,
+                            overflow: 'auto',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                padding: '20px',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    maxWidth: '1200px',
+                                    margin: '0 auto'
+                                }}>
+                                    <h1 style={{ margin: 0, fontSize: '24px' }}>🔔 Price Alerts</h1>
+                                    <button
+                                        onClick={() => setShowPriceAlerts(false)}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.2)',
+                                            border: 'none',
+                                            color: 'white',
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                                <PriceAlertDashboard userId={user?.id} />
+                            </div>
+                        </div>
+                    ):showSavedSearches ? (
+                        <div style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: '#121212',
+                            zIndex: 20000,
+                            overflow: 'auto',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                padding: '20px',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    maxWidth: '1200px',
+                                    margin: '0 auto'
+                                }}>
+                                    <h1 style={{ margin: 0, fontSize: '24px' }}>🔍 Saved Searches</h1>
+                                    <button
+                                        onClick={() => {
+                                            setShowSavedSearches(false);
+                                            fetchSavedSearches(); // Refresh when closing
+                                        }}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.2)',
+                                            border: 'none',
+                                            color: 'white',
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                                <div style={{
+                                    background: 'white',
+                                    borderRadius: '12px',
+                                    padding: '20px',
+                                    marginBottom: '20px'
+                                }}>
+                                    <h3 style={{ margin: '0 0 10px 0', color: '#333' }}>
+                                        Your Saved Searches ({userSavedSearches.length})
+                                    </h3>
+                                    <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>
+                                        You'll receive notifications when new products match these searches
+                                    </p>
+                                    
+                                    {userSavedSearches.length === 0 ? (
+                                        <div style={{ textAlign: 'center', padding: '40px' }}>
+                                            <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔍</div>
+                                            <h4 style={{ margin: '0 0 10px 0', color: '#333' }}>No saved searches yet</h4>
+                                            <p style={{ color: '#666', marginBottom: '20px' }}>
+                                                Save searches when you search for products to get notified of new matches
+                                            </p>
+                                            <button
+                                                onClick={() => setShowSavedSearches(false)}
+                                                style={{
+                                                    padding: '10px 20px',
+                                                    background: '#667eea',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                Start Searching
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                                            {userSavedSearches.map((search) => (
+                                                <div key={search.id} style={{
+                                                    background: '#f8f9fa',
+                                                    borderRadius: '10px',
+                                                    padding: '15px',
+                                                    border: '1px solid #e0e0e0',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    flexWrap: 'wrap',
+                                                    gap: '15px'
+                                                }}>
+                                                    <div style={{ flex: 1 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                                                            <span style={{ fontSize: '20px' }}>🔍</span>
+                                                            <strong style={{ fontSize: '16px', color: '#333' }}>
+                                                                "{search.search_term}"
+                                                            </strong>
+                                                        </div>
+                                                        
+                                                        {(search.min_price || search.max_price || search.location) && (
+                                                            <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                                                                {search.min_price && (
+                                                                    <span style={{ fontSize: '12px', background: '#e3f2fd', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                        Min: ${search.min_price}
+                                                                    </span>
+                                                                )}
+                                                                {search.max_price && (
+                                                                    <span style={{ fontSize: '12px', background: '#e3f2fd', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                        Max: ${search.max_price}
+                                                                    </span>
+                                                                )}
+                                                                {search.location && (
+                                                                    <span style={{ fontSize: '12px', background: '#e3f2fd', padding: '2px 8px', borderRadius: '4px' }}>
+                                                                        📍 {search.location}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        
+                                                        <div style={{ fontSize: '11px', color: '#999' }}>
+                                                            Saved on {new Date(search.created_at).toLocaleDateString()}
+                                                            {search.last_notified_at && (
+                                                                <span> · Last notified: {new Date(search.last_notified_at).toLocaleDateString()}</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    
+                                                    <div style={{ display: 'flex', gap: '10px' }}>
+                                                        <button
+                                                            onClick={() => runSavedSearchItem(search.search_term)}
+                                                            style={{
+                                                                padding: '8px 16px',
+                                                                background: '#4CAF50',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '6px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '13px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '5px'
+                                                            }}
+                                                        >
+                                                            🔍 Run Search
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteSavedSearchItem(search.id)}
+                                                            style={{
+                                                                padding: '8px 16px',
+                                                                background: '#ff4444',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '6px',
+                                                                cursor: 'pointer',
+                                                                fontSize: '13px',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '5px'
+                                                            }}
+                                                        >
+                                                            🗑️ Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ) : showDailyDeals ? (
+                        <div style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: '#121212',
+                            zIndex: 20000,
+                            overflow: 'auto',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                padding: '20px',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    maxWidth: '1200px',
+                                    margin: '0 auto'
+                                }}>
+                                    <h1 style={{ margin: 0, fontSize: '24px' }}>🔥 Daily Deals</h1>
+                                    <button
+                                        onClick={() => setShowDailyDeals(false)}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.2)',
+                                            border: 'none',
+                                            color: 'white',
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                                <DailyDeals 
+                                    userId={user?.id}
+                                    userReferralCount={userReferralCount}
+                                    onClaimDeal={(deal) => {
+                                        showToastNotification(`🎉 Claimed: ${deal.title || 'Deal'}`);
+                                        loadReferralCount();
+                                    }}
+                                />
+                            </div>
+                        </div>
+
+                    ) : showReferralProgram ? (
+                        <div style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: '#121212',
+                            zIndex: 20000,
+                            overflow: 'auto',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                padding: '20px',
+                                position: 'sticky',
+                                top: 0,
+                                zIndex: 100
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    maxWidth: '1200px',
+                                    margin: '0 auto'
+                                }}>
+                                    <h1 style={{ margin: 0, fontSize: '24px' }}>🎁 Referral Program</h1>
+                                    <button
+                                        onClick={() => setShowReferralProgram(false)}
+                                        style={{
+                                            background: 'rgba(255,255,255,0.2)',
+                                            border: 'none',
+                                            color: 'white',
+                                            fontSize: '24px',
+                                            width: '40px',
+                                            height: '40px',
+                                            borderRadius: '50%',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                            <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
+                                <ReferralProgram 
+                                    userId={user?.id}
+                                    userName={userName}
+                                    onReferralComplete={() => {
+                                        showToastNotification('🎉 Referral completed!');
+                                        loadReferralCount();
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    ) : showToolsPanel ? (
                         <div className="tools-panel-container" style={{ width: '100%', padding: '1rem' }}>
                             <button 
                                 onClick={() => setShowToolsPanel(false)}
@@ -5202,8 +5725,6 @@ function SocialAIMarketingEngine() {
                                 }} />
                             </div>
                         </div>
-
-                        
                     ) : (
                     
                     <div className="results-section">

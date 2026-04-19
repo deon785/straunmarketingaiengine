@@ -1,4 +1,4 @@
-// UserSettings.jsx - Dark Theme Version
+// UserSettings.jsx - Dark Theme Version with Theme Customization
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 import { useNavigate } from 'react-router-dom';
@@ -23,6 +23,15 @@ const UserSettings = ({ user }) => {
   const [confirmText, setConfirmText] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
   const navigate = useNavigate();
+
+  // Load saved theme on component mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('user_theme');
+    if (savedTheme) {
+      document.body.classList.remove('dark-theme', 'light-theme', 'ocean-theme', 'sunset-theme', 'forest-theme');
+      document.body.classList.add(`${savedTheme}-theme`);
+    }
+  }, []);
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -132,7 +141,6 @@ const UserSettings = ({ user }) => {
         console.error('Database deletion errors:', errors);
       }
       
-      // In handleDeleteAccount function, add more detailed logging
       try {
           console.log('Attempting to delete auth user via Edge Function...');
           const { data: functionData, error: functionError } = await supabase.functions.invoke('delete-user', {
@@ -142,7 +150,7 @@ const UserSettings = ({ user }) => {
           if (functionError) {
               console.error('Edge Function error details:', functionError);
               setError(`Auth deletion failed: ${functionError.message}. Please contact support.`);
-              return; // Stop here if auth deletion fails
+              return;
           }
           
           console.log('Auth user deleted successfully:', functionData);
@@ -183,440 +191,253 @@ const UserSettings = ({ user }) => {
   };
 
   return (
-    <div className="privacy-settings" style={{
-      maxWidth: '800px',
-      margin: '0 auto',
-      padding: '30px',
-      background: '#0a0a0a',  // Dark background for entire page
-      minHeight: '100vh'
-    }}>
-      {/* Error/Success messages at the TOP */}
-      {(error || success) && (
-        <div className="message-container" style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 1000,
-          width: '90%',
-          maxWidth: '500px'
-        }}>
-          {error && (
-            <div style={{
-              backgroundColor: '#2a1212',
-              border: '1px solid #5c1a1a',
-              color: '#ff8a8a',
-              padding: '15px 20px',
-              borderRadius: '8px',
-              marginBottom: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-            }}>
-              <FontAwesomeIcon icon={faExclamationTriangle} />
-              <div style={{ flex: 1 }}>
-                <strong>Error:</strong> {error}
-              </div>
-              <button
-                onClick={() => setError(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#ff8a8a',
-                  cursor: 'pointer',
-                  fontSize: '16px'
-                }}
-              >
-                <FontAwesomeIcon icon={faTimesCircle} />
-              </button>
+  <div className="privacy-settings">
+    {/* Error/Success messages */}
+    {(error || success) && (
+      <div className="message-container">
+        {error && (
+          <div className="error-message">
+            <FontAwesomeIcon icon={faExclamationTriangle} />
+            <div style={{ flex: 1 }}>
+              <strong>Error:</strong> {error}
             </div>
-          )}
-          
-          {success && (
-            <div style={{
-              backgroundColor: '#0a2a1a',
-              border: '1px solid #1a5c2a',
-              color: '#8affaa',
-              padding: '15px 20px',
-              borderRadius: '8px',
-              marginBottom: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
-            }}>
-              <FontAwesomeIcon icon={faCheckCircle} />
-              <div style={{ flex: 1 }}>
-                <strong>Success:</strong> {success}
-              </div>
-              <button
-                onClick={() => setSuccess(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#8affaa',
-                  cursor: 'pointer',
-                  fontSize: '16px'
-                }}
-              >
-                <FontAwesomeIcon icon={faTimesCircle} />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      <h1 style={{
-        fontSize: '32px',
-        fontWeight: '700',
-        color: '#ffffff',  // White text
-        marginBottom: '30px',
-        textAlign: 'center'
-      }}>
-        Data Privacy
-      </h1>
-
-      <div style={{
-        background: '#1a1a1a',  // Dark card background
-        borderRadius: '12px',
-        padding: '30px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-        border: '1px solid #2a2a2a'
-      }}>
-        <h2 style={{
-          fontSize: '24px',
-          fontWeight: '600',
-          color: '#e0e0e0',  // Light gray text
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          <FontAwesomeIcon icon={faInfoCircle} style={{ color: '#667eea' }} />
-          Manage Your Data
-        </h2>
+            <button onClick={() => setError(null)} className="close-btn">
+              <FontAwesomeIcon icon={faTimesCircle} />
+            </button>
+          </div>
+        )}
         
-        <p style={{ 
-          color: '#b0b0b0',  // Light gray text
-          marginBottom: '30px', 
-          lineHeight: '1.6',
-          fontSize: '16px'
-        }}>
-          You have control over your personal data. You can export all your data or permanently delete your account.
-        </p>
+        {success && (
+          <div className="success-message">
+            <FontAwesomeIcon icon={faCheckCircle} />
+            <div style={{ flex: 1 }}>
+              <strong>Success:</strong> {success}
+            </div>
+            <button onClick={() => setSuccess(null)} className="close-btn">
+              <FontAwesomeIcon icon={faTimesCircle} />
+            </button>
+          </div>
+        )}
+      </div>
+    )}
 
-        {/* Export Data Section */}
-        <div style={{
-          padding: '25px',
-          background: '#0f0f0f',  // Darker background
-          borderRadius: '8px',
-          marginBottom: '25px',
-          border: '1px solid #2a2a2a'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '15px',
-            flexWrap: 'wrap',
-            gap: '15px'
-          }}>
-            <div>
-              <h3 style={{
-                fontSize: '18px',
-                fontWeight: '600',
-                color: '#e0e0e0',  // Light gray text
-                marginBottom: '5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}>
-                <FontAwesomeIcon icon={faDownload} style={{ color: '#667eea' }} />
-                Export My Data
-              </h3>
-              <p style={{ color: '#888888', fontSize: '14px' }}>  // Gray text
-                Get all your data in JSON format including profile, products, searches, and feedback.
+    <h1 className="settings-title">
+      Data Privacy
+    </h1>
+
+    <div className="settings-card">
+      <h2 className="settings-card-title">
+        <FontAwesomeIcon icon={faInfoCircle} />
+        Manage Your Data
+      </h2>
+      
+      <p className="settings-description">
+        You have control over your personal data. You can export all your data or permanently delete your account.
+      </p>
+
+      {/* Export Data Section */}
+      <div className="export-section">
+        <div className="export-header">
+          <div>
+            <h3 className="export-title">
+              <FontAwesomeIcon icon={faDownload} />
+              Export My Data
+            </h3>
+            <p className="export-description">
+              Get all your data in JSON format including profile, products, searches, and feedback.
+            </p>
+          </div>
+          <button
+            onClick={handleDataExport}
+            disabled={exportLoading}
+            className="export-btn"
+          >
+            {exportLoading ? (
+              <>
+                <FontAwesomeIcon icon={faSpinner} spin />
+                Exporting...
+              </>
+            ) : (
+              <>
+                <FontAwesomeIcon icon={faDownload} />
+                Export Data
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Delete Account Section */}
+      <div className="delete-section">
+        <div className="delete-header">
+          <div style={{ flex: 1 }}>
+            <h3 className="delete-title">
+              <FontAwesomeIcon icon={faTrash} />
+              Delete My Account
+            </h3>
+            <p className="delete-description">
+              Permanently remove all your data from our systems. This includes:
+            </p>
+            <ul className="delete-list">
+              <li>Your profile information</li>
+              <li>All your product listings</li>
+              <li>Your search history</li>
+              <li>Your feedback submissions</li>
+              <li>Your account credentials</li>
+            </ul>
+            <div className="warning-box">
+              <p className="warning-text">
+                ⚠️ Warning: This action is permanent and cannot be undone!
               </p>
             </div>
+          </div>
+          <button
+            onClick={showDeleteConfirmation}
+            disabled={loading}
+            className="delete-btn"
+          >
+            <FontAwesomeIcon icon={faTrash} />
+            Delete Account
+          </button>
+        </div>
+
+        {/* Theme Customization Section */}
+        <div className="theme-section">
+          <h3 className="theme-title">
+            <span style={{ fontSize: '20px' }}>🎨</span>
+            Theme Customization
+          </h3>
+          <p className="theme-description">
+            Choose your preferred app theme
+          </p>
+          
+          <div className="theme-buttons">
+            <button onClick={() => {
+              localStorage.setItem('user_theme', 'dark');
+              document.body.classList.add('dark-theme');
+              document.body.classList.remove('light-theme', 'ocean-theme', 'sunset-theme', 'forest-theme');
+              setSuccess('✅ Theme changed to Dark');
+            }} className="theme-btn">
+              🌙 Dark
+            </button>
+            
+            <button onClick={() => {
+              localStorage.setItem('user_theme', 'light');
+              document.body.classList.add('light-theme');
+              document.body.classList.remove('dark-theme', 'ocean-theme', 'sunset-theme', 'forest-theme');
+              setSuccess('✅ Theme changed to Light');
+            }} className="theme-btn">
+              ☀️ Light
+            </button>
+            
+            <button onClick={() => {
+              localStorage.setItem('user_theme', 'ocean');
+              document.body.classList.add('ocean-theme');
+              document.body.classList.remove('dark-theme', 'light-theme', 'sunset-theme', 'forest-theme');
+              setSuccess('✅ Theme changed to Ocean Blue');
+            }} className="theme-btn">
+              🌊 Ocean Blue
+            </button>
+            
+            <button onClick={() => {
+              localStorage.setItem('user_theme', 'sunset');
+              document.body.classList.add('sunset-theme');
+              document.body.classList.remove('dark-theme', 'light-theme', 'ocean-theme', 'forest-theme');
+              setSuccess('✅ Theme changed to Sunset');
+            }} className="theme-btn">
+              🌅 Sunset
+            </button>
+            
+            <button onClick={() => {
+              localStorage.setItem('user_theme', 'forest');
+              document.body.classList.add('forest-theme');
+              document.body.classList.remove('dark-theme', 'light-theme', 'ocean-theme', 'sunset-theme');
+              setSuccess('✅ Theme changed to Forest Green');
+            }} className="theme-btn">
+              🌲 Forest Green
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* Confirmation Modal - Keep as is but update colors */}
+    {showConfirmModal && (
+      <div className="modal-overlay">
+        <div className="modal-content">
+          <h3 className="modal-title">
+            <FontAwesomeIcon icon={faExclamationTriangle} />
+            Confirm Account Deletion
+          </h3>
+          
+          <div className="modal-warning">
+            <p className="modal-warning-text">
+              This will permanently delete ALL your data including:
+            </p>
+            <ul className="modal-list">
+              <li>Your profile information</li>
+              <li>All your product listings</li>
+              <li>Your search history</li>
+              <li>Your feedback submissions</li>
+              <li>Your account credentials</li>
+            </ul>
+            <p className="modal-danger-text">
+              ⚠️ This action cannot be undone!
+            </p>
+          </div>
+          
+          <div className="modal-input-group">
+            <label className="modal-label">
+              Type <strong className="danger-text">DELETE</strong> to confirm:
+            </label>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              className="modal-input"
+              placeholder="Type DELETE here"
+              autoFocus
+            />
+          </div>
+          
+          <div className="modal-buttons">
             <button
-              onClick={handleDataExport}
-              disabled={exportLoading}
-              style={{
-                padding: '12px 24px',
-                background: '#4361ee',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: exportLoading ? 'not-allowed' : 'pointer',
-                fontWeight: '600',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                opacity: exportLoading ? 0.7 : 1,
-                transition: 'all 0.3s ease'
+              onClick={() => {
+                setShowConfirmModal(false);
+                setConfirmText('');
               }}
-              onMouseEnter={(e) => !exportLoading && (e.target.style.background = '#5a6fd8')}
-              onMouseLeave={(e) => !exportLoading && (e.target.style.background = '#4361ee')}
+              disabled={isConfirming}
+              className="modal-cancel-btn"
             >
-              {exportLoading ? (
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteAccount}
+              disabled={isConfirming || confirmText !== 'DELETE'}
+              className="modal-confirm-btn"
+              style={{
+                background: confirmText === 'DELETE' ? '#dc2626' : '#2a2a2a',
+                opacity: (isConfirming || confirmText !== 'DELETE') ? 0.5 : 1
+              }}
+            >
+              {isConfirming ? (
                 <>
                   <FontAwesomeIcon icon={faSpinner} spin />
-                  Exporting...
+                  Deleting...
                 </>
               ) : (
                 <>
-                  <FontAwesomeIcon icon={faDownload} />
-                  Export Data
+                  <FontAwesomeIcon icon={faTrash} />
+                  Permanently Delete Account
                 </>
               )}
             </button>
           </div>
         </div>
-
-        {/* Delete Account Section */}
-        <div style={{
-          padding: '25px',
-          background: '#1a0a0a',  // Dark red-tinted background
-          borderRadius: '8px',
-          border: '1px solid #5c1a1a'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            marginBottom: '20px',
-            flexWrap: 'wrap',
-            gap: '15px'
-          }}>
-            <div style={{ flex: 1 }}>
-              <h3 style={{
-                fontSize: '18px',
-                fontWeight: '600',
-                color: '#ff6b6b',  // Light red text
-                marginBottom: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px'
-              }}>
-                <FontAwesomeIcon icon={faTrash} />
-                Delete My Account
-              </h3>
-              <p style={{ color: '#b0b0b0', fontSize: '14px', marginBottom: '15px' }}>
-                Permanently remove all your data from our systems. This includes:
-              </p>
-              <ul style={{
-                color: '#b0b0b0',
-                fontSize: '14px',
-                paddingLeft: '20px',
-                marginBottom: '15px'
-              }}>
-                <li>Your profile information</li>
-                <li>All your product listings</li>
-                <li>Your search history</li>
-                <li>Your feedback submissions</li>
-                <li>Your account credentials</li>
-              </ul>
-              <div style={{
-                backgroundColor: '#2a1a0a',
-                borderLeft: '4px solid #dd6b20',
-                padding: '12px 15px',
-                borderRadius: '4px',
-                marginBottom: '15px'
-              }}>
-                <p style={{
-                  color: '#ffaa66',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  margin: 0
-                }}>
-                  ⚠️ Warning: This action is permanent and cannot be undone!
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={showDeleteConfirmation}
-              disabled={loading}
-              style={{
-                padding: '12px 24px',
-                background: '#dc2626',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                fontWeight: '600',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                opacity: loading ? 0.7 : 1,
-                transition: 'all 0.3s ease',
-                minWidth: '150px'
-              }}
-              onMouseEnter={(e) => !loading && (e.target.style.background = '#b91c1c')}
-              onMouseLeave={(e) => !loading && (e.target.style.background = '#dc2626')}
-            >
-              <FontAwesomeIcon icon={faTrash} />
-              Delete Account
-            </button>
-          </div>
-        </div>
       </div>
-
-      {/* Confirmation Modal - Dark Theme */}
-      {showConfirmModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.8)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1001,
-          padding: '20px'
-        }}>
-          <div style={{
-            background: '#1a1a1a',
-            borderRadius: '12px',
-            padding: '30px',
-            maxWidth: '500px',
-            width: '100%',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-            border: '1px solid #2a2a2a'
-          }}>
-            <h3 style={{
-              fontSize: '22px',
-              fontWeight: '600',
-              color: '#ff6b6b',
-              marginBottom: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}>
-              <FontAwesomeIcon icon={faExclamationTriangle} />
-              Confirm Account Deletion
-            </h3>
-            
-            <div style={{
-              backgroundColor: '#2a1212',
-              border: '1px solid #5c1a1a',
-              borderRadius: '8px',
-              padding: '20px',
-              marginBottom: '25px'
-            }}>
-              <p style={{ color: '#ffaa66', marginBottom: '15px', fontWeight: '600' }}>
-                This will permanently delete ALL your data including:
-              </p>
-              <ul style={{
-                color: '#ffaa66',
-                paddingLeft: '20px',
-                marginBottom: '15px'
-              }}>
-                <li>Your profile information</li>
-                <li>All your product listings</li>
-                <li>Your search history</li>
-                <li>Your feedback submissions</li>
-                <li>Your account credentials</li>
-              </ul>
-              <p style={{ color: '#ff6b6b', fontWeight: '600' }}>
-                ⚠️ This action cannot be undone!
-              </p>
-            </div>
-            
-            <div style={{ marginBottom: '25px' }}>
-              <label style={{
-                display: 'block',
-                color: '#e0e0e0',
-                marginBottom: '10px',
-                fontWeight: '500'
-              }}>
-                Type <strong style={{ color: '#ff6b6b' }}>DELETE</strong> to confirm:
-              </label>
-              <input
-                type="text"
-                value={confirmText}
-                onChange={(e) => setConfirmText(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '12px 15px',
-                  background: '#0a0a0a',
-                  border: '2px solid #2a2a2a',
-                  borderRadius: '6px',
-                  fontSize: '16px',
-                  color: '#ffffff',
-                  transition: 'all 0.3s ease'
-                }}
-                placeholder="Type DELETE here"
-                autoFocus
-              />
-            </div>
-            
-            <div style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '15px'
-            }}>
-              <button
-                onClick={() => {
-                  setShowConfirmModal(false);
-                  setConfirmText('');
-                }}
-                disabled={isConfirming}
-                style={{
-                  padding: '12px 24px',
-                  background: '#2a2a2a',
-                  color: '#e0e0e0',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: isConfirming ? 'not-allowed' : 'pointer',
-                  fontWeight: '600',
-                  fontSize: '14px',
-                  opacity: isConfirming ? 0.7 : 1
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteAccount}
-                disabled={isConfirming || confirmText !== 'DELETE'}
-                style={{
-                  padding: '12px 24px',
-                  background: confirmText === 'DELETE' ? '#dc2626' : '#2a2a2a',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: (isConfirming || confirmText !== 'DELETE') ? 'not-allowed' : 'pointer',
-                  fontWeight: '600',
-                  fontSize: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  opacity: (isConfirming || confirmText !== 'DELETE') ? 0.5 : 1,
-                  transition: 'all 0.3s ease'
-                }}
-              >
-                {isConfirming ? (
-                  <>
-                    <FontAwesomeIcon icon={faSpinner} spin />
-                    Deleting...
-                  </>
-                ) : (
-                  <>
-                    <FontAwesomeIcon icon={faTrash} />
-                    Permanently Delete Account
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    )}
+  </div>
+);
 };
 
 export default UserSettings;
