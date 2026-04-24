@@ -24,77 +24,29 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const MIN_DISCOUNT = 20;
     const MAX_DISCOUNT = 60;
 
-    // LOG: Component mounted
-    console.log('🔥 DailyDeals component mounted');
-    console.log('📌 Received userId:', userId);
-    console.log('📌 Received userReferralCount:', userReferralCount);
-
-    // Check if userId is provided
-    useEffect(() => {
-        if (!userId) {
-            console.error('❌ ERROR: userId prop is missing! DailyDeals will not work.');
-            setLoading(false);
-            setProductCheck({ error: 'userId is required', count: 0 });
-        } else {
-            console.log('✅ userId is present:', userId);
-            checkProductsInDatabase();
-        }
-    }, [userId]);
-
-    // Function to check products in database
-    const checkProductsInDatabase = async () => {
-        console.log('🔍 Checking for products in database...');
+    // ✅ OPTIMIZATION 1: Batch function to get referral points for ALL sellers in ONE query
+    const getSellerReferralPointsBatch = async (sellerIds) => {
+        if (!sellerIds || sellerIds.length === 0) return {};
         
-        try {
-            const { data, count, error } = await supabase
-                .from('products')
-                .select('*', { count: 'exact', head: false })
-                .eq('status', 'active');
-            
-            if (error) {
-                console.error('❌ Error checking products:', error);
-                setProductCheck({ error: error.message, count: 0 });
-                return;
-            }
-            
-            console.log(`📦 Found ${count || data?.length || 0} available products`);
-            
-            if (data && data.length > 0) {
-                console.log('✅ Sample product:', {
-                    id: data[0].id,
-                    name: data[0].name,
-                    price: data[0].price,
-                    location: data[0].location,
-                    seller_id: data[0].seller_id
-                });
-                setProductCheck({ success: true, count: data.length, sample: data[0] });
-            } else {
-                console.warn('⚠️ No products found in database! Add some products to see deals.');
-                setProductCheck({ success: false, count: 0, message: 'No products available' });
-                setLoading(false);
-            }
-        } catch (err) {
-            console.error('❌ Failed to check products:', err);
-            setProductCheck({ error: err.message, count: 0 });
-        }
-    };
-
-    // Fetch seller referral points
-    const getSellerReferralPoints = async (sellerId) => {
         try {
             const { data, error } = await supabase
                 .from('referrals')
-                .select('id')
-                .eq('referrer_id', sellerId)
-                .eq('status', 'completed');
+                .select('referrer_id')
+                .eq('status', 'completed')
+                .in('referrer_id', sellerIds);
             
             if (error) throw error;
-            const count = data?.length || 0;
-            if (count > 0) console.log(`📊 Seller ${sellerId} has ${count} referral points`);
-            return count;
+            
+            // Count referrals per seller
+            const pointsMap = {};
+            data.forEach(ref => {
+                pointsMap[ref.referrer_id] = (pointsMap[ref.referrer_id] || 0) + 1;
+            });
+            
+            return pointsMap;
         } catch (error) {
             console.error('Error fetching seller points:', error);
-            return 0;
+            return {};
         }
     };
 
@@ -111,42 +63,30 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         
         try {
             // Get current user's location
-            console.log('📍 Fetching user profile location...');
             const { data: userProfile, error: profileError } = await supabase
                 .from('profiles')
                 .select('location')
                 .eq('user_id', userId)
                 .single();
             
-            if (profileError) {
-                console.log('⚠️ Could not fetch user location:', profileError.message);
-            }
-            
             const userLocation = userProfile?.location || '';
-            console.log(`📍 User location: ${userLocation || 'Not set'}`);
             
-            // Fetch available products - SIMPLE VERSION
-            console.log('🛒 Fetching available products...');
+            // ✅ OPTIMIZATION 2: Add limit to products query - only fetch what we need
             const { data: allProducts, error } = await supabase
                 .from('products')
                 .select('*')
-                .eq('status', 'active');
+                .eq('status', 'active')
+                .limit(100);  // ← Only fetch 100 products max
             
-            if (error) {
-                console.error('❌ Error fetching products:', error);
-                throw error;
-            }
-            
-            console.log(`📦 Total products fetched: ${allProducts?.length || 0}`);
+            if (error) throw error;
             
             if (!allProducts || allProducts.length === 0) {
-                console.warn('⚠️ No products available in database');
                 setDeals([]);
                 setLoading(false);
                 return;
             }
 
-            // After getting products, fetch seller names from profiles
+            // Get seller names
             const sellerIds = [...new Set(allProducts.map(p => p.seller_id).filter(Boolean))];
             let sellersMap = {};
 
@@ -158,7 +98,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 
                 if (!sellersError && sellers) {
                     sellersMap = Object.fromEntries(sellers.map(s => [s.user_id, s.username]));
-                    console.log('✅ Loaded seller names:', Object.keys(sellersMap).length);
                 }
             }
             
@@ -168,45 +107,37 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 seller_name: sellersMap[product.seller_id] || 'Seller'
             }));
             
-            // Get referral points for each seller
-            console.log('🎯 Calculating seller referral points...');
-            const productsWithScores = await Promise.all(
-                productsWithSellers.map(async (product) => {
-                    const referralPoints = await getSellerReferralPoints(product.seller_id);
-                    
-                    let score = 0;
-                    score += referralPoints * 10;
-                    if (userLocation && product.location === userLocation) {
-                        score += 50;
-                        console.log(`📍 Location bonus for ${product.name}: +50`);
-                    }
-                    score += Math.min((product.views || 0) / 10, 50);
-                    
-                    return { 
-                        ...product, 
-                        score,
-                        seller_referral_points: referralPoints
-                    };
-                })
-            );
+            // ✅ OPTIMIZATION 3: Get ALL referral points in ONE batch query (not in a loop!)
+            const uniqueSellerIds = [...new Set(productsWithSellers.map(p => p.seller_id).filter(Boolean))];
+            const referralPointsMap = await getSellerReferralPointsBatch(uniqueSellerIds);
+            
+            // Calculate scores without additional DB calls
+            const productsWithScores = productsWithSellers.map(product => {
+                const referralPoints = referralPointsMap[product.seller_id] || 0;
+                let score = 0;
+                score += referralPoints * 10;
+                if (userLocation && product.location === userLocation) {
+                    score += 50;
+                }
+                score += Math.min((product.views || 0) / 10, 50);
+                
+                return { 
+                    ...product, 
+                    score,
+                    seller_referral_points: referralPoints
+                };
+            });
             
             // Sort by score
             const sortedByScore = productsWithScores.sort((a, b) => b.score - a.score);
-            console.log(`📊 Top product score: ${sortedByScore[0]?.score || 0}`);
             
-            // Separate products with scores vs without
+            // Select products for deals
+            let selectedProducts = [];
             const productsWithScoresOnly = sortedByScore.filter(p => p.score > 0);
             const productsWithoutScores = sortedByScore.filter(p => p.score === 0);
             
-            console.log(`🏆 Products with referral points: ${productsWithScoresOnly.length}`);
-            console.log(`🎲 Products without referral points: ${productsWithoutScores.length}`);
-            
-            let selectedProducts = [];
-            
-            // Tiered selection
             if (productsWithScoresOnly.length >= NUMBER_OF_DEALS) {
                 selectedProducts = productsWithScoresOnly.slice(0, NUMBER_OF_DEALS);
-                console.log('✅ Taking top 6 products from sellers with highest referral points');
             } else if (productsWithScoresOnly.length > 0) {
                 const remainingSlots = NUMBER_OF_DEALS - productsWithScoresOnly.length;
                 selectedProducts = [...productsWithScoresOnly];
@@ -216,7 +147,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                     [shuffledRandom[i], shuffledRandom[j]] = [shuffledRandom[j], shuffledRandom[i]];
                 }
                 selectedProducts.push(...shuffledRandom.slice(0, remainingSlots));
-                console.log(`✅ Taking ${productsWithScoresOnly.length} from top sellers + ${remainingSlots} random products`);
             } else {
                 const shuffled = [...productsWithSellers];
                 for (let i = shuffled.length - 1; i > 0; i--) {
@@ -224,20 +154,15 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
                 }
                 selectedProducts = shuffled.slice(0, NUMBER_OF_DEALS);
-                console.log('🎲 No referral points found - showing random products');
             }
             
-            console.log(`✅ Selected ${selectedProducts.length} products for deals`);
-            
-            // Create deal objects - WITHOUT referral requirements
+            // Create deal objects
             const newDeals = selectedProducts.map((product, index) => {
                 const discountPercent = Math.floor(Math.random() * (MAX_DISCOUNT - MIN_DISCOUNT + 1)) + MIN_DISCOUNT;
                 const originalPrice = product.price;
                 const dealPrice = +(originalPrice * (1 - discountPercent / 100)).toFixed(2);
                 const maxQuantity = Math.floor(Math.random() * 16) + 5;
                 const alreadyClaimed = activeDealIds.includes(product.id);
-                
-                console.log(`🎁 Deal ${index + 1}: ${product.name} - ${discountPercent}% off -> $${dealPrice}`);
                 
                 return {
                     id: `deal-${product.id}-${Date.now()}`,
@@ -272,6 +197,53 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         }
     }, [userId, NUMBER_OF_DEALS, DEAL_DURATION_MINUTES, MIN_DISCOUNT, MAX_DISCOUNT, activeDealIds]);
 
+    // ✅ OPTIMIZATION 4: Add timeout to prevent infinite loading
+    useEffect(() => {
+        if (!userId) {
+            console.error('❌ ERROR: userId prop is missing!');
+            setLoading(false);
+            setProductCheck({ error: 'userId is required', count: 0 });
+            return;
+        }
+        
+        // Add timeout to stop loading after 5 seconds
+        const timeout = setTimeout(() => {
+            if (loading) {
+                console.log('Loading timeout - forcing stop');
+                setLoading(false);
+            }
+        }, 5000);
+        
+        checkProductsInDatabase();
+        
+        return () => clearTimeout(timeout);
+    }, [userId]);
+
+    // Function to check products in database
+    const checkProductsInDatabase = async () => {
+        console.log('🔍 Checking for products in database...');
+        
+        try {
+            const { data, count, error } = await supabase
+                .from('products')
+                .select('*', { count: 'exact', head: true })
+                .eq('status', 'active');
+            
+            if (error) {
+                console.error('❌ Error checking products:', error);
+                setProductCheck({ error: error.message, count: 0 });
+                return;
+            }
+            
+            console.log(`📦 Found ${count || 0} available products`);
+            setProductCheck({ success: true, count: count || 0 });
+            
+        } catch (err) {
+            console.error('❌ Failed to check products:', err);
+            setProductCheck({ error: err.message, count: 0 });
+        }
+    };
+
     // View product details with seller info
     const viewProductDetails = async (deal) => {
         console.log('👁️ Viewing product details for:', deal.product?.name);
@@ -288,7 +260,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             
             if (!error && sellerData) {
                 setSellerDetails(sellerData);
-                console.log('👤 Seller details loaded:', sellerData.username);
             }
             
             await supabase
@@ -419,13 +390,11 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const ProductImage = ({ product, style, modalStyle }) => {
         const [imgError, setImgError] = useState(false);
         
-        // Get first letter of product name for placeholder
         const getInitialLetter = () => {
             if (!product?.name) return '?';
             return product.name.charAt(0).toUpperCase();
         };
         
-        // If no image URL or image failed to load, show letter placeholder
         if (!product?.image_url || imgError) {
             return (
                 <div style={style || {
@@ -468,8 +437,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         );
     }
 
-    // Show product check status while loading
-    if (loading && !productCheck) {
+    // Show loading state
+    if (loading && deals.length === 0) {
         return (
             <div style={styles.loadingContainer}>
                 <div style={styles.spinner}></div>
@@ -548,7 +517,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                     <div style={styles.claimedBadge}>✓ Claimed!</div>
                                 )}
                                 
-                                {/* Product Image with Letter Placeholder */}
                                 <ProductImage 
                                     product={product} 
                                     style={styles.dealImage}
@@ -676,7 +644,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                         <h4>📊 Deal Details</h4>
                                         <ul style={styles.dealDetailsList}>
                                             <li>🔥 Limited stock: {selectedDeal.max_quantity - selectedDeal.sold_count} left</li>
-                                            <li>👥 Referrals needed: {selectedDeal.referral_required === 0 ? 'None!' : `${selectedDeal.referral_required}+ referrals`}</li>
                                             <li>⏰ Deal expires in: {timeLeft[selectedDeal.id] ? formatTimeDisplay(timeLeft[selectedDeal.id]) : 'Expiring soon'}</li>
                                             <li>📅 Listed on: {new Date(selectedDeal.product?.created_at).toLocaleDateString()}</li>
                                         </ul>
@@ -687,20 +654,18 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             closeModal();
                                             claimDeal(selectedDeal);
                                         }}
-                                        disabled={!canAccessDeal(selectedDeal) || claiming[selectedDeal.id] || 
+                                        disabled={claiming[selectedDeal.id] || 
                                                   selectedDeal.sold_count >= selectedDeal.max_quantity || 
                                                   selectedDeal.already_claimed}
                                         style={{
                                             ...styles.modalClaimButton,
                                             background: selectedDeal.already_claimed ? '#4CAF50' :
-                                                       !canAccessDeal(selectedDeal) ? '#999' :
                                                        selectedDeal.sold_count >= selectedDeal.max_quantity ? '#f44336' :
                                                        'linear-gradient(135deg, #667eea, #764ba2)'
                                         }}
                                     >
                                         {claiming[selectedDeal.id] ? 'Claiming...' :
                                          selectedDeal.already_claimed ? '✓ Already Claimed' :
-                                         !canAccessDeal(selectedDeal) ? '🔒 Need More Referrals' :
                                          selectedDeal.sold_count >= selectedDeal.max_quantity ? 'Sold Out' :
                                          '🔥 Claim This Deal'}
                                     </button>

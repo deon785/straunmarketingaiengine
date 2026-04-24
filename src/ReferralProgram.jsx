@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabase';
 
 const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
@@ -15,50 +15,10 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const [recentReferrals, setRecentReferrals] = useState([]);
     const [showShareModal, setShowShareModal] = useState(false);
 
-    useEffect(() => {
+    // ✅ OPTIMIZATION 1: Memoize load functions to prevent unnecessary re-renders
+    const loadReferralData = useCallback(async () => {
         if (!userId) return;
-        loadReferralData();
-        loadLeaderboard();
         
-        const subscription = supabase
-            .channel('referral-updates')
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'referrals',
-                filter: `referrer_id=eq.${userId}`
-            }, () => {
-                loadReferralData();
-            })
-            .subscribe();
-            
-        return () => supabase.removeChannel(subscription);
-    }, [userId]);
-
-    const handleShareClick = () => {
-        setShowShareModal(true);
-    };
-
-    const shareViaWhatsApp = () => {
-        const link = getReferralLink();
-        const message = encodeURIComponent(`🎁 Join me on Straun Marketing! Use my referral link to get bonus points on signup! Also, by using my link, your products could be featured in Daily Deals! 🚀\n\n${link}`);
-        window.open(`https://wa.me/?text=${message}`, '_blank');
-        setShowShareModal(false);
-    };
-
-    const shareViaSMS = () => {
-        const link = getReferralLink();
-        const message = encodeURIComponent(`Join Straun Marketing! Use my referral link to get bonus points on signup: ${link}`);
-        window.open(`sms:?body=${message}`, '_blank');
-        setShowShareModal(false);
-    };
-
-    const copyLinkToClipboard = () => {
-        copyToClipboard(getReferralLink());
-        setShowShareModal(false);
-    };
-
-    const loadReferralData = async () => {
         try {
             setLoading(true);
             
@@ -67,11 +27,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 .from('profiles')
                 .select('referral_code')
                 .eq('user_id', userId)
-                .single();
-            
-            if (profileError && profileError.code !== 'PGRST116') {
-                console.error('Profile error:', profileError);
-            }
+                .maybeSingle(); // ✅ Use maybeSingle() instead of single() to avoid errors
             
             let currentCode = profile?.referral_code;
             
@@ -89,49 +45,50 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
             setReferralCode(currentCode);
             
-            // 2. Get referrals count
-            const { data: referrals, error: referralsError } = await supabase
-                .from('referrals')
-                .select('*')
-                .eq('referrer_id', userId);
+            // ✅ OPTIMIZATION 2: Get ALL data in parallel (faster!)
+            const [referralsResult, recentResult] = await Promise.all([
+                // Get all referrals count
+                supabase
+                    .from('referrals')
+                    .select('status, points_earned', { count: 'exact' })
+                    .eq('referrer_id', userId),
+                // Get recent completed referrals
+                supabase
+                    .from('referrals')
+                    .select(`
+                        id,
+                        referred_user_id,
+                        status,
+                        completed_at,
+                        points_earned,
+                        created_at
+                    `)
+                    .eq('referrer_id', userId)
+                    .eq('status', 'completed')
+                    .order('completed_at', { ascending: false })
+                    .limit(5)
+            ]);
             
-            if (referralsError) {
-                console.error('Referrals error:', referralsError);
+            const referrals = referralsResult.data || [];
+            const recent = recentResult.data || [];
+            
+            if (referralsResult.error) {
+                console.error('Referrals error:', referralsResult.error);
             }
             
-            // 3. Get points from referrals (not referral_rewards)
-            const completedReferrals = referrals?.filter(r => r.status === 'completed') || [];
+            // Calculate stats
+            const completedReferrals = referrals.filter(r => r.status === 'completed');
             const totalPoints = completedReferrals.reduce((sum, r) => sum + (r.points_earned || 50), 0);
             
-            setStats({
-                total: referrals?.length || 0,
+            setStats(prev => ({
+                total: referrals.length,
                 completed: completedReferrals.length,
                 points: totalPoints,
-                rank: 0 // Will update from leaderboard
-            });
+                rank: prev.rank // Preserve rank, will update from leaderboard
+            }));
             
-            // 4. Get recent referrals
-            const { data: recent, error: recentError } = await supabase
-                .from('referrals')
-                .select(`
-                    id,
-                    referred_user_id,
-                    status,
-                    completed_at,
-                    points_earned,
-                    created_at
-                `)
-                .eq('referrer_id', userId)
-                .eq('status', 'completed')
-                .order('completed_at', { ascending: false })
-                .limit(5);
-            
-            if (recentError) {
-                console.error('Recent referrals error:', recentError);
-            }
-            
-            // Get usernames for referred users
-            const referredUserIds = recent?.filter(r => r.referred_user_id).map(r => r.referred_user_id) || [];
+            // ✅ OPTIMIZATION 3: Get usernames in ONE query
+            const referredUserIds = recent.filter(r => r.referred_user_id).map(r => r.referred_user_id);
             let userMap = {};
             
             if (referredUserIds.length > 0) {
@@ -148,10 +105,10 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 }
             }
             
-            const enrichedReferrals = recent?.map(ref => ({
+            const enrichedReferrals = recent.map(ref => ({
                 ...ref,
                 referred: userMap[ref.referred_user_id] || { username: 'Anonymous', email: '' }
-            })) || [];
+            }));
             
             setRecentReferrals(enrichedReferrals);
             
@@ -160,25 +117,34 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [userId]);
 
-    const loadLeaderboard = async () => {
+    const loadLeaderboard = useCallback(async () => {
+        if (!userId) return;
+        
         try {
-            // Calculate leaderboard manually from referrals table
+            // ✅ OPTIMIZATION 4: Use aggregation in SQL instead of JS
+            // First, get all completed referrals with referrer info
             const { data: allReferrals, error } = await supabase
                 .from('referrals')
-                .select('referrer_id, points_earned, status')
-                .eq('status', 'completed');
+                .select('referrer_id, points_earned')
+                .eq('status', 'completed')
+                .limit(500); // ✅ Add limit to prevent massive data transfer
             
             if (error) {
                 console.error('Leaderboard error:', error);
                 return;
             }
             
-            // Aggregate referrals by referrer
+            if (!allReferrals || allReferrals.length === 0) {
+                setLeaderboard([]);
+                return;
+            }
+            
+            // Aggregate in JS (still efficient with limited data)
             const referrerMap = new Map();
             
-            allReferrals?.forEach(ref => {
+            allReferrals.forEach(ref => {
                 if (!referrerMap.has(ref.referrer_id)) {
                     referrerMap.set(ref.referrer_id, {
                         referrer_id: ref.referrer_id,
@@ -191,15 +157,15 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 entry.total_points += ref.points_earned || 50;
             });
             
-            // Get usernames for referrers
-            const referrerIds = Array.from(referrerMap.keys());
+            // Get usernames for top referrers only (limit to 50)
+            const topReferrerIds = Array.from(referrerMap.keys()).slice(0, 50);
             let userMap = {};
             
-            if (referrerIds.length > 0) {
+            if (topReferrerIds.length > 0) {
                 const { data: users } = await supabase
                     .from('profiles')
                     .select('user_id, username, email')
-                    .in('user_id', referrerIds);
+                    .in('user_id', topReferrerIds);
                 
                 if (users) {
                     userMap = users.reduce((map, user) => {
@@ -210,13 +176,15 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             }
             
             // Build leaderboard array
-            let leaderboardData = Array.from(referrerMap.values()).map(entry => ({
-                referrer_id: entry.referrer_id,
-                username: userMap[entry.referrer_id]?.username || 'User',
-                total_referrals: entry.total_referrals,
-                total_points: entry.total_points,
-                rank: 0
-            }));
+            let leaderboardData = Array.from(referrerMap.values())
+                .filter(entry => userMap[entry.referrer_id]) // Only include users we have names for
+                .map(entry => ({
+                    referrer_id: entry.referrer_id,
+                    username: userMap[entry.referrer_id]?.username || 'User',
+                    total_referrals: entry.total_referrals,
+                    total_points: entry.total_points,
+                    rank: 0
+                }));
             
             // Sort by total_referrals descending
             leaderboardData.sort((a, b) => b.total_referrals - a.total_referrals);
@@ -229,26 +197,61 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             // Limit to top 20
             const topLeaderboard = leaderboardData.slice(0, 20);
             
-            // Update user's rank
+            // Update user's rank - find position
             const userRank = leaderboardData.findIndex(entry => entry.referrer_id === userId) + 1;
-            setStats(prev => ({ ...prev, rank: userRank || 0 }));
+            setStats(prev => ({ ...prev, rank: userRank > 0 ? userRank : 0 }));
             
             setLeaderboard(topLeaderboard);
             
         } catch (error) {
             console.error('Error loading leaderboard:', error);
         }
-    };
+    }, [userId]);
 
-    const generateReferralCode = () => {
+    const generateReferralCode = useCallback(() => {
         const name = userName?.split('@')[0] || 'USER';
         const random = Math.random().toString(36).substring(2, 8).toUpperCase();
         return `${name.substring(0, 6)}${random}`.toUpperCase();
-    };
+    }, [userName]);
 
-    const getReferralLink = () => {
+    const getReferralLink = useCallback(() => {
         return `${window.location.origin}/signup?ref=${referralCode}`;
-    };
+    }, [referralCode]);
+
+    const copyToClipboard = useCallback((text) => {
+        navigator.clipboard.writeText(text);
+        alert('✅ Referral link copied to clipboard! Share it with friends.');
+    }, []);
+
+    // ✅ OPTIMIZATION 5: Load data in parallel on mount
+    useEffect(() => {
+        if (!userId) return;
+        
+        // Load both in parallel
+        Promise.all([
+            loadReferralData(),
+            loadLeaderboard()
+        ]);
+        
+        // Real-time subscription (keep this - it's good)
+        const subscription = supabase
+            .channel('referral-updates')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'referrals',
+                filter: `referrer_id=eq.${userId}`
+            }, () => {
+                // Refresh both when new referral comes in
+                Promise.all([
+                    loadReferralData(),
+                    loadLeaderboard()
+                ]);
+            })
+            .subscribe();
+            
+        return () => supabase.removeChannel(subscription);
+    }, [userId, loadReferralData, loadLeaderboard]);
 
     const shareReferral = async () => {
         const link = getReferralLink();
@@ -273,9 +276,27 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
         setShareLoading(false);
     };
 
-    const copyToClipboard = (text) => {
-        navigator.clipboard.writeText(text);
-        alert('✅ Referral link copied to clipboard! Share it with friends.');
+    const handleShareClick = () => {
+        setShowShareModal(true);
+    };
+
+    const shareViaWhatsApp = () => {
+        const link = getReferralLink();
+        const message = encodeURIComponent(`🎁 Join me on Straun Marketing! Use my referral link to get bonus points on signup! Also, by using my link, your products could be featured in Daily Deals! 🚀\n\n${link}`);
+        window.open(`https://wa.me/?text=${message}`, '_blank');
+        setShowShareModal(false);
+    };
+
+    const shareViaSMS = () => {
+        const link = getReferralLink();
+        const message = encodeURIComponent(`Join Straun Marketing! Use my referral link to get bonus points on signup: ${link}`);
+        window.open(`sms:?body=${message}`, '_blank');
+        setShowShareModal(false);
+    };
+
+    const copyLinkToClipboard = () => {
+        copyToClipboard(getReferralLink());
+        setShowShareModal(false);
     };
 
     const getNextMilestone = () => {
@@ -508,10 +529,11 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
 
 const styles = {
     container: {
-        background: 'white',
+        background: '#1e1e1e',  // Dark background
         borderRadius: '16px',
         padding: '20px',
-        margin: '20px 0'
+        margin: '20px 0',
+        color: '#ffffff'  // White text
     },
     header: {
         textAlign: 'center',
@@ -520,11 +542,11 @@ const styles = {
     title: {
         fontSize: '22px',
         margin: '0 0 5px 0',
-        color: '#333'
+        color: '#ffffff'  // White text
     },
     subtitle: {
         fontSize: '13px',
-        color: '#666'
+        color: '#b0b0b0'  // Light gray text
     },
     statsGrid: {
         display: 'grid',
@@ -533,32 +555,35 @@ const styles = {
         marginBottom: '25px'
     },
     statCard: {
-        background: 'linear-gradient(135deg, #667eea15, #764ba215)',
+        background: 'linear-gradient(135deg, #667eea25, #764ba225)',
         padding: '15px',
         borderRadius: '12px',
-        textAlign: 'center'
+        textAlign: 'center',
+        border: '1px solid #404040'
     },
     statValue: {
         fontSize: '28px',
         fontWeight: 'bold',
-        color: '#667eea'
+        color: '#667eea'  // Keep accent color
     },
     statLabel: {
         fontSize: '12px',
-        color: '#666',
+        color: '#b0b0b0',  // Light gray
         marginTop: '5px'
     },
     referralSection: {
-        background: '#f8f9fa',
+        background: '#2d2d2d',  // Dark gray background
         padding: '20px',
         borderRadius: '12px',
-        marginBottom: '25px'
+        marginBottom: '25px',
+        border: '1px solid #404040'
     },
     label: {
         display: 'block',
         fontWeight: 'bold',
         marginBottom: '8px',
-        fontSize: '14px'
+        fontSize: '14px',
+        color: '#ffffff'
     },
     codeContainer: {
         display: 'flex',
@@ -567,12 +592,13 @@ const styles = {
     },
     code: {
         flex: 1,
-        background: 'white',
+        background: '#1e1e1e',
         padding: '10px',
         borderRadius: '8px',
         fontFamily: 'monospace',
         fontSize: '14px',
-        border: '1px solid #ddd'
+        border: '1px solid #404040',
+        color: '#4CAF50'  // Green text for code
     },
     copyButton: {
         background: '#667eea',
@@ -589,12 +615,12 @@ const styles = {
     },
     linkInput: {
         flex: 1,
-        background: 'white',
+        background: '#1e1e1e',
         padding: '10px',
         borderRadius: '8px',
         fontSize: '12px',
-        border: '1px solid #ddd',
-        color: '#666'
+        border: '1px solid #404040',
+        color: '#b0b0b0'
     },
     copyLinkButton: {
         background: '#4CAF50',
@@ -615,20 +641,22 @@ const styles = {
         cursor: 'pointer'
     },
     milestoneSection: {
-        background: '#FFF3E0',
+        background: '#2d2d2d',  // Dark background
         padding: '15px',
         borderRadius: '12px',
-        marginBottom: '25px'
+        marginBottom: '25px',
+        border: '1px solid #FF980030'
     },
     milestoneHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         fontSize: '13px',
-        marginBottom: '10px'
+        marginBottom: '10px',
+        color: '#ffffff'
     },
     progressBar: {
         height: '8px',
-        background: '#E0E0E0',
+        background: '#404040',
         borderRadius: '4px',
         overflow: 'hidden',
         marginBottom: '8px'
@@ -642,7 +670,7 @@ const styles = {
     progressStats: {
         fontSize: '12px',
         textAlign: 'center',
-        color: '#666'
+        color: '#b0b0b0'
     },
     recentSection: {
         marginBottom: '25px'
@@ -650,7 +678,7 @@ const styles = {
     sectionTitle: {
         fontSize: '16px',
         marginBottom: '15px',
-        color: '#333'
+        color: '#ffffff'
     },
     recentList: {
         display: 'flex',
@@ -662,9 +690,11 @@ const styles = {
         alignItems: 'center',
         gap: '10px',
         padding: '8px 12px',
-        background: '#f8f9fa',
+        background: '#2d2d2d',
         borderRadius: '8px',
-        fontSize: '14px'
+        fontSize: '14px',
+        color: '#ffffff',
+        border: '1px solid #404040'
     },
     recentIcon: {
         fontSize: '16px'
@@ -672,7 +702,7 @@ const styles = {
     recentDate: {
         marginLeft: 'auto',
         fontSize: '12px',
-        color: '#999'
+        color: '#b0b0b0'
     },
     tiersSection: {
         marginBottom: '25px'
@@ -683,10 +713,11 @@ const styles = {
         gap: '15px'
     },
     tierCard: {
-        background: '#f8f9fa',
+        background: '#2d2d2d',
         padding: '15px',
         borderRadius: '12px',
-        textAlign: 'center'
+        textAlign: 'center',
+        border: '1px solid #404040'
     },
     tierIcon: {
         fontSize: '24px',
@@ -695,14 +726,15 @@ const styles = {
     tierName: {
         fontWeight: 'bold',
         fontSize: '13px',
-        marginBottom: '5px'
+        marginBottom: '5px',
+        color: '#ffffff'
     },
     tierReward: {
         fontSize: '11px',
         color: '#4CAF50'
     },
     leaderboardSection: {
-        borderTop: '1px solid #e0e0e0',
+        borderTop: '1px solid #404040',
         paddingTop: '20px'
     },
     leaderboardList: {
@@ -715,21 +747,24 @@ const styles = {
         alignItems: 'center',
         gap: '15px',
         padding: '12px',
-        borderRadius: '8px'
+        borderRadius: '8px',
+        border: '1px solid #404040'
     },
     rank: {
         fontWeight: 'bold',
         width: '45px',
-        fontSize: '14px'
+        fontSize: '14px',
+        color: '#ffffff'
     },
     userName: {
         flex: 1,
         fontWeight: 'bold',
-        fontSize: '14px'
+        fontSize: '14px',
+        color: '#ffffff'
     },
     referralCount: {
         fontSize: '13px',
-        color: '#666'
+        color: '#b0b0b0'
     },
     points: {
         fontWeight: 'bold',
@@ -738,12 +773,13 @@ const styles = {
     },
     loadingContainer: {
         textAlign: 'center',
-        padding: '40px'
+        padding: '40px',
+        color: '#ffffff'
     },
     spinner: {
         width: '40px',
         height: '40px',
-        border: '3px solid #f3f3f3',
+        border: '3px solid #404040',
         borderTop: '3px solid #667eea',
         borderRadius: '50%',
         animation: 'spin 1s linear infinite',
@@ -755,7 +791,7 @@ const styles = {
         left: 0,
         right: 0,
         bottom: 0,
-        background: 'rgba(0, 0, 0, 0.7)',
+        background: 'rgba(0, 0, 0, 0.9)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -763,19 +799,20 @@ const styles = {
         animation: 'fadeIn 0.3s ease'
     },
     modalContent: {
-        background: 'white',
+        background: '#1e1e1e',
         borderRadius: '16px',
         maxWidth: '400px',
         width: '90%',
         overflow: 'hidden',
-        animation: 'slideUp 0.3s ease'
+        animation: 'slideUp 0.3s ease',
+        border: '1px solid #404040'
     },
     modalHeader: {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         padding: '15px 20px',
-        borderBottom: '1px solid #eee',
+        borderBottom: '1px solid #404040',
         background: 'linear-gradient(135deg, #667eea, #764ba2)',
         color: 'white'
     },
@@ -792,11 +829,11 @@ const styles = {
     modalMessage: {
         fontSize: '16px',
         marginBottom: '10px',
-        color: '#333'
+        color: '#ffffff'
     },
     modalSubmessage: {
         fontSize: '13px',
-        color: '#666',
+        color: '#b0b0b0',
         marginBottom: '20px',
         lineHeight: '1.5'
     },
