@@ -2798,7 +2798,7 @@ function SocialAIMarketingEngine() {
                         console.log('✅ Real-time connection restored');
                         isConnected = true;
                         reconnectAttempts = 0;
-                        showToastNotification('Connected to server');
+                        //showToastNotification('Connected to server');
                     })
                     .subscribe((status) => {
                         if (status === 'SUBSCRIBED') {
@@ -4653,18 +4653,7 @@ function SocialAIMarketingEngine() {
 
     // --- MAIN INTERFACE ---
     return (
-      <div className="social-media-page"> 
-
-        {/* MOBILE NAVIGATION */}
-        <div className="mobile-nav-container">
-            {/* Hamburger Menu Button */}
-            <button 
-                className="mobile-menu-button" 
-                onClick={toggleMobileMenu}
-                aria-label="Menu"
-            >
-                <span className="menu-icon">☰</span>
-            </button>
+        <div className="social-media-page"> 
 
             {/* Mobile Sidebar Navigation */}
             <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
@@ -4717,7 +4706,6 @@ function SocialAIMarketingEngine() {
             
             {/* Overlay */}
         {mobileMenuOpen && <div className="mobile-overlay" onClick={toggleMobileMenu}></div>}
-        </div>
 
         {showSettings && (
             <div className="settings-modal-overlay">
@@ -4736,38 +4724,99 @@ function SocialAIMarketingEngine() {
        <div className="page-wrapper">
             <header className="social-header" style={{
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                padding: '15px 20px',
+                padding: '12px 20px',
                 position: 'sticky',
                 top: 0,
                 zIndex: 1000,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between'
+                justifyContent: 'space-between',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
             }}>
+                {/* Menu Button */}
                 <button 
-                    className="mobile-menu-button" 
                     onClick={toggleMobileMenu}
                     aria-label="Menu"
                     style={{
-                        background: 'rgba(255,255,255,0.2)',
+                        background: 'rgba(255,255,255,0.15)',
                         border: 'none',
                         color: 'white',
-                        fontSize: '24px',
-                        width: '40px',
-                        height: '40px',
-                        borderRadius: '8px',
+                        fontSize: '20px',
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        transition: 'all 0.2s ease'
                     }}
                 >
                     ☰
                 </button>
-                <div style={{ color: 'white', fontWeight: 'bold', fontSize: '18px' }}>
-                    Straun Marketing
+                
+                {/* Clean App Name - Straun AI WITH CLICKABLE CROWN FOR ADMIN */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: '6px'
+                }}>
+                    <span style={{
+                        fontSize: '20px',
+                        fontWeight: '700',
+                        color: 'white',
+                        letterSpacing: '-0.3px'
+                    }}>
+                        Straun
+                    </span>
+                    <span style={{
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        color: 'rgba(255,255,255,0.85)',
+                        background: 'rgba(255,255,255,0.2)',
+                        padding: '2px 8px',
+                        borderRadius: '20px',
+                        letterSpacing: '0.3px'
+                    }}>
+                        AI
+                    </span>
+                    
+                    {/* 👑 CLICKABLE CROWN ICON FOR ADMIN - ADD THIS */}
+                    {isAdmin && (
+                        <button
+                            onClick={() => {
+                                console.log('👑 Admin crown clicked - navigating to admin dashboard');
+                                navigate('/admin');
+                            }}
+                            title="Admin Dashboard"
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '18px',
+                                marginLeft: '8px',
+                                padding: '4px 8px',
+                                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+                                transition: 'all 0.2s ease',
+                                animation: 'crownGlow 2s ease-in-out infinite',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'scale(1.1)';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'scale(1)';
+                            }}
+                        >
+                            👑
+                        </button>
+                    )}
                 </div>
-                <div style={{ width: '40px' }}></div> {/* Spacer to center the app name */}
+                
+                {/* Empty spacer for balance */}
+                <div style={{ width: '38px' }}></div>
             </header>
 
         <div className="navbar-spacer"></div>

@@ -16,6 +16,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const [showShareModal, setShowShareModal] = useState(false);
 
     useEffect(() => {
+        if (!userId) return;
         loadReferralData();
         loadLeaderboard();
         
@@ -59,65 +60,100 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
 
     const loadReferralData = async () => {
         try {
+            setLoading(true);
+            
+            // 1. Get user's profile with referral code
             let { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('referral_code')
                 .eq('user_id', userId)
                 .single();
             
-            if (profileError && profileError.code === 'PGRST116') {
-                console.log('Profile not found');
+            if (profileError && profileError.code !== 'PGRST116') {
+                console.error('Profile error:', profileError);
             }
             
             let currentCode = profile?.referral_code;
             
             if (!currentCode) {
                 currentCode = generateReferralCode();
-                await supabase
+                const { error: updateError } = await supabase
                     .from('profiles')
                     .update({ referral_code: currentCode })
                     .eq('user_id', userId);
+                
+                if (updateError) {
+                    console.error('Error updating referral code:', updateError);
+                }
             }
             
             setReferralCode(currentCode);
             
+            // 2. Get referrals count
             const { data: referrals, error: referralsError } = await supabase
                 .from('referrals')
                 .select('*')
                 .eq('referrer_id', userId);
             
-            if (referralsError) throw referralsError;
+            if (referralsError) {
+                console.error('Referrals error:', referralsError);
+            }
             
-            const { data: rewards, error: rewardsError } = await supabase
-                .from('referral_rewards')
-                .select('points_earned')
-                .eq('user_id', userId);
-            
-            if (rewardsError) throw rewardsError;
-            
+            // 3. Get points from referrals (not referral_rewards)
             const completedReferrals = referrals?.filter(r => r.status === 'completed') || [];
-            
-            const userRank = leaderboard.findIndex(l => l.referrer_id === userId) + 1;
+            const totalPoints = completedReferrals.reduce((sum, r) => sum + (r.points_earned || 50), 0);
             
             setStats({
                 total: referrals?.length || 0,
                 completed: completedReferrals.length,
-                points: rewards?.reduce((sum, r) => sum + r.points_earned, 0) || 0,
-                rank: userRank || 0
+                points: totalPoints,
+                rank: 0 // Will update from leaderboard
             });
             
-            const { data: recent } = await supabase
+            // 4. Get recent referrals
+            const { data: recent, error: recentError } = await supabase
                 .from('referrals')
                 .select(`
-                    *,
-                    referred:profiles!referred_user_id (username, email)
+                    id,
+                    referred_user_id,
+                    status,
+                    completed_at,
+                    points_earned,
+                    created_at
                 `)
                 .eq('referrer_id', userId)
                 .eq('status', 'completed')
                 .order('completed_at', { ascending: false })
                 .limit(5);
             
-            setRecentReferrals(recent || []);
+            if (recentError) {
+                console.error('Recent referrals error:', recentError);
+            }
+            
+            // Get usernames for referred users
+            const referredUserIds = recent?.filter(r => r.referred_user_id).map(r => r.referred_user_id) || [];
+            let userMap = {};
+            
+            if (referredUserIds.length > 0) {
+                const { data: users } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, email')
+                    .in('user_id', referredUserIds);
+                
+                if (users) {
+                    userMap = users.reduce((map, user) => {
+                        map[user.user_id] = user;
+                        return map;
+                    }, {});
+                }
+            }
+            
+            const enrichedReferrals = recent?.map(ref => ({
+                ...ref,
+                referred: userMap[ref.referred_user_id] || { username: 'Anonymous', email: '' }
+            })) || [];
+            
+            setRecentReferrals(enrichedReferrals);
             
         } catch (error) {
             console.error('Error loading referral data:', error);
@@ -127,13 +163,81 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     };
 
     const loadLeaderboard = async () => {
-        const { data } = await supabase
-            .from('referral_leaderboard')
-            .select('referrer_id, username, total_referrals, total_points, rank')
-            .order('rank', { ascending: true })
-            .limit(20);
-        
-        setLeaderboard(data || []);
+        try {
+            // Calculate leaderboard manually from referrals table
+            const { data: allReferrals, error } = await supabase
+                .from('referrals')
+                .select('referrer_id, points_earned, status')
+                .eq('status', 'completed');
+            
+            if (error) {
+                console.error('Leaderboard error:', error);
+                return;
+            }
+            
+            // Aggregate referrals by referrer
+            const referrerMap = new Map();
+            
+            allReferrals?.forEach(ref => {
+                if (!referrerMap.has(ref.referrer_id)) {
+                    referrerMap.set(ref.referrer_id, {
+                        referrer_id: ref.referrer_id,
+                        total_referrals: 0,
+                        total_points: 0
+                    });
+                }
+                const entry = referrerMap.get(ref.referrer_id);
+                entry.total_referrals++;
+                entry.total_points += ref.points_earned || 50;
+            });
+            
+            // Get usernames for referrers
+            const referrerIds = Array.from(referrerMap.keys());
+            let userMap = {};
+            
+            if (referrerIds.length > 0) {
+                const { data: users } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, email')
+                    .in('user_id', referrerIds);
+                
+                if (users) {
+                    userMap = users.reduce((map, user) => {
+                        map[user.user_id] = user;
+                        return map;
+                    }, {});
+                }
+            }
+            
+            // Build leaderboard array
+            let leaderboardData = Array.from(referrerMap.values()).map(entry => ({
+                referrer_id: entry.referrer_id,
+                username: userMap[entry.referrer_id]?.username || 'User',
+                total_referrals: entry.total_referrals,
+                total_points: entry.total_points,
+                rank: 0
+            }));
+            
+            // Sort by total_referrals descending
+            leaderboardData.sort((a, b) => b.total_referrals - a.total_referrals);
+            
+            // Assign ranks
+            leaderboardData.forEach((entry, index) => {
+                entry.rank = index + 1;
+            });
+            
+            // Limit to top 20
+            const topLeaderboard = leaderboardData.slice(0, 20);
+            
+            // Update user's rank
+            const userRank = leaderboardData.findIndex(entry => entry.referrer_id === userId) + 1;
+            setStats(prev => ({ ...prev, rank: userRank || 0 }));
+            
+            setLeaderboard(topLeaderboard);
+            
+        } catch (error) {
+            console.error('Error loading leaderboard:', error);
+        }
     };
 
     const generateReferralCode = () => {
@@ -143,7 +247,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     };
 
     const getReferralLink = () => {
-        return `${window.location.origin}/?ref=${referralCode}`;
+        return `${window.location.origin}/signup?ref=${referralCode}`;
     };
 
     const shareReferral = async () => {
@@ -334,7 +438,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                                 <span style={styles.recentIcon}>✅</span>
                                 <span>{ref.referred?.username || ref.referred?.email?.split('@')[0] || 'New User'}</span>
                                 <span style={styles.recentDate}>
-                                    {new Date(ref.completed_at).toLocaleDateString()}
+                                    {new Date(ref.completed_at || ref.created_at).toLocaleDateString()}
                                 </span>
                             </div>
                         ))}

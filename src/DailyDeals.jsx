@@ -125,29 +125,11 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             const userLocation = userProfile?.location || '';
             console.log(`📍 User location: ${userLocation || 'Not set'}`);
             
-            // Fetch available products
+            // Fetch available products - SIMPLE VERSION
             console.log('🛒 Fetching available products...');
             const { data: allProducts, error } = await supabase
                 .from('products')
-                .select(`
-                    id,
-                    name,
-                    description,
-                    price,
-                    image_url,
-                    location,
-                    seller_id,
-                    views,
-                    created_at,
-                    seller:profiles!seller_id (
-                        id,
-                        username,
-                        email,
-                        location,
-                        rating,
-                        avatar_url
-                    )
-                `)
+                .select('*')
                 .eq('status', 'active');
             
             if (error) {
@@ -163,11 +145,33 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 setLoading(false);
                 return;
             }
+
+            // After getting products, fetch seller names from profiles
+            const sellerIds = [...new Set(allProducts.map(p => p.seller_id).filter(Boolean))];
+            let sellersMap = {};
+
+            if (sellerIds.length > 0) {
+                const { data: sellers, error: sellersError } = await supabase
+                    .from('profiles')
+                    .select('user_id, username')
+                    .in('user_id', sellerIds);
+                
+                if (!sellersError && sellers) {
+                    sellersMap = Object.fromEntries(sellers.map(s => [s.user_id, s.username]));
+                    console.log('✅ Loaded seller names:', Object.keys(sellersMap).length);
+                }
+            }
+            
+            // Add seller name to each product
+            const productsWithSellers = allProducts.map(product => ({
+                ...product,
+                seller_name: sellersMap[product.seller_id] || 'Seller'
+            }));
             
             // Get referral points for each seller
             console.log('🎯 Calculating seller referral points...');
             const productsWithScores = await Promise.all(
-                allProducts.map(async (product) => {
+                productsWithSellers.map(async (product) => {
                     const referralPoints = await getSellerReferralPoints(product.seller_id);
                     
                     let score = 0;
@@ -214,7 +218,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 selectedProducts.push(...shuffledRandom.slice(0, remainingSlots));
                 console.log(`✅ Taking ${productsWithScoresOnly.length} from top sellers + ${remainingSlots} random products`);
             } else {
-                const shuffled = [...allProducts];
+                const shuffled = [...productsWithSellers];
                 for (let i = shuffled.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
@@ -225,12 +229,11 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             
             console.log(`✅ Selected ${selectedProducts.length} products for deals`);
             
-            // Create deal objects
+            // Create deal objects - WITHOUT referral requirements
             const newDeals = selectedProducts.map((product, index) => {
                 const discountPercent = Math.floor(Math.random() * (MAX_DISCOUNT - MIN_DISCOUNT + 1)) + MIN_DISCOUNT;
                 const originalPrice = product.price;
                 const dealPrice = +(originalPrice * (1 - discountPercent / 100)).toFixed(2);
-                const referralRequired = Math.floor(Math.random() * 6);
                 const maxQuantity = Math.floor(Math.random() * 16) + 5;
                 const alreadyClaimed = activeDealIds.includes(product.id);
                 
@@ -243,13 +246,13 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                     original_price: originalPrice,
                     deal_price: dealPrice,
                     discount_percentage: discountPercent,
-                    referral_required: referralRequired,
                     max_quantity: maxQuantity,
                     sold_count: alreadyClaimed ? 1 : 0,
                     end_time: new Date(Date.now() + DEAL_DURATION_MINUTES * 60 * 1000).toISOString(),
                     is_active: true,
                     already_claimed: alreadyClaimed,
-                    seller_referral_points: product.seller_referral_points
+                    seller_referral_points: product.seller_referral_points,
+                    seller_name: product.seller_name
                 };
             });
             
@@ -370,11 +373,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             alert('❌ You already claimed this deal!');
             return;
         }
-        
-        if (!canAccessDeal(deal)) {
-            alert(`⚠️ You need ${deal.referral_required} referrals to access this deal! Invite friends to unlock.`);
-            return;
-        }
 
         if (deal.sold_count >= deal.max_quantity) {
             alert('❌ This deal is sold out!');
@@ -415,6 +413,47 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             console.log('🔄 Manual refresh triggered');
             loadRandomDeals();
         }
+    };
+
+    // Product Image Component with Fallback to Letter Placeholder
+    const ProductImage = ({ product, style, modalStyle }) => {
+        const [imgError, setImgError] = useState(false);
+        
+        // Get first letter of product name for placeholder
+        const getInitialLetter = () => {
+            if (!product?.name) return '?';
+            return product.name.charAt(0).toUpperCase();
+        };
+        
+        // If no image URL or image failed to load, show letter placeholder
+        if (!product?.image_url || imgError) {
+            return (
+                <div style={style || {
+                    width: '100%',
+                    height: '180px',
+                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '48px',
+                    fontWeight: 'bold',
+                    color: 'white',
+                    textTransform: 'uppercase'
+                }}>
+                    {getInitialLetter()}
+                </div>
+            );
+        }
+        
+        return (
+            <img 
+                src={product.image_url} 
+                alt={product.name}
+                style={style || { width: '100%', height: '180px', objectFit: 'cover' }}
+                onError={() => setImgError(true)}
+                loading="lazy"
+            />
+        );
     };
 
     // Show error if no userId
@@ -489,7 +528,6 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
 
                 <div style={styles.dealsGrid}>
                     {deals.map(deal => {
-                        const accessible = canAccessDeal(deal);
                         const timeRemaining = timeLeft[deal.id];
                         const product = deal.product;
                         const isSoldOut = deal.sold_count >= deal.max_quantity;
@@ -510,25 +548,11 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                     <div style={styles.claimedBadge}>✓ Claimed!</div>
                                 )}
                                 
-                                {deal.seller_referral_points > 0 && (
-                                    <div style={styles.topSellerBadge}>
-                                        ⭐ Top Seller ({deal.seller_referral_points} referrals)
-                                    </div>
-                                )}
-                                
-                                {product?.image_url ? (
-                                    <img 
-                                        src={product.image_url} 
-                                        alt={product.name}
-                                        style={styles.dealImage}
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                            e.target.nextSibling.style.display = 'flex';
-                                        }}
-                                    />
-                                ) : (
-                                    <div style={styles.dealImagePlaceholder}>🛍️</div>
-                                )}
+                                {/* Product Image with Letter Placeholder */}
+                                <ProductImage 
+                                    product={product} 
+                                    style={styles.dealImage}
+                                />
                                 
                                 <div style={styles.dealContent}>
                                     <h4 style={styles.dealName}>{product?.name || 'Unknown Product'}</h4>
@@ -546,15 +570,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             📍 {product?.location || 'Unknown'}
                                         </div>
                                         <div style={styles.seller}>
-                                            👤 {product?.seller?.username || product?.seller?.email?.split('@')[0] || 'Seller'}
+                                            👤 {deal.seller_name || 'Seller'}
                                         </div>
-                                    </div>
-                                    
-                                    <div style={styles.referralRequired}>
-                                        {deal.referral_required === 0 ? 
-                                            '🎁 No referrals needed' : 
-                                            `👥 Requires ${deal.referral_required}+ referrals`
-                                        }
                                     </div>
                                     
                                     {timeRemaining && timeRemaining.minutes > 0 && !isClaimed && (
@@ -568,20 +585,18 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             e.stopPropagation();
                                             claimDeal(deal);
                                         }}
-                                        disabled={!accessible || claiming[deal.id] || isSoldOut || isClaimed}
+                                        disabled={isSoldOut || isClaimed}
                                         style={{
                                             ...styles.claimButton,
                                             background: isClaimed ? '#4CAF50' : 
-                                                       !accessible ? '#999' : 
-                                                       isSoldOut ? '#f44336' : 
-                                                       'linear-gradient(135deg, #667eea, #764ba2)',
+                                                    isSoldOut ? '#f44336' : 
+                                                    'linear-gradient(135deg, #667eea, #764ba2)',
                                         }}
                                     >
                                         {claiming[deal.id] ? 'Claiming...' : 
-                                         isClaimed ? '✓ Claimed' :
-                                         !accessible ? '🔒 Need More Referrals' :
-                                         isSoldOut ? 'Sold Out' :
-                                         '🔥 Claim Deal'
+                                        isClaimed ? '✓ Claimed' :
+                                        isSoldOut ? 'Sold Out' :
+                                        '🔥 Claim Deal'
                                         }
                                     </button>
                                 </div>
@@ -613,15 +628,10 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                         ) : (
                             <>
                                 <div style={styles.modalImageContainer}>
-                                    {selectedDeal.product?.image_url ? (
-                                        <img 
-                                            src={selectedDeal.product.image_url} 
-                                            alt={selectedDeal.product.name}
-                                            style={styles.modalImage}
-                                        />
-                                    ) : (
-                                        <div style={styles.modalImagePlaceholder}>🛍️</div>
-                                    )}
+                                    <ProductImage 
+                                        product={selectedDeal.product} 
+                                        style={styles.modalImage}
+                                    />
                                 </div>
                                 
                                 <div style={styles.modalBody}>
@@ -646,14 +656,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                                     <img src={sellerDetails.avatar_url} alt="Seller" style={styles.avatar} />
                                                 ) : (
                                                     <div style={styles.avatarPlaceholder}>
-                                                        {sellerDetails?.username?.charAt(0) || selectedDeal.product?.seller?.username?.charAt(0) || 'S'}
+                                                        {sellerDetails?.username?.charAt(0) || selectedDeal.seller_name?.charAt(0) || 'S'}
                                                     </div>
                                                 )}
                                             </div>
                                             <div style={styles.sellerDetails}>
-                                                <p><strong>Name:</strong> {sellerDetails?.username || selectedDeal.product?.seller?.username || 'Unknown Seller'}</p>
+                                                <p><strong>Name:</strong> {sellerDetails?.username || selectedDeal.seller_name || 'Unknown Seller'}</p>
                                                 <p><strong>Location:</strong> 📍 {sellerDetails?.location || selectedDeal.product?.location || 'Unknown'}</p>
-                                                <p><strong>Rating:</strong> ⭐ {sellerDetails?.rating || selectedDeal.product?.seller?.rating || 'New Seller'}/5</p>
+                                                <p><strong>Rating:</strong> ⭐ {sellerDetails?.rating || 'New Seller'}/5</p>
                                                 <p><strong>Referral Points:</strong> 🎁 {selectedDeal.seller_referral_points || 0} referrals</p>
                                                 {sellerDetails?.email && (
                                                     <p><strong>Contact:</strong> 📧 {sellerDetails.email}</p>

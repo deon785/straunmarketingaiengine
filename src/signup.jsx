@@ -55,18 +55,37 @@ const Auth = () => {
   }, []);
 
   // Helper function to store user in localStorage
-  const storeUserInLocalStorage = (userData) => {
+  const storeUserInLocalStorage = async (userData) => {
     if (userData?.user) {
+      // Fetch the profile to get role
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role, referral_code')  // ← Select 'role', not 'is_admin'
+        .eq('user_id', userData.user.id)
+        .single();
+      
       const userToStore = {
         id: userData.user.id,
         email: userData.user.email,
         phone: userData.user.phone || phone || null,
         created_at: userData.user.created_at,
         last_login: new Date().toISOString(),
+        role: profile?.role || 'user',  // ← Store the role (will be 'user' or 'is_admin')
+        referral_code: profile?.referral_code || null
       };
       localStorage.setItem('user', JSON.stringify(userToStore));
-      console.log('✅ User stored in localStorage:', userToStore.email);
+      console.log('✅ User stored in localStorage:', userToStore.email, 'Role:', userToStore.role);
     }
+  };
+
+  const isAdminEmail = (email) => {
+    // Define your admin emails here - you can make this configurable
+    const adminEmails = [ 
+      'deonmahachi8@gmail.com'
+      // Add more admin emails as needed
+    ];
+    
+    return adminEmails.includes(email?.toLowerCase());
   };
 
   // Handle referral points awarding
@@ -158,21 +177,33 @@ const Auth = () => {
     }
   };
 
-  // Generate unique referral code for new user
+  // Generate unique referral code for new user AND set admin status
   const generateReferralCode = async (userId, email) => {
     const base = email.split('@')[0].substring(0, 6).toUpperCase();
     const random = Math.random().toString(36).substring(2, 6).toUpperCase();
     const code = `${base}${random}`;
     
+    // Check if this is an admin email
+    const isAdmin = isAdminEmail(email);
+    
+    // Set role based on admin check
+    const roleValue = isAdmin ? 'is_admin' : 'user';  // ← This is the fix
+    
     const { error } = await supabase
       .from('profiles')
-      .update({ referral_code: code })
+      .update({ 
+        referral_code: code,
+        role: roleValue  // ← Use 'role' column, set to 'is_admin' or 'user'
+      })
       .eq('user_id', userId);
     
     if (error) {
       console.error('Error setting referral code:', error);
     } else {
       console.log('✅ Referral code generated:', code);
+      if (isAdmin) {
+        console.log('👑 Admin user detected - role set to: is_admin');
+      }
     }
     
     return code;
@@ -262,7 +293,10 @@ const Auth = () => {
             .single();
 
           if (checkError && checkError.code === 'PGRST116') {
-            // Create new profile
+            // Check if this is an admin email
+            const isAdmin = isAdminEmail(email);
+            
+            // Create new profile with role
             const { error: insertError } = await supabase
               .from('profiles')
               .insert([
@@ -270,16 +304,15 @@ const Auth = () => {
                   user_id: authData.user.id,
                   email: email,
                   phone_number: cleanedPhone || null,
+                  role: isAdmin ? 'is_admin' : 'user'  // ← Add this line to set the role
                 },
               ]);
 
             if (insertError) {
               console.error('Profile creation error:', insertError);
             } else {
-              console.log('✅ Profile created successfully');
+              console.log('✅ Profile created successfully with role:', isAdmin ? 'is_admin' : 'user');
             }
-          } else if (existingProfile) {
-            console.log('✅ Profile already exists');
           }
           
           // Generate referral code for new user
@@ -411,7 +444,9 @@ const Auth = () => {
 
       if (error) throw error;
 
-      storeUserInLocalStorage(data);
+      // This function now correctly fetches and stores the role
+      await storeUserInLocalStorage(data);
+      
       setMessage({
         text: 'Login successful! Redirecting...',
         type: 'success',
