@@ -4,6 +4,16 @@ import * as Sentry from "@sentry/react";
 import App from './App.jsx'; 
 import './index.css';
 import ReactGA from "react-ga4";
+import { LoadingProvider } from './LoadingContext';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+    <AuthProvider>
+        <LoadingProvider>
+            <App />
+        </LoadingProvider>
+    </AuthProvider>
+);
 
 // COMPLETELY DISABLE automatic service worker updates
 if (import.meta.env.PROD) {

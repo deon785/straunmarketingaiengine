@@ -8,8 +8,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const [claiming, setClaiming] = useState({});
     const [nextRefreshIn, setNextRefreshIn] = useState(null);
     const [lastRefresh, setLastRefresh] = useState(null);
-    const [activeDealIds, setActiveDealIds] = useState([]);
     const [productCheck, setProductCheck] = useState(null);
+    const [loadedCount, setLoadedCount] = useState(6); // For lazy loading
     
     // Modal state for product details
     const [selectedDeal, setSelectedDeal] = useState(null);
@@ -19,12 +19,21 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
 
     // Configuration
     const DEAL_DURATION_MINUTES = 30;
-    const NUMBER_OF_DEALS = 6;
-    const REFRESH_ON_PAGE_VIEW = true;
+    const NUMBER_OF_DEALS = 12; // Changed to 12 products
     const MIN_DISCOUNT = 20;
     const MAX_DISCOUNT = 60;
+    
+    // Responsive design
+    const getResponsiveDealCount = () => {
+        const width = window.innerWidth;
+        if (width < 640) return 4;  // Mobile: show 4 initially
+        if (width < 1024) return 6; // Tablet: show 6 initially
+        return 12;                   // Desktop: show all 12
+    };
+    
+    const [visibleDealCount, setVisibleDealCount] = useState(getResponsiveDealCount());
 
-    // ✅ OPTIMIZATION 1: Batch function to get referral points for ALL sellers in ONE query
+    // ✅ Batch function to get referral points for ALL sellers in ONE query
     const getSellerReferralPointsBatch = async (sellerIds) => {
         if (!sellerIds || sellerIds.length === 0) return {};
         
@@ -71,12 +80,13 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             
             const userLocation = userProfile?.location || '';
             
-            // ✅ OPTIMIZATION 2: Add limit to products query - only fetch what we need
+            // Fetch more products than needed for better randomization (3x multiplier)
+            const FETCH_LIMIT = Math.min(NUMBER_OF_DEALS * 3, 100);
             const { data: allProducts, error } = await supabase
                 .from('products')
                 .select('*')
                 .eq('status', 'active')
-                .limit(100);  // ← Only fetch 100 products max
+                .limit(FETCH_LIMIT);
             
             if (error) throw error;
             
@@ -107,7 +117,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 seller_name: sellersMap[product.seller_id] || 'Seller'
             }));
             
-            // ✅ OPTIMIZATION 3: Get ALL referral points in ONE batch query (not in a loop!)
+            // Get ALL referral points in ONE batch query
             const uniqueSellerIds = [...new Set(productsWithSellers.map(p => p.seller_id).filter(Boolean))];
             const referralPointsMap = await getSellerReferralPointsBatch(uniqueSellerIds);
             
@@ -128,16 +138,22 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 };
             });
             
-            // Sort by score
+            // Sort by score and select products
             const sortedByScore = productsWithScores.sort((a, b) => b.score - a.score);
             
-            // Select products for deals
+            // Select products for deals with better randomization
             let selectedProducts = [];
             const productsWithScoresOnly = sortedByScore.filter(p => p.score > 0);
             const productsWithoutScores = sortedByScore.filter(p => p.score === 0);
             
             if (productsWithScoresOnly.length >= NUMBER_OF_DEALS) {
-                selectedProducts = productsWithScoresOnly.slice(0, NUMBER_OF_DEALS);
+                // Randomly select from top products to add variety
+                const shuffled = [...productsWithScoresOnly];
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+                selectedProducts = shuffled.slice(0, NUMBER_OF_DEALS);
             } else if (productsWithScoresOnly.length > 0) {
                 const remainingSlots = NUMBER_OF_DEALS - productsWithScoresOnly.length;
                 selectedProducts = [...productsWithScoresOnly];
@@ -148,6 +164,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 }
                 selectedProducts.push(...shuffledRandom.slice(0, remainingSlots));
             } else {
+                // Random selection as fallback
                 const shuffled = [...productsWithSellers];
                 for (let i = shuffled.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
@@ -158,33 +175,33 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             
             // Create deal objects
             const newDeals = selectedProducts.map((product, index) => {
-                const discountPercent = Math.floor(Math.random() * (MAX_DISCOUNT - MIN_DISCOUNT + 1)) + MIN_DISCOUNT;
-                const originalPrice = product.price;
-                const dealPrice = +(originalPrice * (1 - discountPercent / 100)).toFixed(2);
-                const maxQuantity = Math.floor(Math.random() * 16) + 5;
-                const alreadyClaimed = activeDealIds.includes(product.id);
+                const originalPrice = parseFloat(product.price);
+                const discountPercent = Math.floor(Math.random() * (MAX_DISCOUNT - MIN_DISCOUNT + 1) + MIN_DISCOUNT);
+                const dealPrice = originalPrice * (1 - discountPercent / 100);
+                const maxQuantity = product.quantity || product.stock || 10; // ✅ FIXED: Added maxQuantity
                 
                 return {
-                    id: `deal-${product.id}-${Date.now()}`,
+                    id: `deal-${product.id}-${Date.now()}-${index}`,
                     product_id: product.id,
                     product: product,
                     original_price: originalPrice,
-                    deal_price: dealPrice,
+                    deal_price: parseFloat(dealPrice.toFixed(2)),
                     discount_percentage: discountPercent,
                     max_quantity: maxQuantity,
-                    sold_count: alreadyClaimed ? 1 : 0,
+                    sold_count: 0, // Initialize with 0
                     end_time: new Date(Date.now() + DEAL_DURATION_MINUTES * 60 * 1000).toISOString(),
                     is_active: true,
-                    already_claimed: alreadyClaimed,
-                    seller_referral_points: product.seller_referral_points,
-                    seller_name: product.seller_name
+                    seller_referral_points: product.seller_referral_points || 0,
+                    seller_name: product.seller_name || 'Seller'
                 };
             });
             
             setDeals(newDeals);
             setLastRefresh(new Date());
             setNextRefreshIn(DEAL_DURATION_MINUTES * 60);
+            setLoadedCount(Math.min(visibleDealCount, newDeals.length));
             
+            // Store in localStorage for persistence
             localStorage.setItem('lastDealsRefresh', new Date().toISOString());
             localStorage.setItem('currentDeals', JSON.stringify(newDeals.map(d => d.product_id)));
             
@@ -195,36 +212,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         } finally {
             setLoading(false);
         }
-    }, [userId, NUMBER_OF_DEALS, DEAL_DURATION_MINUTES, MIN_DISCOUNT, MAX_DISCOUNT, activeDealIds]);
+    }, [userId, NUMBER_OF_DEALS, DEAL_DURATION_MINUTES, MIN_DISCOUNT, MAX_DISCOUNT, visibleDealCount]);
 
-    // ✅ OPTIMIZATION 4: Add timeout to prevent infinite loading
-    useEffect(() => {
-        if (!userId) {
-            console.error('❌ ERROR: userId prop is missing!');
-            setLoading(false);
-            setProductCheck({ error: 'userId is required', count: 0 });
-            return;
-        }
-        
-        // Add timeout to stop loading after 5 seconds
-        const timeout = setTimeout(() => {
-            if (loading) {
-                console.log('Loading timeout - forcing stop');
-                setLoading(false);
-            }
-        }, 5000);
-        
-        checkProductsInDatabase();
-        
-        return () => clearTimeout(timeout);
-    }, [userId]);
-
-    // Function to check products in database
+    // Check products in database
     const checkProductsInDatabase = async () => {
         console.log('🔍 Checking for products in database...');
         
         try {
-            const { data, count, error } = await supabase
+            const { count, error } = await supabase
                 .from('products')
                 .select('*', { count: 'exact', head: true })
                 .eq('status', 'active');
@@ -262,6 +257,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 setSellerDetails(sellerData);
             }
             
+            // Increment view count
             await supabase
                 .from('products')
                 .update({ views: (deal.product.views || 0) + 1 })
@@ -280,6 +276,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         setSellerDetails(null);
     };
 
+    // Update countdown timers
     const updateCountdowns = useCallback(() => {
         const newTimeLeft = {};
         const now = new Date().getTime();
@@ -307,6 +304,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         }
     }, [deals, loadRandomDeals]);
 
+    // Auto-refresh timer
     useEffect(() => {
         if (nextRefreshIn !== null && nextRefreshIn > 0) {
             const timer = setTimeout(() => {
@@ -318,6 +316,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         }
     }, [nextRefreshIn, loadRandomDeals]);
 
+    // Initial load and refresh interval
     useEffect(() => {
         if (userId) {
             loadRandomDeals();
@@ -328,23 +327,54 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         }
     }, [loadRandomDeals, DEAL_DURATION_MINUTES, userId]);
 
+    // Countdown interval
     useEffect(() => {
         const countdownInterval = setInterval(updateCountdowns, 1000);
         return () => clearInterval(countdownInterval);
     }, [updateCountdowns]);
 
+    // Responsive design: update visible deals on resize
+    useEffect(() => {
+        const handleResize = () => {
+            const newCount = getResponsiveDealCount();
+            setVisibleDealCount(newCount);
+            setLoadedCount(Math.min(newCount, deals.length));
+        };
+        
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, [deals.length]);
+
+    // Initial product check
+    useEffect(() => {
+        if (!userId) {
+            console.error('❌ ERROR: userId prop is missing!');
+            setLoading(false);
+            setProductCheck({ error: 'userId is required', count: 0 });
+            return;
+        }
+        
+        const timeout = setTimeout(() => {
+            if (loading) {
+                console.log('Loading timeout - forcing stop');
+                setLoading(false);
+            }
+        }, 5000);
+        
+        checkProductsInDatabase();
+        
+        return () => clearTimeout(timeout);
+    }, [userId]);
+
+    // Check if deal is available
     const canAccessDeal = (deal) => {
-        return userReferralCount >= deal.referral_required && !deal.already_claimed;
+        return userReferralCount >= (deal.referral_required || 0) && deal.sold_count < deal.max_quantity;
     };
 
+    // Claim a deal
     const claimDeal = async (deal) => {
         console.log('🎯 Claiming deal:', deal.product?.name);
         
-        if (deal.already_claimed) {
-            alert('❌ You already claimed this deal!');
-            return;
-        }
-
         if (deal.sold_count >= deal.max_quantity) {
             alert('❌ This deal is sold out!');
             return;
@@ -352,18 +382,16 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
 
         setClaiming(prev => ({ ...prev, [deal.id]: true }));
 
+        // Simulate claim process
         setTimeout(() => {
-            alert(`🎉 Deal claimed! You saved $${(deal.original_price - deal.deal_price).toFixed(2)}!`);
+            const savings = (deal.original_price - deal.deal_price).toFixed(2);
+            alert(`🎉 Deal claimed! You saved $${savings}!`);
             console.log('✅ Deal claimed successfully:', deal.product?.name);
             
+            // Update local state
             setDeals(prev => prev.map(d => 
-                d.id === deal.id ? { ...d, sold_count: d.sold_count + 1, already_claimed: true } : d
+                d.id === deal.id ? { ...d, sold_count: d.sold_count + 1 } : d
             ));
-            
-            setActiveDealIds(prev => [...prev, deal.product_id]);
-            
-            const claimedDeals = JSON.parse(localStorage.getItem('claimedDeals') || '[]');
-            localStorage.setItem('claimedDeals', JSON.stringify([...claimedDeals, deal.product_id]));
             
             if (onClaimDeal) {
                 onClaimDeal(deal);
@@ -371,6 +399,11 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             
             setClaiming(prev => ({ ...prev, [deal.id]: false }));
         }, 500);
+    };
+
+    // Load more deals (lazy loading)
+    const loadMoreDeals = () => {
+        setLoadedCount(prev => Math.min(prev + 6, deals.length));
     };
 
     const formatTimeDisplay = (time) => {
@@ -382,13 +415,15 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const handleManualRefresh = () => {
         if (window.confirm('Refresh deals now? New random deals will appear.')) {
             console.log('🔄 Manual refresh triggered');
+            setLoadedCount(visibleDealCount);
             loadRandomDeals();
         }
     };
 
-    // Product Image Component with Fallback to Letter Placeholder
+    // Product Image Component with Skeleton Loading
     const ProductImage = ({ product, style, modalStyle }) => {
         const [imgError, setImgError] = useState(false);
+        const [isLoading, setIsLoading] = useState(true);
         
         const getInitialLetter = () => {
             if (!product?.name) return '?';
@@ -397,31 +432,34 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         
         if (!product?.image_url || imgError) {
             return (
-                <div style={style || {
-                    width: '100%',
-                    height: '180px',
-                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '48px',
-                    fontWeight: 'bold',
-                    color: 'white',
-                    textTransform: 'uppercase'
-                }}>
+                <div style={style || styles.dealImagePlaceholder}>
                     {getInitialLetter()}
                 </div>
             );
         }
         
         return (
-            <img 
-                src={product.image_url} 
-                alt={product.name}
-                style={style || { width: '100%', height: '180px', objectFit: 'cover' }}
-                onError={() => setImgError(true)}
-                loading="lazy"
-            />
+            <div style={{ position: 'relative', width: '100%', height: style?.height || '180px' }}>
+                {isLoading && (
+                    <div style={styles.imageSkeleton}>
+                        <div className="skeleton-shimmer"></div>
+                    </div>
+                )}
+                <img 
+                    src={product.image_url} 
+                    alt={product.name}
+                    style={{
+                        ...(style || styles.dealImage),
+                        display: isLoading ? 'none' : 'block'
+                    }}
+                    onLoad={() => setIsLoading(false)}
+                    onError={() => {
+                        setImgError(true);
+                        setIsLoading(false);
+                    }}
+                    loading="lazy"
+                />
+            </div>
         );
     };
 
@@ -465,6 +503,10 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         );
     }
 
+    // Get visible deals based on loaded count
+    const visibleDeals = deals.slice(0, loadedCount);
+    const hasMoreDeals = loadedCount < deals.length;
+
     return (
         <>
             <div style={styles.container}>
@@ -476,7 +518,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                         </p>
                         {productCheck && (
                             <p style={{ fontSize: '11px', color: '#888', marginTop: '5px' }}>
-                                📦 {productCheck.count} products available
+                                📦 {productCheck.count} products available • Showing {visibleDeals.length} of {deals.length} deals
                             </p>
                         )}
                     </div>
@@ -496,25 +538,27 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 </div>
 
                 <div style={styles.dealsGrid}>
-                    {deals.map(deal => {
+                    {visibleDeals.map(deal => {
                         const timeRemaining = timeLeft[deal.id];
                         const product = deal.product;
                         const isSoldOut = deal.sold_count >= deal.max_quantity;
-                        const isClaimed = deal.already_claimed;
                         
                         return (
                             <div 
                                 key={deal.id} 
                                 style={{
                                     ...styles.dealCard,
-                                    opacity: isClaimed ? 0.7 : 1,
-                                    border: isClaimed ? '2px solid #4CAF50' : 'none',
+                                    opacity: isSoldOut ? 0.6 : 1,
                                     cursor: 'pointer'
                                 }}
                                 onClick={() => viewProductDetails(deal)}
                             >
-                                {isClaimed && (
-                                    <div style={styles.claimedBadge}>✓ Claimed!</div>
+                                {isSoldOut && (
+                                    <div style={styles.soldOutBadge}>Sold Out!</div>
+                                )}
+                                
+                                {deal.discount_percentage > 40 && (
+                                    <div style={styles.hotBadge}>🔥 HOT</div>
                                 )}
                                 
                                 <ProductImage 
@@ -526,11 +570,9 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                     <h4 style={styles.dealName}>{product?.name || 'Unknown Product'}</h4>
                                     
                                     <div style={styles.priceSection}>
-                                        <span style={styles.originalPrice}>${deal.original_price}</span>
-                                        <span style={styles.dealPrice}>${deal.deal_price}</span>
-                                        <span style={styles.discountBadge}>
-                                            -{deal.discount_percentage}%
-                                        </span>
+                                        <span style={styles.originalPrice}>${deal.original_price.toFixed(2)}</span>
+                                        <span style={styles.dealPrice}>${deal.deal_price.toFixed(2)}</span>
+                                        <span style={styles.discountBadge}>-{deal.discount_percentage}%</span>
                                     </div>
                                     
                                     <div style={styles.dealInfo}>
@@ -540,9 +582,12 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                         <div style={styles.seller}>
                                             👤 {deal.seller_name || 'Seller'}
                                         </div>
+                                        <div style={styles.stock}>
+                                            🎫 {deal.max_quantity - deal.sold_count} left
+                                        </div>
                                     </div>
                                     
-                                    {timeRemaining && timeRemaining.minutes > 0 && !isClaimed && (
+                                    {timeRemaining && timeRemaining.minutes > 0 && !isSoldOut && (
                                         <div style={styles.timer}>
                                             ⏰ Expires in: {formatTimeDisplay(timeRemaining)}
                                         </div>
@@ -553,16 +598,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             e.stopPropagation();
                                             claimDeal(deal);
                                         }}
-                                        disabled={isSoldOut || isClaimed}
+                                        disabled={isSoldOut}
                                         style={{
                                             ...styles.claimButton,
-                                            background: isClaimed ? '#4CAF50' : 
-                                                    isSoldOut ? '#f44336' : 
-                                                    'linear-gradient(135deg, #667eea, #764ba2)',
+                                            background: isSoldOut ? '#f44336' : 
+                                                       'linear-gradient(135deg, #667eea, #764ba2)',
                                         }}
                                     >
                                         {claiming[deal.id] ? 'Claiming...' : 
-                                        isClaimed ? '✓ Claimed' :
                                         isSoldOut ? 'Sold Out' :
                                         '🔥 Claim Deal'
                                         }
@@ -572,6 +615,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                         );
                     })}
                 </div>
+                
+                {hasMoreDeals && (
+                    <div style={styles.loadMoreContainer}>
+                        <button onClick={loadMoreDeals} style={styles.loadMoreButton}>
+                            Load More Deals ({deals.length - loadedCount} remaining)
+                        </button>
+                    </div>
+                )}
                 
                 <div style={styles.footer}>
                     <p style={styles.footerText}>
@@ -606,8 +657,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                     <h2 style={styles.modalTitle}>{selectedDeal.product?.name}</h2>
                                     
                                     <div style={styles.modalPriceSection}>
-                                        <span style={styles.modalOriginalPrice}>${selectedDeal.original_price}</span>
-                                        <span style={styles.modalDealPrice}>${selectedDeal.deal_price}</span>
+                                        <span style={styles.modalOriginalPrice}>${selectedDeal.original_price.toFixed(2)}</span>
+                                        <span style={styles.modalDealPrice}>${selectedDeal.deal_price.toFixed(2)}</span>
                                         <span style={styles.modalDiscount}>-{selectedDeal.discount_percentage}% OFF</span>
                                     </div>
                                     
@@ -646,6 +697,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             <li>🔥 Limited stock: {selectedDeal.max_quantity - selectedDeal.sold_count} left</li>
                                             <li>⏰ Deal expires in: {timeLeft[selectedDeal.id] ? formatTimeDisplay(timeLeft[selectedDeal.id]) : 'Expiring soon'}</li>
                                             <li>📅 Listed on: {new Date(selectedDeal.product?.created_at).toLocaleDateString()}</li>
+                                            <li>💰 You save: ${(selectedDeal.original_price - selectedDeal.deal_price).toFixed(2)}</li>
                                         </ul>
                                     </div>
                                     
@@ -654,20 +706,16 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                                             closeModal();
                                             claimDeal(selectedDeal);
                                         }}
-                                        disabled={claiming[selectedDeal.id] || 
-                                                  selectedDeal.sold_count >= selectedDeal.max_quantity || 
-                                                  selectedDeal.already_claimed}
+                                        disabled={claiming[selectedDeal.id] || selectedDeal.sold_count >= selectedDeal.max_quantity}
                                         style={{
                                             ...styles.modalClaimButton,
-                                            background: selectedDeal.already_claimed ? '#4CAF50' :
-                                                       selectedDeal.sold_count >= selectedDeal.max_quantity ? '#f44336' :
+                                            background: selectedDeal.sold_count >= selectedDeal.max_quantity ? '#f44336' :
                                                        'linear-gradient(135deg, #667eea, #764ba2)'
                                         }}
                                     >
                                         {claiming[selectedDeal.id] ? 'Claiming...' :
-                                         selectedDeal.already_claimed ? '✓ Already Claimed' :
                                          selectedDeal.sold_count >= selectedDeal.max_quantity ? 'Sold Out' :
-                                         '🔥 Claim This Deal'}
+                                         `🔥 Claim Now - Save $${(selectedDeal.original_price - selectedDeal.deal_price).toFixed(2)}`}
                                     </button>
                                 </div>
                             </>
@@ -747,12 +795,11 @@ const styles = {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
         gap: '20px',
-        maxHeight: '60vh',
+        maxHeight: '70vh',
         overflowY: 'auto',
         WebkitOverflowScrolling: 'touch',
         padding: '5px',
-        scrollBehavior: 'smooth',
-        overscrollBehavior: 'contain'
+        scrollBehavior: 'smooth'
     },
     dealCard: {
         background: '#2d2d2d',
@@ -764,23 +811,24 @@ const styles = {
         cursor: 'pointer',
         border: '1px solid #404040'
     },
-    topSellerBadge: {
+    hotBadge: {
         position: 'absolute',
         top: '10px',
         left: '10px',
-        background: 'linear-gradient(135deg, #FFD700, #FFA500)',
-        color: '#333',
+        background: 'linear-gradient(135deg, #FF6B6B, #FF4444)',
+        color: 'white',
         padding: '4px 12px',
         borderRadius: '20px',
-        fontSize: '11px',
+        fontSize: '12px',
         fontWeight: 'bold',
-        zIndex: 1
+        zIndex: 1,
+        animation: 'pulse 1s infinite'
     },
-    claimedBadge: {
+    soldOutBadge: {
         position: 'absolute',
         top: '10px',
         right: '10px',
-        background: '#4CAF50',
+        background: '#f44336',
         color: 'white',
         padding: '4px 12px',
         borderRadius: '20px',
@@ -801,7 +849,17 @@ const styles = {
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: '48px',
+        fontWeight: 'bold',
         color: 'white'
+    },
+    imageSkeleton: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        background: '#1a1a1a',
+        overflow: 'hidden'
     },
     dealContent: {
         padding: '15px'
@@ -810,7 +868,10 @@ const styles = {
         margin: '0 0 10px 0',
         fontSize: '16px',
         fontWeight: 'bold',
-        color: '#ffffff'
+        color: '#ffffff',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap'
     },
     priceSection: {
         display: 'flex',
@@ -856,10 +917,11 @@ const styles = {
         alignItems: 'center',
         gap: '4px'
     },
-    referralRequired: {
-        fontSize: '12px',
-        color: '#b0b0b0',
-        marginBottom: '10px'
+    stock: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        color: '#FF9800'
     },
     timer: {
         background: '#1a1a1a',
@@ -916,6 +978,21 @@ const styles = {
         borderRadius: '8px',
         cursor: 'pointer'
     },
+    loadMoreContainer: {
+        textAlign: 'center',
+        marginTop: '20px'
+    },
+    loadMoreButton: {
+        background: '#2a2a2a',
+        border: '1px solid #667eea',
+        color: '#667eea',
+        padding: '10px 24px',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        fontWeight: 'bold',
+        transition: 'all 0.2s'
+    },
     footer: {
         textAlign: 'center',
         marginTop: '20px',
@@ -933,7 +1010,7 @@ const styles = {
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+        backgroundColor: 'rgba(0, 0, 0, 0.95)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -978,16 +1055,6 @@ const styles = {
         width: '100%',
         height: '100%',
         objectFit: 'cover'
-    },
-    modalImagePlaceholder: {
-        width: '100%',
-        height: '250px',
-        background: 'linear-gradient(135deg, #667eea, #764ba2)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '64px',
-        color: 'white'
     },
     modalBody: {
         padding: '24px'
@@ -1104,6 +1171,28 @@ styleSheet.textContent = `
             opacity: 1;
             transform: translateY(0);
         }
+    }
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.7;
+        }
+    }
+    .skeleton-shimmer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, #1a1a1a 25%, #2a2a2a 50%, #1a1a1a 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
     }
 `;
 document.head.appendChild(styleSheet);

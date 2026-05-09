@@ -26,6 +26,7 @@ import { fscrub } from 'fpoint';
 import PriceAlertButton from './PriceAlertButton.jsx';
 import RecommendationsSection from './RecommendationsSection';
 import RecommendationEngine from './recommendationEngine';
+import { useLoading } from './LoadingContext';
 
 import DailyDeals from './DailyDeals';
 import ReferralProgram from './ReferralProgram';
@@ -33,6 +34,27 @@ import UserDashboard from './UserDashboard';
 import ChatList from './ChatList';
 import ChatSystem from './ChatSystem.jsx';
 import PriceAlertDashboard from './PriceAlertDashboard';
+
+// Safe notification check
+const isNotificationSupported = () => {
+    return typeof Notification !== 'undefined' && 
+           typeof Notification.requestPermission === 'function' &&
+           typeof window !== 'undefined';
+};
+
+const safeRequestNotificationPermission = async () => {
+    if (!isNotificationSupported()) {
+        console.log('Notifications not supported in this environment');
+        return 'unsupported';
+    }
+    
+    try {
+        return await Notification.requestPermission();
+    } catch (error) {
+        console.error('Error requesting notification permission:', error);
+        return 'error';
+    }
+};
 
 class UserBehaviorAnalyzer {
   constructor() {
@@ -256,6 +278,11 @@ function urlBase64ToUint8Array(base64String) {
 function SocialAIMarketingEngine() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { withLoading, showLoading, hideLoading } = useLoading();
+
+    // Add these with your other useState declarations
+    const [globalLoading, setGlobalLoading] = useState(false);
+    const [globalLoadingMessage, setGlobalLoadingMessage] = useState('');
     const { user, loading: authLoading } = useAuth();
 
     // ✅ FIRST: Initialize searchParams from URL
@@ -372,6 +399,14 @@ function SocialAIMarketingEngine() {
     sortBy: 'newest', // 'newest', 'price_low', 'price_high'
     category: '' // Optional: if you have categories
     });
+
+    const handleNavigationWithLoading = async (path) => {
+        await withLoading(async () => {
+            navigate(path);
+            // Simulate minimum loading time for smooth transition
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }, 'Loading page...');
+    };
 
     const styles = {
         modalOverlay: {
@@ -559,7 +594,7 @@ function SocialAIMarketingEngine() {
         toggleMobileMenu();
     };
 
-   const fetchNotifications = useCallback(async () => {
+    const fetchNotifications = useCallback(async () => {
         if (!user || !user.id) {
             console.log('No user for notifications fetch');
             return;
@@ -599,21 +634,33 @@ function SocialAIMarketingEngine() {
 
     const PushEnableButton = () => {
         const handleEnable = async () => {
-            // 1. Ask browser for permission
-            const permission = await Notification.requestPermission();
+            // Check if Notification API exists
+            if (typeof Notification === 'undefined') {
+                alert("Notifications are not supported in this environment.");
+                return;
+            }
             
-            if (permission === 'granted') {
-            // 2. Run the subscription function we wrote earlier
-            await subscribeToPush(); 
-            alert("Notifications enabled! You'll receive updates like WhatsApp.");
-            } else {
-            alert("You denied notifications. Please enable them in browser settings to get updates.");
+            try {
+                // Ask browser for permission
+                const permission = await Notification.requestPermission();
+                
+                if (permission === 'granted') {
+                    if (typeof subscribeToPush === 'function') {
+                        await subscribeToPush();
+                    }
+                    alert("Notifications enabled! You'll receive updates like WhatsApp.");
+                } else {
+                    alert("You denied notifications. Please enable them in browser settings to get updates.");
+                }
+            } catch (error) {
+                console.error("Error enabling notifications:", error);
+                alert("Could not enable notifications. Please try again.");
             }
         };
 
         return (
             <button onClick={handleEnable} className="push-btn">
-            🔔 Enable Push Notifications
+                🔔 Enable Push Notifications
             </button>
         );
     };
@@ -651,6 +698,11 @@ function SocialAIMarketingEngine() {
 
     // Subscribe to push notifications using Supabase Edge Function
     const subscribeToPush = async () => {
+        if (!isNotificationSupported()) {
+            showToastNotification('⚠️ Notifications not supported in this browser');
+            return false;
+        }
+
         if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
             showToastNotification('⚠️ Push notifications not supported');
             return false;
@@ -660,7 +712,7 @@ function SocialAIMarketingEngine() {
             setPushLoading(true);
             
             const registration = await navigator.serviceWorker.ready;
-            const permission = await Notification.requestPermission();
+            const permission = isNotificationSupported() ? await Notification.requestPermission() : 'unsupported';
             
             if (permission !== 'granted') {
                 showToastNotification('❌ Please allow notifications');
@@ -1134,6 +1186,9 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---  
     const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
+        setGlobalLoading(true);
+        setGlobalLoadingMessage('Opening WhatsApp...');
+
         const engine = new RecommendationEngine(user.id);
         await engine.trackBehavior(product?.id, 'contact');
 
@@ -1258,6 +1313,8 @@ function SocialAIMarketingEngine() {
             alert('Failed to initiate WhatsApp contact. Please try again.');
         } finally {
             setOpeningWhatsApp(false);
+            setGlobalLoading(false);
+            setGlobalLoadingMessage('');
         }
     };
 
@@ -1298,71 +1355,73 @@ function SocialAIMarketingEngine() {
         window.open(whatsappUrl, '_blank');
     };
 
-    // Fetch products with seller info
+    // Fetch products with seller info     
     const fetchProducts = useCallback(async (searchTerm = '') => {
-        setProductsFetchLoading(true);
-        setError(null);
-        try {
-            // Start with base query
-            let query = supabase
-                .from('products')
-                .select('*')
-                .ilike('name', `%${searchTerm}%`);
+        await withGlobalLoading(async () => {
+            setProductsFetchLoading(true);
+            setError(null);
+            try {
+                let query = supabase
+                    .from('products')
+                    .select('*')
+                    .ilike('name', `%${searchTerm}%`);
 
-            // Apply filters when fetching all products
-            query = applyFiltersToQuery(query, filters);
+                query = applyFiltersToQuery(query, filters);
+                const { data: products, error: productsError } = await query;
 
-            const { data: products, error: productsError } = await query;
-
-            if (productsError) {
-                throw new Error(`Failed to fetch products: ${productsError.message}`);
-            }
-            
-            if (!products || products.length === 0) {
-                setItems([]);
-                setAllProducts([]);
-                return;
-            }
-
-            const sellerIds = [...new Set(products.map(p => p.seller_id).filter(id => id))];
-
-            let sellersMap = {};
-            if (sellerIds.length > 0) {
-                const { data: sellers, error: sellersError } = await supabase
-                    .from('profiles')
-                    .select('user_id, username, location, phone_number, is_seller')
-                    .in('user_id', sellerIds);
-
-                if (!sellersError && sellers) {
-                    sellersMap = sellers.reduce((map, seller) => {
-                        map[seller.user_id] = seller;
-                        return map;
-                    }, {});
+                if (productsError) {
+                    throw new Error(`Failed to fetch products: ${productsError.message}`);
                 }
+                
+                if (!products || products.length === 0) {
+                    setItems([]);
+                    setAllProducts([]);
+                    return;
+                }
+
+                const sellerIds = [...new Set(products.map(p => p.seller_id).filter(id => id))];
+
+                let sellersMap = {};
+                if (sellerIds.length > 0) {
+                    const { data: sellers, error: sellersError } = await supabase
+                        .from('profiles')
+                        .select('user_id, username, location, phone_number, is_seller')
+                        .in('user_id', sellerIds);
+
+                    if (!sellersError && sellers) {
+                        sellersMap = sellers.reduce((map, seller) => {
+                            map[seller.user_id] = seller;
+                            return map;
+                        }, {});
+                    }
+                }
+
+                const productsWithSellers = products.map(product => ({
+                    ...product,
+                    seller: sellersMap[product.seller_id] || null
+                }));
+
+                setItems(productsWithSellers);
+                setAllProducts(productsWithSellers);
+
+                if (selectedMode === 'buyer') {
+                    setProductsFound(productsWithSellers);
+                }
+                
+            } catch (err) {
+                console.error("❌ Error in fetchProducts:", err);
+                setError(err.message || "Failed to load products. Please try again.");
+            } finally {
+                setProductsFetchLoading(false);
             }
-
-            const productsWithSellers = products.map(product => ({
-                ...product,
-                seller: sellersMap[product.seller_id] || null
-            }));
-
-            setItems(productsWithSellers);
-            setAllProducts(productsWithSellers);
-
-            if (selectedMode === 'buyer') {
-                setProductsFound(productsWithSellers);
-            }
-            
-        } catch (err) {
-            console.error("❌ Error in fetchProducts:", err);
-            setError(err.message || "Failed to load products. Please try again.");
-        } finally {
-            setProductsFetchLoading(false);
-        }
-    }, [user , selectedMode , filters]);
+        }, 'Loading products...'); // ← Message string here
+    }, [user, selectedMode, filters]); 
 
    // --- SAVE TO WISHLIST FUNCTION ---
     const saveToWishlist = async (item, itemType = 'product') => {
+        setGlobalLoading(true);
+        setGlobalLoadingMessage(`Saving ${item.name} to wishlist...`);
+
         const engine = new RecommendationEngine(user.id);
         await engine.trackBehavior(item.id, 'save');
 
@@ -1495,7 +1554,11 @@ function SocialAIMarketingEngine() {
         } catch (error) {
             console.error('Error saving to wishlist:', error);
             alert('Failed to save to wishlist. Please try again.');
-        }
+        
+        } finally {
+        setGlobalLoading(false);
+        setGlobalLoadingMessage('');
+    }
     };
  
     // --- CHECK FOR MATCHES FUNCTION ---
@@ -2854,30 +2917,29 @@ function SocialAIMarketingEngine() {
     });
 
     // --- HANDLE MODE SELECTION ---
-    const handleModeSelect = (mode) => {
-        setSelectedMode(mode);
-        setIsProfileComplete(false);
-        setError(null);
+    const handleModeSelect = async (mode) => {
+        await withGlobalLoading(async () => {
+            setSelectedMode(mode);
+            setIsProfileComplete(false);
+            setError(null);
 
-        // Instead of going directly to setup form, show decision page for sellers
-        if (mode === 'seller') {
-            setShowSellerDecision(true); // Show decision page
-        } else {
-            // Buyers go directly to setup form
-            setIsProfileComplete(false); // This will show the setup form
-        }
-        
-        setProductsFound([]);
-        setProspects([]);
-        setProductSearch('');
-        setAllProducts([]);
-        setIsNavCollapsed(false);
-        setCurrentPage(0);
-        setHasMore(true);
-        setSearchCache({});
-
-        setSimilarProducts([]); 
-        setShowSimilarProducts(false);
+            if (mode === 'seller') {
+                setShowSellerDecision(true);
+            } else {
+                setIsProfileComplete(false);
+            }
+            
+            setProductsFound([]);
+            setProspects([]);
+            setProductSearch('');
+            setAllProducts([]);
+            setIsNavCollapsed(false);
+            setCurrentPage(0);
+            setHasMore(true);
+            setSearchCache({});
+            setSimilarProducts([]); 
+            setShowSimilarProducts(false);
+        }, `Preparing ${mode} mode...`);
     };
 
     const handleSellerClick = () => {
@@ -2898,303 +2960,310 @@ function SocialAIMarketingEngine() {
     };
 
     // --- HANDLE SWITCH MODE ---
-    const handleSwitchMode = () => {
-        setSelectedMode(null);
-        setIsProfileComplete(false);
-        setProfileData(null);
-        setProductsFound([]);
-        setProspects([]);
-        setProductSearch('');
-        setError(null);
-        setAllProducts([]);
-        setCurrentPage(0);
-        setHasMore(true);
-        setSearchCache({});
+    const handleSwitchMode = async () => {
+        await withGlobalLoading(async () => {
+            setSelectedMode(null);
+            setIsProfileComplete(false);
+            setProfileData(null);
+            setProductsFound([]);
+            setProspects([]);
+            setProductSearch('');
+            setError(null);
+            setAllProducts([]);
+            setCurrentPage(0);
+            setHasMore(true);
+            setSearchCache({});
+        }, 'Switching mode...');
     };
 
     // --- HANDLE PROFILE COMPLETION ---
     const handleProfileComplete = async (details) => {
-        if (!user) return;
-    
+        await withGlobalLoading(async () => {
+            if (!user) return;
+            
             setProfileUpdateLoading(true);
 
-        try {
-            
-            // Rate limit check for profile setup
-            if (selectedMode === 'seller') {
-                let check;
-                try {
-                    check = await smartLimiterInstance.checkAndUpdate(user.id, 'PROFILE_SETUP', {
-                        mode: 'seller',
-                        product: details.product_listed
-                    });
-                    
-                    if (!check.allowed) {
-                        setError(`⚠️ ${check.reason}`);
-                        setProfileUpdateLoading(false);
-                        return;
+            try {
+                // Rate limit check for profile setup
+                if (selectedMode === 'seller') {
+                    let check;
+                    try {
+                        check = await smartLimiterInstance.checkAndUpdate(user.id, 'PROFILE_SETUP', {
+                            mode: 'seller',
+                            product: details.product_listed
+                        });
+                        
+                        if (!check.allowed) {
+                            setError(`⚠️ ${check.reason}`);
+                            setProfileUpdateLoading(false);
+                            return;
+                        }
+                    } catch (error) {
+                        console.error('Rate limit check error:', error);
+                        // Continue anyway
                     }
-                } catch (error) {
-                    console.error('Rate limit check error:', error);
-                    // Continue anyway
                 }
-            }
- 
-            if (!user) {
-                throw new Error('No user authenticated');
-            }
-            
-            setProfileUpdateLoading(true);
-            setError(null);
+    
+                if (!user) {
+                    throw new Error('No user authenticated');
+                }
+                
+                setProfileUpdateLoading(true);
+                setError(null);
 
-            const sanitizedLocation = sanitizeLocation(details.location);
-            const sanitizedPhoneNumber = sanitizePhone(details.phone_number);
-            const sanitizedProduct = sanitizeProductName(details.product_listed);
+                const sanitizedLocation = sanitizeLocation(details.location);
+                const sanitizedPhoneNumber = sanitizePhone(details.phone_number);
+                const sanitizedProduct = sanitizeProductName(details.product_listed);
 
-            if (!sanitizedLocation) {
-                throw new Error('Location is required and cannot be empty.');
-            }
-            if (!sanitizedPhoneNumber) {
-                throw new Error('Phone number is required and cannot be empty.');
-            }
+                if (!sanitizedLocation) {
+                    throw new Error('Location is required and cannot be empty.');
+                }
+                if (!sanitizedPhoneNumber) {
+                    throw new Error('Phone number is required and cannot be empty.');
+                }
 
-            if (selectedMode === 'buyer') {
-                let interestsToCheck = details.interests;
-                
-                if (typeof interestsToCheck === 'string') {
-                    interestsToCheck = interestsToCheck.split(',').filter(i => i.trim());
-                }
-                
-                if (!interestsToCheck || interestsToCheck.length === 0) {
-                    throw new Error('Please enter at least one interest for buyer setup');
-                }
-                
-                let sanitizedInterests = [];
-                if (Array.isArray(interestsToCheck)) {
-                    sanitizedInterests = interestsToCheck
-                        .map(interest => sanitizeInput(interest, 50))
-                        .filter(interest => interest.length > 0);
-                } else {
-                    sanitizedInterests = [sanitizeInput(interestsToCheck.toString(), 50)]
-                        .filter(interest => interest.length > 0);
-                }
-                
-                if (sanitizedInterests.length === 0) {
-                    throw new Error('Please enter at least one valid interest for buyer setup');
-                }
-            }
-
-            if (selectedMode === 'seller' && !sanitizedProduct) {
-                throw new Error('Please enter at least one product to sell for seller setup');
-            }
-
-            const isSellerMode = selectedMode === 'seller';
-            const isBuyerMode = selectedMode === 'buyer';
-            const now = new Date().toISOString();
-            
-            let sanitizedInterestsArray = [];
-            if (isBuyerMode && details.interests) {
-                let interestsArray = details.interests;
-                
-                if (typeof interestsArray === 'string') {
-                    interestsArray = interestsArray.split(',');
-                }
-                
-                sanitizedInterestsArray = interestsArray
-                    .filter(i => i != null && i !== '')
-                    .map(i => sanitizeInput(i.toString().trim().toLowerCase(), 50))
-                    .filter(i => i.length > 0);
-            }
+                if (selectedMode === 'buyer') {
+                    let interestsToCheck = details.interests;
                     
-            const profileUpdate = {
-                user_id: user.id,
-                username: sanitizeEmail(user.email || user.user_metadata?.email || 'unknown'),
-                location: sanitizedLocation,
-                phone_number: sanitizedPhoneNumber,
-                updated_at: now,
-                created_at: now,
-                is_seller: isSellerMode,
-                is_buyer: isBuyerMode,
-                seller_setup_completed: isSellerMode,
-                buyer_setup_completed: isBuyerMode,
-                interests: sanitizedInterestsArray
-            };
+                    if (typeof interestsToCheck === 'string') {
+                        interestsToCheck = interestsToCheck.split(',').filter(i => i.trim());
+                    }
+                    
+                    if (!interestsToCheck || interestsToCheck.length === 0) {
+                        throw new Error('Please enter at least one interest for buyer setup');
+                    }
+                    
+                    let sanitizedInterests = [];
+                    if (Array.isArray(interestsToCheck)) {
+                        sanitizedInterests = interestsToCheck
+                            .map(interest => sanitizeInput(interest, 50))
+                            .filter(interest => interest.length > 0);
+                    } else {
+                        sanitizedInterests = [sanitizeInput(interestsToCheck.toString(), 50)]
+                            .filter(interest => interest.length > 0);
+                    }
+                    
+                    if (sanitizedInterests.length === 0) {
+                        throw new Error('Please enter at least one valid interest for buyer setup');
+                    }
+                }
 
-            const { data: existingProfile, error: fetchError } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('user_id', user.id)
-                .maybeSingle();
+                if (selectedMode === 'seller' && !sanitizedProduct) {
+                    throw new Error('Please enter at least one product to sell for seller setup');
+                }
 
-            if (fetchError) throw fetchError;
-
-            const profileUpdateData = {
-                ...profileUpdate,
-                is_active: true,
-                updated_at: new Date().toISOString(),
-                created_at: existingProfile?.created_at || new Date().toISOString()
-            };
-
-            let savedProfileData;
-            if (existingProfile) {
-                const { data: updated, error: updateError } = await supabase
-                    .from('profiles')
-                    .update(profileUpdateData)
-                    .eq('user_id', user.id)
-                    .select()
-                    .single();
+                const isSellerMode = selectedMode === 'seller';
+                const isBuyerMode = selectedMode === 'buyer';
+                const now = new Date().toISOString();
                 
-                if (updateError) throw updateError;
-                savedProfileData = updated;
-            } else {
-                const { data: inserted, error: insertError } = await supabase
-                    .from('profiles')
-                    .insert([profileUpdateData])
-                    .select()
-                    .single();
-                
-                if (insertError) throw insertError;
-                savedProfileData = inserted;
-            }
-
-            if (isSellerMode && sanitizedProduct) {
-                const sanitizedDescription = DOMPurify.sanitize(details.description || '', {
-                    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li', 'a', 'img'],
-                    ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style'],
-                    ALLOWED_URI_REGEXP: /^(?:(?:https?):\/\/|\/)/i,
-                    FORBID_ATTR: ['onclick', 'onload', 'onerror'],
-                    KEEP_CONTENT: true
-                })
-                .trim()
-                .substring(0, 1000);
-
-                const productInsert = {
-                    seller_id: user.id,
-                    name: sanitizedProduct,
+                let sanitizedInterestsArray = [];
+                if (isBuyerMode && details.interests) {
+                    let interestsArray = details.interests;
+                    
+                    if (typeof interestsArray === 'string') {
+                        interestsArray = interestsArray.split(',');
+                    }
+                    
+                    sanitizedInterestsArray = interestsArray
+                        .filter(i => i != null && i !== '')
+                        .map(i => sanitizeInput(i.toString().trim().toLowerCase(), 50))
+                        .filter(i => i.length > 0);
+                }
+                        
+                const profileUpdate = {
+                    user_id: user.id,
+                    username: sanitizeEmail(user.email || user.user_metadata?.email || 'unknown'),
                     location: sanitizedLocation,
                     phone_number: sanitizedPhoneNumber,
-                    price: typeof details.price === 'number' ? 
-                       Math.max(0, Math.min(details.price, 999999.99)) : 0,
-                    description: sanitizedDescription, 
-                    created_at: new Date().toISOString()
+                    updated_at: now,
+                    created_at: now,
+                    is_seller: isSellerMode,
+                    is_buyer: isBuyerMode,
+                    seller_setup_completed: isSellerMode,
+                    buyer_setup_completed: isBuyerMode,
+                    interests: sanitizedInterestsArray
                 };
 
-                const { data: savedProduct, error: productError } = await supabase
-                    .from('products')
-                    .insert([productInsert])
-                    .select()
-                    .single();
+                const { data: existingProfile, error: fetchError } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .maybeSingle();
 
-                if (productError) {
-                    console.error("❌ Error saving product:", productError);
-                } else {
-                    console.log("✅ Product saved, checking for buyer matches...");
+                if (fetchError) throw fetchError;
+
+                const profileUpdateData = {
+                    ...profileUpdate,
+                    is_active: true,
+                    updated_at: new Date().toISOString(),
+                    created_at: existingProfile?.created_at || new Date().toISOString()
+                };
+
+                let savedProfileData;
+                if (existingProfile) {
+                    const { data: updated, error: updateError } = await supabase
+                        .from('profiles')
+                        .update(profileUpdateData)
+                        .eq('user_id', user.id)
+                        .select()
+                        .single();
                     
-                    // 🔔 REAL-TIME MATCH NOTIFICATION: Notify matching buyers
-                    try {
-                        const { data: allBuyers } = await supabase
-                            .from('profiles')
-                            .select('user_id, interests, username')
-                            .eq('is_buyer', true)
-                            .neq('user_id', user.id)
-                            .eq('is_active', true);
+                    if (updateError) throw updateError;
+                    savedProfileData = updated;
+                } else {
+                    const { data: inserted, error: insertError } = await supabase
+                        .from('profiles')
+                        .insert([profileUpdateData])
+                        .select()
+                        .single();
+                    
+                    if (insertError) throw insertError;
+                    savedProfileData = inserted;
+                }
 
-                        if (allBuyers && allBuyers.length > 0) {
-                            const productNameLower = sanitizedProduct ? sanitizedProduct.toLowerCase() : '';
-                            let matchCount = 0;
-                            
-                            for (const buyer of allBuyers) {
-                                try {
-                                    let buyerInterests = [];
-                                    if (buyer.interests) {
-                                        if (Array.isArray(buyer.interests)) {
-                                            buyerInterests = buyer.interests;
-                                        } else if (typeof buyer.interests === 'string') {
-                                            try {
-                                                buyerInterests = JSON.parse(buyer.interests);
-                                            } catch (e) {
-                                                buyerInterests = [buyer.interests];
+                if (isSellerMode && sanitizedProduct) {
+                    const sanitizedDescription = DOMPurify.sanitize(details.description || '', {
+                        ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li', 'a', 'img'],
+                        ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style'],
+                        ALLOWED_URI_REGEXP: /^(?:(?:https?):\/\/|\/)/i,
+                        FORBID_ATTR: ['onclick', 'onload', 'onerror'],
+                        KEEP_CONTENT: true
+                    })
+                    .trim()
+                    .substring(0, 1000);
+
+                    const productInsert = {
+                        seller_id: user.id,
+                        name: sanitizedProduct,
+                        location: sanitizedLocation,
+                        phone_number: sanitizedPhoneNumber,
+                        price: typeof details.price === 'number' ? 
+                        Math.max(0, Math.min(details.price, 999999.99)) : 0,
+                        description: sanitizedDescription, 
+                        created_at: new Date().toISOString()
+                    };
+
+                    const { data: savedProduct, error: productError } = await supabase
+                        .from('products')
+                        .insert([productInsert])
+                        .select()
+                        .single();
+
+                    if (productError) {
+                        console.error("❌ Error saving product:", productError);
+                    } else {
+                        console.log("✅ Product saved, checking for buyer matches...");
+                        
+                        // 🔔 REAL-TIME MATCH NOTIFICATION: Notify matching buyers
+                        try {
+                            const { data: allBuyers } = await supabase
+                                .from('profiles')
+                                .select('user_id, interests, username')
+                                .eq('is_buyer', true)
+                                .neq('user_id', user.id)
+                                .eq('is_active', true);
+
+                            if (allBuyers && allBuyers.length > 0) {
+                                const productNameLower = sanitizedProduct ? sanitizedProduct.toLowerCase() : '';
+                                let matchCount = 0;
+                                
+                                for (const buyer of allBuyers) {
+                                    try {
+                                        let buyerInterests = [];
+                                        if (buyer.interests) {
+                                            if (Array.isArray(buyer.interests)) {
+                                                buyerInterests = buyer.interests;
+                                            } else if (typeof buyer.interests === 'string') {
+                                                try {
+                                                    buyerInterests = JSON.parse(buyer.interests);
+                                                } catch (e) {
+                                                    buyerInterests = [buyer.interests];
+                                                }
                                             }
                                         }
-                                    }
 
-                                    const hasMatch = buyerInterests.some(interest => {
-                                        if (!interest) return false;
-                                        const interestLower = interest.toLowerCase();
-                                        return interestLower.includes(productNameLower) || 
-                                            productNameLower.includes(interestLower) ||
-                                            getWordVariations(productNameLower || '').some(variation =>
-                                                interestLower.includes(variation)
-                                            );
-                                    });
+                                        const hasMatch = buyerInterests.some(interest => {
+                                            if (!interest) return false;
+                                            const interestLower = interest.toLowerCase();
+                                            return interestLower.includes(productNameLower) || 
+                                                productNameLower.includes(interestLower) ||
+                                                getWordVariations(productNameLower || '').some(variation =>
+                                                    interestLower.includes(variation)
+                                                );
+                                        });
 
-                                    if (hasMatch) {
-                                        matchCount++;
-                                        await supabase.from('notifications').insert([{
-                                            user_id: buyer.user_id,
-                                            sender_id: user.id,
-                                            product_id: savedProduct.id,
-                                            product_image: null,
-                                            message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
-                                            link_type: 'product_match',
-                                            status: 'unread',
-                                            created_at: new Date().toISOString()
-                                        }]);
+                                        if (hasMatch) {
+                                            matchCount++;
+                                            await supabase.from('notifications').insert([{
+                                                user_id: buyer.user_id,
+                                                sender_id: user.id,
+                                                product_id: savedProduct.id,
+                                                product_image: null,
+                                                message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
+                                                link_type: 'product_match',
+                                                status: 'unread',
+                                                created_at: new Date().toISOString()
+                                            }]);
+                                        }
+                                    } catch (e) {
+                                        console.log('Error checking match for buyer:', e);
                                     }
-                                } catch (e) {
-                                    console.log('Error checking match for buyer:', e);
+                                }
+                                
+                                if (matchCount > 0) {
+                                    console.log(`✅ Notified ${matchCount} buyers about new product match`);
                                 }
                             }
-                            
-                            if (matchCount > 0) {
-                                console.log(`✅ Notified ${matchCount} buyers about new product match`);
-                            }
+                        } catch (matchError) {
+                            console.error('Error in match notification:', matchError);
                         }
-                    } catch (matchError) {
-                        console.error('Error in match notification:', matchError);
                     }
                 }
+
+                setProfileData(savedProfileData);
+                setIsProfileComplete(true);
+                setShowSellerDecision(false);
+
+                // Track user behavior
+                if (behaviorAnalyzerInstance) {
+                    behaviorAnalyzerInstance.recordUserAction(user.id, 'profile_complete', {
+                        mode: selectedMode,
+                        productListed: details.product_listed
+                    });
+                }
+
+            } catch (error) {
+                console.error('❌ Error in handleProfileComplete:', error);
+                setError(error.message || 'Failed to save profile. Please try again.');
+                setIsProfileComplete(false);
+            } finally {
+                setProfileUpdateLoading(false);
             }
-
-
-            setProfileData(savedProfileData);
-            setIsProfileComplete(true);
-            setShowSellerDecision(false);
-
-              // Track user behavior
-            if (behaviorAnalyzerInstance) {
-                behaviorAnalyzerInstance.recordUserAction(user.id, 'profile_complete', {
-                    mode: selectedMode,
-                    productListed: details.product_listed
-                });
-            }
-            
-
-        } catch (error) {
-            console.error('❌ Error in handleProfileComplete:', error);
-            setError(error.message || 'Failed to save profile. Please try again.');
-            setIsProfileComplete(false);
-        } finally {
-            setProfileUpdateLoading(false);
-        }
+        }, `Setting up your ${selectedMode === 'seller' ? 'seller' : 'buyer'} profile...`);
     };
 
     // --- SIMPLIFIED SEARCH FUNCTION (LIKE PREVIOUS VERSION) ---
     const handleSearch = async () => {
+        // Show global loading spinner
+        setGlobalLoading(true);
+        setGlobalLoadingMessage(`Searching for "${productSearch}"...`);
+        
         const sanitizedSearch = sanitizeProductName(productSearch);
         const engine = new RecommendationEngine(user.id);
-        await engine.trackBehavior(null, 'search', sanitizedSearch);
+        
+        try {
+            await engine.trackBehavior(null, 'search', sanitizedSearch);
 
-        await supabase.rpc('track_user_activity', {
+            await supabase.rpc('track_user_activity', {
                 p_user_id: user.id,
                 p_activity_type: 'search',
                 p_metadata: { searchTerm: sanitizedSearch }
-        });
+            });
 
-        setSearchLoading(true);
-        setError(null);
-        setShowSafetyWarning(false)
-        try {
+            setSearchLoading(true);
+            setError(null);
+            setShowSafetyWarning(false);
+            
             const sanitizedSearch = sanitizeProductName(productSearch);
             
             if (!sanitizedSearch || sanitizedSearch.trim().length === 0) {
@@ -3210,23 +3279,21 @@ function SocialAIMarketingEngine() {
             // Update URL with search term
             const params = new URLSearchParams(location.search);
             params.set('q', sanitizedSearch);
-            params.delete('page'); // Reset to page 1 on new search
+            params.delete('page');
             
-            // Use pushState to add to history stack (for back button)
             window.history.pushState({}, '', `${location.pathname}?${params.toString()}`);
             
-            // Update search params state
             setSearchParams(prev => ({
-            ...prev,
-            query: sanitizedSearch,
-            page: 1
+                ...prev,
+                query: sanitizedSearch,
+                page: 1
             }));
             
             if (user && isProfileComplete) {
                 await UserActivityTracker.trackActivity(user.id, 'search', {
-                searchTerm: sanitizedSearch,
-                mode: selectedMode,
-                resultsCount: selectedMode === 'seller' ? prospects.length : productsFound.length
+                    searchTerm: sanitizedSearch,
+                    mode: selectedMode,
+                    resultsCount: selectedMode === 'seller' ? prospects.length : productsFound.length
                 });
             }
             
@@ -3239,15 +3306,13 @@ function SocialAIMarketingEngine() {
                 await findProducts(sanitizedSearch);
             }
 
-            // ✅ ADD THIS: Show PWA install prompt after successful search results
+            // Show PWA install prompt after successful search results
             if ((selectedMode === 'seller' && prospects.length > 0) || 
                 (selectedMode === 'buyer' && productsFound.length > 0)) {
                 
-                // Check if we haven't prompted this session yet
                 const hasPromptedThisSession = sessionStorage.getItem('pwaPrompted');
                 
                 if (!hasPromptedThisSession && deferredPrompt && !hasBeenPrompted) {
-                    // Wait 2 seconds so user can see results first
                     setTimeout(() => {
                         setShowInstallPrompt(true);
                         setHasBeenPrompted(true);
@@ -3260,6 +3325,8 @@ function SocialAIMarketingEngine() {
             setError(error.message || 'Search failed');
         } finally {
             setSearchLoading(false);
+            setGlobalLoading(false); // Hide global loading
+            setGlobalLoadingMessage('');
         }
     };
 
@@ -6335,6 +6402,60 @@ function SocialAIMarketingEngine() {
                                             </div>
                                         </div>
 
+                                        )}
+
+                                        {/* Global Loading Spinner */}
+                                        {globalLoading && (
+                                            <div style={{
+                                                position: 'fixed',
+                                                top: 0,
+                                                left: 0,
+                                                right: 0,
+                                                bottom: 0,
+                                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                                zIndex: 999999,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                backdropFilter: 'blur(4px)',
+                                                animation: 'fadeIn 0.2s ease'
+                                            }}>
+                                                <div style={{
+                                                    background: 'white',
+                                                    borderRadius: '20px',
+                                                    padding: '30px 40px',
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'center',
+                                                    gap: '20px',
+                                                    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                                                    minWidth: '280px',
+                                                    textAlign: 'center'
+                                                }}>
+                                                    <div className="global-spinner" style={{
+                                                        width: '60px',
+                                                        height: '60px',
+                                                        border: '4px solid #f3f3f3',
+                                                        borderTop: '4px solid #667eea',
+                                                        borderRight: '4px solid #764ba2',
+                                                        borderRadius: '50%',
+                                                        animation: 'spin 0.8s linear infinite'
+                                                    }}></div>
+                                                    <div style={{
+                                                        fontSize: '18px',
+                                                        fontWeight: 'bold',
+                                                        color: '#333'
+                                                    }}>
+                                                        {globalLoadingMessage}
+                                                    </div>
+                                                    <div style={{
+                                                        fontSize: '13px',
+                                                        color: '#666'
+                                                    }}>
+                                                        Please wait...
+                                                    </div>
+                                                </div>
+                                            </div>
                                         )}
                                         
                                         {/* SIMILAR PRODUCTS SUGGESTIONS */}
