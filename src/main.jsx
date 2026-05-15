@@ -5,38 +5,7 @@ import App from './App.jsx';
 import './index.css';
 import ReactGA from "react-ga4";
 import { LoadingProvider } from './LoadingContext';
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-    <AuthProvider>
-        <LoadingProvider>
-            <App />
-        </LoadingProvider>
-    </AuthProvider>
-);
-
-// COMPLETELY DISABLE automatic service worker updates
-if (import.meta.env.PROD) {
-  if ('serviceWorker' in navigator) {
-    // Use a synchronous check and immediate Promise handling
-    const registerSW = async () => {
-      try {
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        console.log('✅ SW registered:', registration.scope);
-      } catch (err) {
-        // This catches the rejection immediately
-        console.log('❌ SW registration failed:', err.message);
-        // Prevent Sentry from reporting this as an error
-        if (err && err.preventDefault) {
-          err.preventDefault();
-        }
-      }
-    };
-    
-    // Register immediately, not waiting for load
-    registerSW();
-  }
-}
+import { AuthProvider } from './AuthContext';
 
 // Analytics
 ReactGA.initialize("G-RWLWLNQM67");
@@ -49,20 +18,24 @@ Sentry.init({
   tracesSampleRate: 1.0,
   replaysSessionSampleRate: 0.1,
   replaysOnErrorSampleRate: 1.0,
-  // ADD THIS SECTION to ignore SW errors
   ignoreErrors: [
     'ServiceWorker registration failed',
-    'navigator.serviceWorker.register',
     'Failed to register a ServiceWorker',
-    'Error: rejected at wrsparams.serviceWorkers.navigator.serviceWorker.register'
   ],
-  // Also blacklist URLs if needed
   denyUrls: [
-    /registerSW/i,
     /serviceWorker/i
   ]
 });
 
-// Render App
+// ✅ ONLY render - NO service worker code here
 const rootElement = document.getElementById('root');
-createRoot(rootElement).render(<App />);
+if (rootElement) {
+  const root = createRoot(rootElement);
+  root.render(
+    <AuthProvider>
+      <LoadingProvider>
+        <App />
+      </LoadingProvider>
+    </AuthProvider>
+  );
+}

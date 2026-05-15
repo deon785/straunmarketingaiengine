@@ -8,9 +8,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       
-      // Development options
       devOptions: {
-        enabled: true,
+        enabled: process.env.NODE_ENV === 'development',
         type: 'module',
         navigateFallback: 'index.html',
       },
@@ -33,7 +32,6 @@ export default defineConfig({
         orientation: 'portrait-primary',
         scope: '/',
         start_url: '/',
-        
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -56,11 +54,10 @@ export default defineConfig({
         ]
       },
       
-      // ✅ CHANGE TO generateSW (REMOVE injectManifest config)
       strategies: 'generateSW',
       
-      // ✅ KEEP workbox configuration (it works with generateSW)
       workbox: {
+        // ✅ Keep your push-sw.js for notifications
         importScripts: ['/push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         cleanupOutdatedCaches: true,
@@ -76,7 +73,7 @@ export default defineConfig({
               networkTimeoutSeconds: 10,
               expiration: {
                 maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 // 1 day
+                maxAgeSeconds: 60 * 60 * 24
               }
             }
           },
@@ -87,7 +84,7 @@ export default defineConfig({
               cacheName: 'google-fonts',
               expiration: {
                 maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+                maxAgeSeconds: 60 * 60 * 24 * 365
               }
             }
           }
