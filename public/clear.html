@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear All Data</title>
+</head>
+<body>
+    <h1>Click to Clear Everything</h1>
+    <button onclick="clearAll()">Clear Cache & Fix App</button>
+    <div id="status"></div>
+    <script>
+        async function clearAll() {
+            const status = document.getElementById('status');
+            status.innerHTML = 'Clearing...<br>';
+            
+            // Clear all caches
+            if ('caches' in window) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(key => caches.delete(key)));
+                status.innerHTML += '✓ Caches cleared<br>';
+            }
+            
+            // Clear storage
+            localStorage.clear();
+            sessionStorage.clear();
+            status.innerHTML += '✓ Storage cleared<br>';
+            
+            // Unregister service workers
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(reg => reg.unregister()));
+                status.innerHTML += '✓ Service workers cleared<br>';
+            }
+            
+            status.innerHTML += '<strong>Done! Reloading...</strong>';
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
