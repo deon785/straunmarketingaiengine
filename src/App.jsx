@@ -1,25 +1,21 @@
-import React, { useState, useEffect, Suspense, lazy, useRef, useTransition } from 'react'; // Added useTransition
+import React, { useState, useEffect, Suspense, lazy, useRef, useTransition } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './App.css';
 import { supabase } from './lib/supabase';
-import CookieBanner from './CookieBanner.jsx';
+
 import * as Sentry from "@sentry/react";
 import ReactGA from "react-ga4";
-import { toast, Toaster } from 'react-hot-toast';
+import { toast, Toaster } from 'react-hot-toast'; // Toaster is small, keep it
 
 // Import AuthContext from separate file
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 import PullToRefreshWrapper from './PullToRefreshWrapper.jsx';
-
 import RefreshPersistenceWrapper from './RefreshPersistWrapper.jsx';
 import { userMonitor } from './userBehaviorMonitor.js';
 import GlobalBackHandler from './GlobalBackHandler.jsx';
 import { NavigationProvider } from './NavigationContext.jsx';
-import SellerDecision from './SellerDecision.jsx'; 
 
-import PushNotificationHandler from './PushNotificationHandler.jsx';
-
-// --- LAZY LOADED COMPONENTS ---
+// --- LAZY LOAD ALL NON-CRITICAL COMPONENTS ---
 const Auth = lazy(() => import('./signup'));
 const SocialAIMarketingEngine = lazy(() => import('./SocialAIMarketingEngine.jsx'));
 const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
@@ -30,6 +26,11 @@ const NotificationsList = lazy(() => import('./NotificationsList'));
 const WishlistButton = lazy(() => import('./WishlistButton.jsx'));
 const SimpleAdmin = lazy(() => import('./SimpleAdmin'));
 const ResetPassword = lazy(() => import('./ResetPassword.jsx'));
+
+// ✅ NEW: Lazy load these components (were loading globally before)
+const CookieBanner = lazy(() => import('./CookieBanner.jsx'));
+const PushNotificationHandler = lazy(() => import('./PushNotificationHandler.jsx'));
+const SellerDecision = lazy(() => import('./SellerDecision.jsx'));
 
 // ============ LOADING COMPONENTS ============
 const PageLoadingSpinner = () => (
@@ -94,7 +95,7 @@ const ButtonLoadingSpinner = () => (
   }} />
 );
 
-// ============ subscribeToPush Function ============
+// ============ subscribeToPush Function (keep as is) ============
 async function subscribeToPush(userId) {
   if (!userId) {
     console.error("No userId provided for push subscription");
@@ -560,7 +561,7 @@ const AppHeader = () => {
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <span style={{ fontWeight: 'bold', fontSize: '1.2rem' }}>
-            Your App Name
+            Straun Marketing AI Engine
           </span>
         </div>
         
@@ -582,22 +583,9 @@ const AppHeader = () => {
 
 // ============ MAIN APP ============
 function App() {
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-
-  useEffect(() => {
-    // Simulate initial app loading
-    const timer = setTimeout(() => {
-      setIsInitialLoading(false);
-    }, 500);
-    
-    console.log('App initialized');
-    
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (isInitialLoading) {
-    return <FullPageLoader />;
-  }
+  // ✅ REMOVED: The artificial 500ms delay that was slowing down your app
+  // ✅ REMOVED: isInitialLoading state
+  // ✅ App now loads instantly without artificial delay
 
   return (
     <Sentry.ErrorBoundary
@@ -650,9 +638,17 @@ function App() {
                     </Suspense>
                   </main>
                   
-                  <CookieBanner /> 
+                  {/* ✅ Wrapped non-critical components in their own Suspense */}
+                  <Suspense fallback={null}>
+                    <CookieBanner />
+                  </Suspense>
+                  
                   <FeedbackButton />
-                  <PushNotificationHandler />
+                  
+                  <Suspense fallback={null}>
+                    <PushNotificationHandler />
+                  </Suspense>
+                  
                   {/* <UpdateNotification /> */}
                 </div>
               </PullToRefreshWrapper>
