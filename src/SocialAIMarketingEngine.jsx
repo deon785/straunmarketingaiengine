@@ -1357,7 +1357,7 @@ function SocialAIMarketingEngine() {
 
     // Fetch products with seller info     
     const fetchProducts = useCallback(async (searchTerm = '') => {
-        await withGlobalLoading(async () => {
+        await withLoading(async () => { 
             setProductsFetchLoading(true);
             setError(null);
             try {
@@ -1415,7 +1415,7 @@ function SocialAIMarketingEngine() {
                 setProductsFetchLoading(false);
             }
         }, 'Loading products...'); // ← Message string here
-    }, [user, selectedMode, filters]); 
+    }, [user, selectedMode, filters, withLoading]); 
 
    // --- SAVE TO WISHLIST FUNCTION ---
     const saveToWishlist = async (item, itemType = 'product') => {
@@ -2918,7 +2918,7 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE MODE SELECTION ---
     const handleModeSelect = async (mode) => {
-        await withGlobalLoading(async () => {
+        await withLoading(async () => {
             setSelectedMode(mode);
             setIsProfileComplete(false);
             setError(null);
@@ -2961,7 +2961,7 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE SWITCH MODE ---
     const handleSwitchMode = async () => {
-        await withGlobalLoading(async () => {
+        await withLoading(async () => {
             setSelectedMode(null);
             setIsProfileComplete(false);
             setProfileData(null);
@@ -2978,7 +2978,7 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE PROFILE COMPLETION ---
     const handleProfileComplete = async (details) => {
-        await withGlobalLoading(async () => {
+        await withLoading(async () => {
             if (!user) return;
             
             setProfileUpdateLoading(true);
