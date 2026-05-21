@@ -6,19 +6,32 @@ export class UserActivityTracker {
     if (!userId) return;
     
     try {
-      // Get user IP and user agent
-      const ipResponse = await fetch('https://api.ipify.org?format=json');
-      const ipData = await ipResponse.json();
+      // Get user IP
+      let ipAddress = null;
+      try {
+        const ipResponse = await fetch('https://api.ipify.org?format=json');
+        const ipData = await ipResponse.json();
+        ipAddress = ipData.ip;
+      } catch (ipError) {
+        console.warn('Could not fetch IP:', ipError);
+      }
       
       const activity = {
         user_id: userId,
         action_type: actionType,
         target_id: details.targetId || null,
         target_type: details.targetType || null,
-        details: details,
-        ip_address: ipData.ip || null,
+        details: details || {},                    // ✅ jsonb
+        ip_address: ipAddress,
         user_agent: navigator.userAgent,
-        created_at: new Date().toISOString()
+        activity_type: actionType,                // ✅ ADD THIS - text column
+        metadata: {                               // ✅ ADD THIS - jsonb column
+          url: window.location.href,
+          timestamp: new Date().toISOString(),
+          ...details
+        },
+        message: `${actionType} by user ${userId}` // ✅ ADD THIS - text column
+        // created_at will auto-set by Supabase
       };
       
       // Update profile last activity
@@ -31,10 +44,15 @@ export class UserActivityTracker {
         })
         .eq('user_id', userId);
       
-      // Insert activity log
-      await supabase
+      // Insert activity log - NOT as array
+      const { error } = await supabase
         .from('user_activities')
-        .insert([activity]);
+        .insert(activity);  // ← Single object, not array
+      
+      if (error) {
+        console.error('Activity insert error:', error);
+        throw error;
+      }
       
       console.log(`📊 Activity tracked: ${actionType} for user ${userId}`);
       

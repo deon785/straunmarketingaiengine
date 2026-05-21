@@ -1195,7 +1195,8 @@ function SocialAIMarketingEngine() {
         await supabase.rpc('track_user_activity', {
             p_user_id: user.id,
             p_activity_type: 'contact',
-            p_metadata: { targetUserId: targetUserId, type: type }
+            p_metadata: { targetUserId: targetUserId, type: type },
+            p_message: `User contacted ${type} about ${product?.name || 'product'}` 
         });
      
         if (!smartLimiterInstance) {
@@ -1428,7 +1429,8 @@ function SocialAIMarketingEngine() {
         await supabase.rpc('track_user_activity', {
             p_user_id: user.id,
             p_activity_type: 'save',
-            p_metadata: { itemName: item.name, itemType: itemType }
+            p_metadata: { itemName: item.name, itemType: itemType },
+            p_message: `User saved ${item.name} to wishlist` 
         });
 
         // Behavior check
@@ -2031,15 +2033,6 @@ function SocialAIMarketingEngine() {
                     });
                 });
                 
-                // Handle controller change
-                let refreshing = false;
-                navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (refreshing) return;
-                    refreshing = true;
-                    console.log('🔄 Service worker changed, refreshing...');
-                    window.location.reload();
-                });
-                
                 // Check if we should auto-subscribe to push
                 const hasPromptedForPush = localStorage.getItem('push_prompted');
                 if (!hasPromptedForPush && user && isProfileComplete) {
@@ -2053,7 +2046,7 @@ function SocialAIMarketingEngine() {
                     }, 5000);
                 }
                 
-            } catch (error) {
+            } catch (error) {   
                 console.error('❌ Service Worker registration failed:', error);
             }
         };
@@ -2256,22 +2249,64 @@ function SocialAIMarketingEngine() {
         }
     }, [user]);
 
-    // Listen for real-time notifications
+    // Detect if running on Vercel (serverless environment)
+    const isVercel = import.meta.env.PROD && typeof window !== 'undefined';
+
     useEffect(() => {
         if (!user || !user.id) {
             console.log('No user found for notification subscription');
             return;
         }
 
-        let notificationSubscription;
-        let reconnectTimeout;
+        let notificationSubscription = null;
+        let pollingInterval = null;
+        let reconnectTimeout = null;
         let retryCount = 0;
-        const MAX_RETRIES = 5;
+        let lastCheckedTime = new Date().toISOString();
+        let isPolling = false;
+        const MAX_RETRIES = 3;
         const BASE_RETRY_DELAY = 1000;
 
+        // ========== POLLING FUNCTION (Fallback for Vercel) ==========
+        const checkForNewNotifications = async () => {
+            if (isPolling) return;
+            isPolling = true;
+            
+            try {
+                const { data: newNotifications, error } = await supabase
+                    .from('notifications')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .gt('created_at', lastCheckedTime)
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    console.error('Polling error:', error);
+                    return;
+                }
+
+                if (newNotifications && newNotifications.length > 0) {
+                    lastCheckedTime = new Date().toISOString();
+                    
+                    newNotifications.forEach(notification => {
+                        if (notification.message) {
+                            playNotificationSound();
+                            showToastNotification(notification.message);
+                        }
+                    });
+                    
+                    fetchNotifications();
+                }
+            } catch (error) {
+                console.error('Error polling notifications:', error);
+            } finally {
+                isPolling = false;
+            }
+        };
+
+        // ========== REALTIME WEBSOCKET FUNCTION ==========
         const connectToNotifications = async () => {
             try {
-                // Clean up any existing subscription
                 if (notificationSubscription) {
                     await supabase.removeChannel(notificationSubscription);
                 }
@@ -2287,122 +2322,87 @@ function SocialAIMarketingEngine() {
                             filter: `user_id=eq.${user.id}`
                         },
                         async (payload) => {
-                            try {
-                                // Validate payload
-                                if (!payload.new || !payload.new.message) {
-                                    console.warn('Received invalid notification payload:', payload);
-                                    return;
-                                }
-
-                                // Play sound
-                                playNotificationSound();
-
-                                // Show toast notification (silently, without error messages)
-                                showToastNotification(payload.new.message);
-
-                                // Fetch updated notifications
-                                await fetchNotifications();
-
-                            } catch (error) {
-                                console.error('Error processing notification:', error);
-                            }
+                            if (!payload.new || !payload.new.message) return;
+                            playNotificationSound();
+                            showToastNotification(payload.new.message);
+                            await fetchNotifications();
                         }
                     )
                     .on('system', { event: 'disconnect' }, () => {
-                        console.log('Notification channel disconnected, attempting reconnect...');
-                        // SILENT RECONNECT - Don't show error to user
-                        scheduleReconnect();
-                    })
-                    .on('system', { event: 'reconnect' }, () => {
-                        console.log('Notification channel reconnected');
-                        retryCount = 0;
+                        console.log('⚠️ WebSocket disconnected, switching to polling mode');
+                        startPolling();
                     })
                     .subscribe((status, error) => {
                         if (status === 'SUBSCRIBED') {
-                            console.log('✅ Successfully subscribed to notifications channel');
+                            console.log('✅ Realtime WebSocket connected');
                             retryCount = 0;
+                            // Stop polling if WebSocket works
+                            if (pollingInterval) {
+                                clearInterval(pollingInterval);
+                                pollingInterval = null;
+                            }
                         }
-                        
                         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                            console.log('Notification channel connection issue, will retry:', error?.message || error);
-                            scheduleReconnect();
+                            console.log('⚠️ WebSocket failed, using polling mode');
+                            startPolling();
                         }
                     });
 
             } catch (error) {
-                console.log('Error setting up notification subscription, will retry:', error);
-                scheduleReconnect();
+                console.error('WebSocket connection error:', error);
+                startPolling();
             }
         };
 
-        const scheduleReconnect = () => {
-            if (retryCount >= MAX_RETRIES) {
-                console.log('Max retry attempts reached for notification subscription. Will resume when page is active.');
-                
-                // SILENT FAILURE - Don't show error to user
-                // Only try to reconnect when user becomes active again
-                const handleVisibilityChange = () => {
-                    if (!document.hidden) {
-                        console.log('Page became visible, attempting to reconnect notifications...');
-                        retryCount = 0;
-                        connectToNotifications();
-                        document.removeEventListener('visibilitychange', handleVisibilityChange);
-                    }
-                };
-                
-                document.addEventListener('visibilitychange', handleVisibilityChange);
-                return;
-            }
-
-            // Exponential backoff
-            const delay = BASE_RETRY_DELAY * Math.pow(2, retryCount);
-            retryCount++;
-
-            console.log(`Scheduling reconnection attempt ${retryCount} in ${delay}ms`);
-
-            if (reconnectTimeout) {
-                clearTimeout(reconnectTimeout);
-            }
-
-            reconnectTimeout = setTimeout(() => {
-                console.log(`Attempting reconnect ${retryCount}/${MAX_RETRIES}...`);
-                connectToNotifications();
-            }, delay);
+        // ========== START POLLING ==========
+        const startPolling = () => {
+            if (pollingInterval) return;
+            console.log('📡 Using polling mode (checks every 10 seconds)');
+            
+            // Check immediately
+            checkForNewNotifications();
+            
+            // Set up interval
+            pollingInterval = setInterval(checkForNewNotifications, 10000);
         };
 
-        // Initial connection
-        connectToNotifications();
-
-        // Add visibility change listener for background reconnection
-        const handleVisibilityChange = () => {
-            if (!document.hidden && retryCount >= MAX_RETRIES) {
-                console.log('Page became visible, attempting to reconnect notifications...');
-                retryCount = 0;
-                connectToNotifications();
+        // ========== STOP POLLING ==========
+        const stopPolling = () => {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
             }
         };
 
-        document.addEventListener('visibilitychange', handleVisibilityChange);
+        // ========== START REALTIME (with fallback) ==========
+        const startRealtime = () => {
+            // Always try WebSocket first
+            connectToNotifications();
+            
+            // Set a timeout - if WebSocket doesn't connect in 5 seconds, use polling
+            const timeoutId = setTimeout(() => {
+                if (!notificationSubscription || notificationSubscription.state !== 'joined') {
+                    console.log('WebSocket connection timeout, using polling');
+                    startPolling();
+                }
+            }, 5000);
+            
+            return () => clearTimeout(timeoutId);
+        };
 
-        // Cleanup function
+        // ========== INITIALIZE ==========
+        const cleanupTimeout = startRealtime();
+
+        // ========== CLEANUP ==========
         return () => {
-            console.log('Cleaning up notification subscription');
-            
-            // Remove visibility change listener
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            
-            // Clear any pending reconnect timeout
-            if (reconnectTimeout) {
-                clearTimeout(reconnectTimeout);
-            }
-            
-            // Remove channel subscription
+            if (cleanupTimeout) cleanupTimeout();
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
             if (notificationSubscription) {
-                supabase.removeChannel(notificationSubscription).catch(error => {
-                    console.log('Error removing notification channel:', error);
-                });
+                supabase.removeChannel(notificationSubscription);
             }
+            stopPolling();
         };
+        
     }, [user, fetchNotifications, showToastNotification]);
 
     useEffect(() => {
@@ -3257,14 +3257,13 @@ function SocialAIMarketingEngine() {
             await supabase.rpc('track_user_activity', {
                 p_user_id: user.id,
                 p_activity_type: 'search',
-                p_metadata: { searchTerm: sanitizedSearch }
+                p_metadata: { searchTerm: sanitizedSearch },
+                p_message: `User searched for "${sanitizedSearch}"`
             });
 
             setSearchLoading(true);
             setError(null);
             setShowSafetyWarning(false);
-            
-            const sanitizedSearch = sanitizeProductName(productSearch);
             
             if (!sanitizedSearch || sanitizedSearch.trim().length === 0) {
                 setError('Please enter a product name to search.');

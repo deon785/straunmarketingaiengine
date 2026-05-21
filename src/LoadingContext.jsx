@@ -33,8 +33,13 @@ export const LoadingProvider = ({ children }) => {
         });
     }, []);
 
-    // Wrapper for async functions
+    // Wrapper for async functions a check to prevent unnecessary loading
     const withLoading = useCallback(async (asyncFn, message = 'Loading...') => {
+        // Don't show loading for input focus or blur events
+        if (message === 'Loading input...' || message === 'Focusing...') {
+            return await asyncFn();
+        }
+        
         showLoading(message);
         try {
             const result = await asyncFn();
@@ -58,10 +63,24 @@ export const LoadingProvider = ({ children }) => {
     );
 };
 
-// Global Spinner Component
+// Global Spinner Component - FIXED VERSION
 const GlobalSpinner = ({ message }) => {
+    // Don't show spinner if there's no loading state (prevents overlay interference)
+    if (!message) return null;
+    
     return (
-        <div style={styles.overlay}>
+        <div 
+            style={styles.overlay}
+            onClick={(e) => {
+                // Prevent clicks from passing through
+                e.stopPropagation();
+                e.preventDefault();
+            }}
+            onMouseDown={(e) => {
+                // Prevent mouse events from reaching inputs
+                e.stopPropagation();
+            }}
+        >
             <div style={styles.container}>
                 <div style={styles.spinner}></div>
                 <div style={styles.message}>{message}</div>

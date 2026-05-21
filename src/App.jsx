@@ -32,6 +32,40 @@ const CookieBanner = lazy(() => import('./CookieBanner.jsx'));
 const PushNotificationHandler = lazy(() => import('./PushNotificationHandler.jsx'));
 const SellerDecision = lazy(() => import('./SellerDecision.jsx'));
 
+// ============ SERVICE WORKER RESET & UPDATE HANDLER ============
+
+// Prevent service worker from causing reload loops
+if (typeof window !== 'undefined') {
+  // Flag to prevent multiple initializations
+  if (!window._appInitialized) {
+    window._appInitialized = true;
+    
+    // Check for service worker issues on startup
+    setTimeout(async () => {
+      try {
+        const registrations = await navigator.serviceWorker?.getRegistrations();
+        if (registrations?.length > 0) {
+          console.log(`[App] ${registrations.length} service worker(s) active`);
+          
+          // Check if any SW is causing issues (optional: unregister if needed)
+          for (const registration of registrations) {
+            if (registration.active?.scriptURL?.includes('push-sw.js')) {
+              console.log('[App] Push SW active - OK');
+            }
+            if (registration.active?.scriptURL?.includes('sw.js')) {
+              console.log('[App] Main SW active - OK');
+            }
+          }
+        }
+      } catch (e) {
+        console.log('[App] Service worker check failed:', e);
+      }
+    }, 1000);
+  }
+}
+
+// ============ END SERVICE WORKER CODE ============
+
 // ============ LOADING COMPONENTS ============
 const PageLoadingSpinner = () => (
   <div style={{
@@ -95,7 +129,7 @@ const ButtonLoadingSpinner = () => (
   }} />
 );
 
-// ============ subscribeToPush Function (keep as is) ============
+// ============ FIXED subscribeToPush Function ============
 async function subscribeToPush(userId) {
   if (!userId) {
     console.error("No userId provided for push subscription");
@@ -135,12 +169,14 @@ async function subscribeToPush(userId) {
       });
     }
     
+    // ✅ FIXED: Use correct column name 'subscription' not 'subscription_json'
     const { error } = await supabase
       .from('push_subscriptions')
       .upsert({ 
         user_id: userId,
-        subscription_json: subscription,
-        updated_at: new Date().toISOString()
+        subscription: subscription,  // ← FIXED: Changed from subscription_json
+        updated_at: new Date().toISOString(),
+        is_active: true
       });
 
     if (error) {
@@ -156,6 +192,7 @@ async function subscribeToPush(userId) {
     }
   }
 }
+// ============ END FIXED subscribeToPush ============
 
 // AnalyticsTracker component
 const AnalyticsTracker = () => {
@@ -301,18 +338,24 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+// ============ FIXED UpdateNotification - No Auto Reload ============
 const UpdateNotification = () => {
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
-    const handleUpdate = () => setUpdateAvailable(true);
+    const handleUpdate = () => {
+      console.log('[Update] New version available');
+      setUpdateAvailable(true);
+    };
+    
     window.addEventListener('app-update-ready', handleUpdate);
     
+    // Check for service worker updates without auto-reloading
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then(registration => {
         registration.addEventListener('updatefound', () => {
-          console.log('Update found');
-          setUpdateAvailable(true);
+          console.log('[Update] Update found, but NOT auto-reloading');
+          setUpdateAvailable(true); // Just show notification, don't reload
         });
       });
     }
@@ -339,10 +382,12 @@ const UpdateNotification = () => {
       animation: 'slideUp 0.3s ease'
     }}
     onClick={() => {
+      console.log('[Update] User clicked update');
       setUpdateAvailable(false);
+      // Only reload when user clicks the button
       window.location.reload();
     }}>
-      🔄 New version available! Click here to update.
+      🔄 New version available! Click here to update (your data will be saved).
     </div>
   );
 };

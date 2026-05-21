@@ -1,27 +1,37 @@
-// public/sw.js - FINAL CORRECTED VERSION
+// public/sw.js - FIXED VERSION
 const CACHE_NAME = 'straun-static-v1';
+const OFFLINE_URL = '/offline.html';
 
-// Only cache essential static files
+// Only cache these exact assets (NO API routes)
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/offline.html',
-  '/pwa-192x192.png',
-  '/pwa-512x512.png'
+  OFFLINE_URL
 ];
 
-// Install - cache static assets
+// Install - cache static assets only
 self.addEventListener('install', event => {
   console.log('[SW] Installing');
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Only cache what exists
+      for (const asset of STATIC_ASSETS) {
+        try {
+          const response = await fetch(asset);
+          if (response.ok) {
+            await cache.put(asset, response);
+          }
+        } catch (e) {
+          console.log(`[SW] Could not cache ${asset}`);
+        }
+      }
+    })
   );
-  // ✅ ADD THIS: Force waiting service worker to become active
   self.skipWaiting();
 });
 
-// Activate - clean old caches and take control
+// Activate - clean old caches
 self.addEventListener('activate', event => {
   console.log('[SW] Activating');
   event.waitUntil(
@@ -29,51 +39,40 @@ self.addEventListener('activate', event => {
       keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
     ))
   );
-  // ✅ ADD THIS: Take control of all clients immediately
   self.clients.claim();
 });
 
-// Fetch - network first, Vercel handles updates
+// Fetch - NETWORK FIRST for all navigation (CRITICAL FIX)
 self.addEventListener('fetch', event => {
   const url = event.request.url;
   
-  // CRITICAL FIX: Skip ALL problematic requests
-  if (url.startsWith('ws://') || 
-      url.startsWith('wss://') ||
-      url.includes('/realtime/') ||
+  // CRITICAL: NEVER cache API calls or Supabase requests
+  if (url.includes('/rest/v1/') || 
+      url.includes('/functions/') ||
+      url.includes('/auth/') ||
       url.includes('supabase.co') ||
-      url.includes('sentry.io') ||
-      url.includes('ingest') ||
-      url.includes('/api/') || 
-      url.includes('/supabase/')) {
-    // ✅ Just pass through, don't log too much (optional)
-    // console.log('[SW] Bypassing:', url.split('?')[0]);
+      url.includes('?') ||
+      event.request.method !== 'GET') {
+    // Go straight to network, don't try cache
     event.respondWith(fetch(event.request));
     return;
   }
   
-  event.respondWith(
-    fetch(event.request)
-      .catch(() => {
-        // Only offline fallback
-        if (event.request.mode === 'navigate') {
-          return caches.match('/offline.html');
-        }
-        return caches.match(event.request);
-      })
-  );
-});
-
-// Keep push notifications
-self.addEventListener('push', event => {
-  if (event.data) {
-    event.waitUntil(
-      self.registration.showNotification('StraunAI', {
-        body: event.data.text(),
-        icon: '/pwa-192x192.png',
-        badge: '/pwa-192x192.png',
-        vibrate: [200, 100, 200]
-      })
+  // For navigation (page loads) - NETWORK FIRST, then fallback to cache
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => {
+          // Only show offline page if completely offline
+          return caches.match(OFFLINE_URL);
+        })
     );
+    return;
   }
+  
+  // For static assets - cache first, then network
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => response || fetch(event.request))
+  );
 });
