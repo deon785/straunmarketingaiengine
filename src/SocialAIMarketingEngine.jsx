@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate , useLocation } from 'react-router-dom';
-import { supabase } from './lib/supabase';
+import { supabase, queryWithRetry, sendPushNotification, callEdgeFunction } from './lib/supabase';
 import './App.css';
+import { useAuthState, useAuthActions } from './AuthContext.jsx';
 
 // --- Components ---
 import SellerSetupForm from './SellerSetupForm'; 
-import BuyerSetupForm from './BuyerSetupForm'; 
+import BuyerSetupForm from './BuyerSetupForm';
 import SafeHTML from './SafeHTML.jsx';
 import UserSettings from './UserSettings.jsx';
 import DOMPurify from 'dompurify';
@@ -14,7 +15,6 @@ import { Link } from 'react-router-dom';
 
 import ReactGA from "react-ga4";
 import WishlistManager from './WishlistManager.jsx';
-import { useAuth } from './AuthContext.jsx';
 import { SmartRateLimiter } from './smartRateLimiter.js';
 import ReportButton from './ReportButton.jsx';
 
@@ -54,6 +54,67 @@ const safeRequestNotificationPermission = async () => {
         console.error('Error requesting notification permission:', error);
         return 'error';
     }
+};
+
+// ========== SAFE DATA ACCESS HELPERS ==========
+const safeGet = (obj, path, fallback = null) => {
+    try {
+        const keys = path.split('.');
+        let result = obj;
+        for (const key of keys) {
+        if (result === null || result === undefined) return fallback;
+        result = result[key];
+        }
+        return result === undefined ? fallback : result;
+    } catch {
+        return fallback;
+    }
+};
+
+// Safe localStorage access
+const safeLocalStorage = {
+    get: (key, fallback = null) => {
+        try {
+        const item = localStorage.getItem(key);
+        return item ? JSON.parse(item) : fallback;
+        } catch {
+        return fallback;
+        }
+    },
+    set: (key, value) => {
+        try {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+        } catch {
+        return false;
+        }
+    }
+};
+
+// ========== CRASH-PROOF HELPERS ==========
+const safeArray = (arr) => {
+  if (Array.isArray(arr)) return arr;
+  if (arr && typeof arr === 'object' && 'length' in arr) {
+    return Array.from(arr);
+  }
+  return [];
+};
+
+const safeString = (str) => {
+  if (typeof str === 'string') return str;
+  if (str === null || str === undefined) return '';
+  return String(str);
+};
+
+const safeNumber = (num) => {
+  if (typeof num === 'number' && !isNaN(num)) return num;
+  if (typeof num === 'string' && !isNaN(Number(num))) return Number(num);
+  return 0;
+};
+
+const safeObject = (obj) => {
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+  return {};
 };
 
 class UserBehaviorAnalyzer {
@@ -114,13 +175,13 @@ let smartLimiterInstance;
 let behaviorAnalyzerInstance;
 
 const initializeRateLimiter = () => {
-  if (!behaviorAnalyzerInstance) {
-    behaviorAnalyzerInstance = new UserBehaviorAnalyzer();
-  }
-  if (!smartLimiterInstance) {
-    smartLimiterInstance = new SmartRateLimiter(behaviorAnalyzerInstance);
-  }
-  return { smartLimiterInstance, behaviorAnalyzerInstance };
+    if (!behaviorAnalyzerInstance) {
+        behaviorAnalyzerInstance = new UserBehaviorAnalyzer();
+    }
+    if (!smartLimiterInstance) {
+        smartLimiterInstance = new SmartRateLimiter(behaviorAnalyzerInstance);
+    }
+    return { smartLimiterInstance, behaviorAnalyzerInstance };
 };
 
 // Style for the big green buttons
@@ -280,10 +341,26 @@ function SocialAIMarketingEngine() {
     const location = useLocation();
     const { withLoading, showLoading, hideLoading } = useLoading();
 
+    // ========== SAFE NAVIGATION ==========
+    const safeNavigate = (path) => {
+        try {
+            navigate(path);
+        } catch (err) {
+            console.warn('[Navigation] Failed to navigate to', path, err);
+            // Fallback to window.location
+            try {
+            window.location.href = path;
+            } catch (fallbackErr) {
+            console.error('[Navigation] Fallback failed:', fallbackErr);
+            }
+        }
+    };
+
     // Add these with your other useState declarations
     const [globalLoading, setGlobalLoading] = useState(false);
     const [globalLoadingMessage, setGlobalLoadingMessage] = useState('');
-    const { user, loading: authLoading } = useAuth();
+    const { user, loading: authLoading, isAuthenticated, selectedMode } = useAuthState();
+    const { setMode, clearAuthState } = useAuthActions();
 
     // ✅ FIRST: Initialize searchParams from URL
     const [searchParams, setSearchParams] = useState(() => {
@@ -304,9 +381,11 @@ function SocialAIMarketingEngine() {
     }, []);
 
     // --- SIMPLIFIED MODE & PROFILE STATE ---
-    const [selectedMode, setSelectedMode] = useState(null);
     const [showSellerDecision, setShowSellerDecision] = useState(false);
-    const [isProfileComplete, setIsProfileComplete] = useState(false);
+    const [isProfileComplete, setIsProfileComplete] = useState(() => {
+        // Check if already completed
+        return localStorage.getItem('straun_profileComplete') === 'true';
+    });
     
     // --- APP STATE ---
     const [prospects, setProspects] = useState([]);
@@ -316,14 +395,16 @@ function SocialAIMarketingEngine() {
     
     // --- NEW STATE FOR ALL PRODUCTS ---
     const [allProducts, setAllProducts] = useState([]);
+    const searchTimeoutRef = useRef(null);
+    const isSearchingRef = useRef(false);
     
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
-    const [profileLoading, setProfileLoading] = useState(false); 
+    const [profileLoading, setProfileLoading] = useState(true); 
     const [showSettings, setShowSettings] = useState(false);
     
     // Add these to your state declarations
-    const [initialDataLoading, setInitialDataLoading] = useState(false);
+    const [initialDataLoading, setInitialDataLoading] = useState(true);
     const [searchLoading, setSearchLoading] = useState(false);
     const [profileUpdateLoading, setProfileUpdateLoading] = useState(false);
     const [productsFetchLoading, setProductsFetchLoading] = useState(false);
@@ -436,6 +517,24 @@ function SocialAIMarketingEngine() {
         (typeof val === 'string' && val !== '' && val !== 'newest') || 
         (typeof val === 'number' && val !== 0)
     ).length;
+
+    // ✅ Save current location (page + mode)
+    const saveUserLocation = useCallback(() => {
+        if (!user || !user.id) return; // ✅ Must have user
+        
+        const locationData = {
+            mode: selectedMode,
+            path: location.pathname,
+            page: location.pathname === '/app' ? 'social' : 'setup',
+            timestamp: Date.now()
+        };
+        
+        // ✅ Store with user ID in the key
+        const storageKey = `straun_userLocation_${user.id}`;
+        localStorage.setItem(storageKey, JSON.stringify(locationData));
+        
+        console.log('💾 Saved location for user:', user.id);
+    }, [selectedMode, location.pathname, user]);
 
     const loadMoreProducts = async () => {
         setLoading(true);
@@ -579,7 +678,7 @@ function SocialAIMarketingEngine() {
                 break;
                 
             case 'admin':
-                navigate('/admin');
+                safeNavigate('/admin');
                 break;
                 
             case 'signout':
@@ -606,7 +705,7 @@ function SocialAIMarketingEngine() {
                 .select('*')
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false })
-                .limit(50); // Limit to prevent large data loads
+                .limit(50);
 
             if (error) {
                 console.error('Error fetching notifications:', error);
@@ -619,16 +718,14 @@ function SocialAIMarketingEngine() {
                 return;
             }
 
-            // Update state
             setNotifications(data || []);
             
-            // Calculate unread count
-            const unread = (data || []).filter(n => !n.read).length;
+            // ✅ FIXED: Use 'is_read' NOT 'read'
+            const unread = (data || []).filter(n => n.is_read === false).length;
             setUnreadCount(unread);
 
         } catch (error) {
             console.error('Unexpected error fetching notifications:', error);
-            // Don't crash the app - just log the error
         }
     }, [user]);
 
@@ -667,33 +764,46 @@ function SocialAIMarketingEngine() {
 
     // Enable push notifications even when browser is closed
     const setupPushNotifications = async () => {
-    // Register service worker
-        if ('serviceWorker' in navigator) {
+        if (!('serviceWorker' in navigator)) {
+            console.warn('[Push] Service workers not supported');
+            return;
+        }
+
+        try {
             const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('[Push] SW registered');
             
-            // Request permission
             const permission = await Notification.requestPermission();
             
             if (permission === 'granted') {
-            // Subscribe to push
-            const subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: 'YOUR_VAPID_PUBLIC_KEY'
-            });
-            
-            // Save to Supabase
-            await supabase.from('push_subscriptions').insert([{
-                user_id: user.id,
-                subscription: subscription,
-                device_info: navigator.userAgent
-            }]);
+                // ✅ For Vite - use import.meta.env
+                const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                
+                if (!VAPID_PUBLIC_KEY) {
+                    console.error('[Push] Missing VAPID public key in env');
+                    return;
+                }
+                
+                const subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: VAPID_PUBLIC_KEY
+                });
+                
+                await supabase.from('push_subscriptions').insert([{
+                    user_id: user.id,
+                    subscription: subscription,
+                    device_info: navigator.userAgent
+                }]);
+                
+                console.log('[Push] Subscription saved');
             }
+        } catch (error) {
+            console.error('[Push] Setup failed:', error);
+            Sentry.captureMessage('Push notification setup failed', { 
+                level: 'warning',
+                extra: { error: error.message }
+            });
         }
-    // Send push for:
-    // - New matches (instant)
-    // - Price drops on saved items
-    // - Daily digest of new products
-    // - When someone views your product
     };
 
     // Subscribe to push notifications using Supabase Edge Function
@@ -732,20 +842,14 @@ function SocialAIMarketingEngine() {
             }
             
             // Call your edge function
-            const response = await fetch('https://mmcwfoqajkfnohbonaqa.supabase.co/functions/v1/send-push-notifications', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'subscribe',
-                    subscription: subscription,
-                    userId: user.id,
-                    userAgent: navigator.userAgent
-                })
+            const result = await callEdgeFunction('send-push-notifications', {
+                action: 'subscribe',
+                subscription: subscription,
+                userId: user.id,
+                userAgent: navigator.userAgent
             });
             
-            const result = await response.json();
-            
-            if (response.ok && result.success) {
+            if (result.success) {
                 showToastNotification('✅ Push notifications enabled!');
                 setPushEnabled(true);
                 return true;
@@ -786,6 +890,7 @@ function SocialAIMarketingEngine() {
             console.error('Failed to send test notification:', error);
         }
     };
+    
     // Test push notification (for debugging)
     const testPushNotification = async () => {
         if (!('serviceWorker' in navigator)) {
@@ -874,40 +979,105 @@ function SocialAIMarketingEngine() {
 
     // AI-powered product recommendations
     const recommendationEngine = {
-    basedOn: {
-        search_history: 'What they searched for',
-        viewed_products: 'What they clicked',
-        saved_items: 'What they wishlisted',
-        similar_users: 'Users with similar interests',
-        location: 'Nearby products',
-        season: 'Seasonal items'
-    },
-    
-    getRecommendations: async (userId) => {
-        // Get user's interests
-        const { data: profile } = await supabase
-        .from('profiles')
-        .select('interests, search_history, viewed_products')
-        .eq('user_id', userId)
-        .single();
+        basedOn: {
+            search_history: 'What they searched for',
+            viewed_products: 'What they clicked',
+            saved_items: 'What they wishlisted',
+            similar_users: 'Users with similar interests',
+            location: 'Nearby products',
+            season: 'Seasonal items'
+        },
         
-        // Find products based on interests + behavior
-        const recommendations = await supabase
-        .from('products')
-        .select('*')
-        .or(`name.ilike.%${profile.interests.join('%')}%`)
-        .limit(20);
-        
-        return recommendations;
-    }
+        getRecommendations: async (userId) => {
+            if (!userId) {
+                console.warn('[RecommendationEngine] No userId provided');
+                return [];
+            }
+            
+            try {
+                // ✅ Get user's interests
+                const { data: profile, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('interests')
+                    .eq('user_id', userId)
+                    .maybeSingle();
+                
+                if (profileError || !profile?.interests) {
+                    console.log('[RecommendationEngine] No interests found');
+                    return [];
+                }
+                
+                let interests = [];
+                if (Array.isArray(profile.interests)) {
+                    interests = profile.interests;
+                } else if (typeof profile.interests === 'string') {
+                    try {
+                        interests = JSON.parse(profile.interests);
+                    } catch (e) {
+                        interests = [profile.interests];
+                    }
+                }
+                
+                if (interests.length === 0) {
+                    return [];
+                }
+                
+                // ✅ Instead of ONE big OR query, do MULTIPLE individual queries
+                // This avoids the complex or() syntax that's causing 400 errors
+                let allProducts = [];
+                const MAX_INTERESTS = 3; // Limit to first 3 interests to avoid too many queries
+                
+                for (const interest of interests.slice(0, MAX_INTERESTS)) {
+                    if (!interest || !interest.trim()) continue;
+                    
+                    const { data: products, error } = await supabase
+                        .from('products')
+                        .select('*')
+                        .eq('status', 'active')
+                        .ilike('name', `%${interest.trim()}%`)
+                        .limit(10);
+                    
+                    if (!error && products) {
+                        allProducts = [...allProducts, ...products];
+                    }
+                }
+                
+                // ✅ Remove duplicates
+                const uniqueProducts = Array.from(
+                    new Map(allProducts.map(p => [p.id, p])).values()
+                );
+                
+                // ✅ Limit results
+                return uniqueProducts.slice(0, 20);
+                
+            } catch (error) {
+                console.error('[RecommendationEngine] Error:', error);
+                return [];
+            }
+        }
+
     };
 
-    const handleProductClick = (product) => {
+    const handleProductClick = async (product) => {
         setLastViewedProduct(product);
-        // Track the view
+        
+        // ✅ ADD THIS: Track the view in database
+        if (product?.id) {
+            try {
+                await supabase.rpc('increment_product_views', {
+                    p_product_id: product.id
+                });
+                console.log('✅ View tracked for:', product.name);
+            } catch (error) {
+                console.error('Error tracking view:', error);
+            }
+        }
+        
+        // Track with recommendation engine
         const engine = new RecommendationEngine(user.id);
-        engine.trackBehavior(product.id, 'view');
-        // You can also navigate to product detail or show modal
+        await engine.trackBehavior(product.id, 'view');
+        
+        // Show notification
         showToastNotification(`Viewing: ${product.name}`);
     };
 
@@ -1168,15 +1338,18 @@ function SocialAIMarketingEngine() {
     };
 
     const markAsRead = async (notificationId) => {
-        await supabase
+        // ✅ FIXED: Use 'is_read' NOT 'read'
+        const { error } = await supabase
             .from('notifications')
-            .update({ read: true })
+            .update({ is_read: true })
             .eq('id', notificationId);
         
-        setNotifications(prev => 
-            prev.map(n => n.id === notificationId ? {...n, read: true} : n)
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
+        if (!error) {
+            setNotifications(prev => 
+                prev.map(n => n.id === notificationId ? {...n, is_read: true} : n)
+            );
+            setUnreadCount(prev => Math.max(0, prev - 1));
+        }
     };
 
     const validatePhoneNumber = (phone) => {
@@ -1253,18 +1426,19 @@ function SocialAIMarketingEngine() {
             .single();
 
             await supabase.from('notifications').insert([
-            { 
-                user_id: targetUserId,
-                sender_id: currentUser?.id,
-                product_id: product?.id,
-                buyer_phone: profile?.phone_number || 'No phone provided',
-                product_image: product?.image_url,
-                message: type === 'seller'
-                ? `📢 New buyer interested in ${targetName}!` 
-                : `👋 Seller is reaching out about ${targetName}!`,
-                link_type: type,    
-                status: 'unread'
-            }
+                { 
+                    user_id: targetUserId,
+                    sender_id: currentUser?.id,
+                    product_id: product?.id,
+                    buyer_phone: profile?.phone_number || 'No phone provided',
+                    product_image: product?.image_url,
+                    message: type === 'seller'
+                        ? `📢 New buyer interested in ${targetName}!` 
+                        : `👋 Seller is reaching out about ${targetName}!`,
+                    link_type: type,
+                    is_read: false,  // ✅ FIXED
+                    created_at: new Date().toISOString()
+                }
             ]);
 
             await UserActivityTracker.trackContact(
@@ -1362,10 +1536,7 @@ function SocialAIMarketingEngine() {
             setProductsFetchLoading(true);
             setError(null);
             try {
-                let query = supabase
-                    .from('products')
-                    .select('*')
-                    .ilike('name', `%${searchTerm}%`);
+                let query = supabase.from('products').select('*')
 
                 query = applyFiltersToQuery(query, filters);
                 const { data: products, error: productsError } = await query;
@@ -1384,13 +1555,14 @@ function SocialAIMarketingEngine() {
 
                 let sellersMap = {};
                 if (sellerIds.length > 0) {
-                    const { data: sellers, error: sellersError } = await supabase
-                        .from('profiles')
-                        .select('user_id, username, location, phone_number, is_seller')
-                        .in('user_id', sellerIds);
-
-                    if (!sellersError && sellers) {
-                        sellersMap = sellers.reduce((map, seller) => {
+                    const { data: sellersData, error: sellersError } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location, phone_number, is_seller')
+                    .in('user_id', sellerIds);
+                    
+                    // Use sellersResult.error and sellersResult.data correctly
+                    if (!sellersError && sellersData) {
+                        sellersMap = sellersData.reduce((map, seller) => {
                             map[seller.user_id] = seller;
                             return map;
                         }, {});
@@ -1570,7 +1742,7 @@ function SocialAIMarketingEngine() {
                 .from('profiles')
                 .select('*')
                 .eq('user_id', userId)
-                .single();
+                .maybeSingle();
 
             if (!currentUser) return;
 
@@ -1591,7 +1763,8 @@ function SocialAIMarketingEngine() {
                             sender_id: userId,
                             message: `🔍 Buyer searched for "${searchTerm}" and may be interested in your products!`,
                             link_type: 'search_match',
-                            status: 'unread'
+                            is_read: false,  // ✅ FIXED
+                            created_at: new Date().toISOString()
                         }]);
                     });
                 }
@@ -1623,11 +1796,13 @@ function SocialAIMarketingEngine() {
                             if (hasMatch) {
                                 await supabase.from('notifications').insert([{
                                     user_id: buyer.user_id,
-                                    sender_id: userId,
-                                    product_id: productData.id,
-                                    message: `🎯 New match! Seller listed "${productData.name}" that matches your interests!`,
+                                    sender_id: user.id,
+                                    product_id: savedProduct.id,
+                                    product_image: null,
+                                    message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
                                     link_type: 'product_match',
-                                    status: 'unread'
+                                    is_read: false,  // ✅ FIXED
+                                    created_at: new Date().toISOString()
                                 }]);
                             }
                         } catch (e) {
@@ -1641,7 +1816,7 @@ function SocialAIMarketingEngine() {
         }
     };
 
-    // --- FIND SIMILAR PRODUCTS FUNCTION ---
+    // --- FIND SIMILAR PRODUCTS (UPDATED to use RecommendationEngine) ---
     const findSimilarProducts = useCallback(async (searchTerm, excludeIds = []) => {
         if (!searchTerm || searchTerm.trim().length < 2) {
             setSimilarProducts([]);
@@ -1653,67 +1828,75 @@ function SocialAIMarketingEngine() {
 
         try {
             const sanitizedSearch = sanitizeProductName(searchTerm);
-            const searchTermLower = sanitizedSearch.toLowerCase();
             
-            // Get word variations for better matching
-            const variations = getWordVariations(searchTermLower);
-            const searchWords = [...new Set([searchTermLower, ...variations])];
+            console.log('🔍 Searching similar products for:', searchTerm);
             
-            console.log('🔍 Searching similar products for:', searchTerm, 'variations:', searchWords);
+            // ✅ USING ACTUAL COLUMNS FROM YOUR SCHEMA
+            let query = supabase
+                .from('products')
+                .select(`
+                    id,
+                    name,
+                    price,
+                    location,
+                    description,
+                    phone_number,
+                    seller_id,
+                    created_at,
+                    image_url,
+                    profiles:seller_id (
+                        user_id,
+                        username,
+                        location,
+                        phone_number,
+                        is_seller,
+                        is_buyer
+                    )
+                `)
+                .ilike('name', `%${sanitizedSearch}%`)
+                .neq('seller_id', user.id)
+                .limit(10);
             
-            // Query for products with similar names
-            let allSimilarProducts = [];
-            
-            // Try each variation
-            for (const word of searchWords) {
-                if (word.length < 2) continue;
-                
-                // FIXED: Correct Supabase query syntax
-                let query = supabase
-                    .from('products')
-                    .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
-                    .ilike('name', `%${word}%`)
-                    .limit(10);
-                
-                // Only add .not() if we have IDs to exclude
-                if (excludeIds.length > 0) {
-                    query = query.not('id', 'in', `(${excludeIds.join(',')})`);
-                }
-                
-                const { data: products, error } = await query;
-                
-                if (!error && products) {
-                    allSimilarProducts = [...allSimilarProducts, ...products];
-                }
+            // Exclude products
+            if (excludeIds && excludeIds.length > 0) {
+                query = query.not('id', 'in', `(${excludeIds.join(',')})`);
             }
             
-            // Remove duplicates by product id
+            const { data: products, error } = await query;
+            
+            if (error) {
+                console.error('Error in similar products query:', error);
+                setSimilarProducts([]);
+                setShowSimilarProducts(false);
+                return;
+            }
+            
+            if (!products || products.length === 0) {
+                setSimilarProducts([]);
+                setShowSimilarProducts(false);
+                return;
+            }
+            
+            // Remove duplicates
             const uniqueProducts = Array.from(
-                new Map(allSimilarProducts.map(p => [p.id, p])).values()
+                new Map(products.map(p => [p.id, p])).values()
             );
             
-            // Sort by relevance (exact matches first, then partial matches)
+            // Sort by relevance
+            const searchTermLower = sanitizedSearch.toLowerCase();
             const sortedProducts = uniqueProducts.sort((a, b) => {
                 const aName = a.name ? a.name.toLowerCase() : '';
                 const bName = b.name ? b.name.toLowerCase() : '';
                 
-                // Exact match gets highest priority
                 if (aName === searchTermLower && bName !== searchTermLower) return -1;
                 if (aName !== searchTermLower && bName === searchTermLower) return 1;
-                
-                // Starts with search term gets next priority
                 if (aName.startsWith(searchTermLower) && !bName.startsWith(searchTermLower)) return -1;
                 if (!aName.startsWith(searchTermLower) && bName.startsWith(searchTermLower)) return 1;
-                
-                // Contains search term
                 if (aName.includes(searchTermLower) && !bName.includes(searchTermLower)) return -1;
                 if (!aName.includes(searchTermLower) && bName.includes(searchTermLower)) return 1;
-                
-                // Sort by price (cheaper first)
                 return (a.price || 0) - (b.price || 0);
             });
             
-            // Limit to 6 similar products max
             const limitedProducts = sortedProducts.slice(0, 6);
             
             console.log(`✅ Found ${limitedProducts.length} similar products for "${searchTerm}"`);
@@ -1725,34 +1908,60 @@ function SocialAIMarketingEngine() {
             console.error('❌ Error finding similar products:', error);
             setSimilarProducts([]);
             setShowSimilarProducts(false);
-        
         } finally {
             setSimilarProductsLoading(false);
         }
-    }, []);
+    }, [user]);
 
     // Fetch user profile
-    const fetchProfile = useCallback(async () => {  
-        if (!user) return;
+    const fetchProfile = useCallback(async () => {
+        if (!user?.id) {
+            console.warn('[fetchProfile] No user ID available');
+            setProfileLoading(false);  // ✅ Keep this
+            return null;
+        }
+
+        // ✅ Ensure loading is true when starting
+        setProfileLoading(true);
 
         try {
             const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('user_id', user.id)
-                .single();
-            
-            if (error) {
-                console.error("❌ Profile fetch error:", error);
-                return;
+            .from('profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+             if (error) {
+                console.warn('[fetchProfile] Error:', error.message);
+                setProfileLoading(false);
+                return null;
             }
+
+            // ✅ Safe data extraction
+            setProfileData({
+            location: data?.location || '',
+            phone_number: data?.phone_number || '',
+            username: data?.username || user?.email?.split('@')[0] || 'User',
+            is_seller: data?.is_seller || false,
+            is_buyer: data?.is_buyer || false,
+            interests: Array.isArray(data?.interests) ? data.interests : [],
+            seller_setup_completed: data?.seller_setup_completed || false,
+            buyer_setup_completed: data?.buyer_setup_completed || false,
+            created_at: data?.created_at || new Date().toISOString(),
+            updated_at: data?.updated_at || new Date().toISOString()
+            });
+
+            // ✅ Set loading to false when done
+            setProfileLoading(false);
+            return data;
             
-            setProfileData(data);
-            return data;  // ✅ Just return profile
         } catch (err) {
-            console.error("❌ Error in fetchProfile:", err);    
+            console.error('[fetchProfile] Unexpected error:', err);
+            setProfileLoading(false);  // ✅ Always set to false on error
+            // ✅ Don't crash - just return null
+            return null;
         }
-    }, [user]); 
+        }, [user]); 
 
     // Add toast notification function
     const showToastNotification = useCallback((message) => {
@@ -1925,13 +2134,13 @@ function SocialAIMarketingEngine() {
                 padding: '15px',
                 marginTop: '15px'
             }}>
-                <h4 style={{ margin: '0 0 10px 0' }}>Recent Activity</h4>
+                <h4 style={{ margin: '0 0 10px 0', color: '#333' }}>Recent Activity</h4>
                 {events.map((event, idx) => (
                     <div key={idx} style={{
                         padding: '8px 0',
-                        borderBottom: idx < events.length - 1 ? '1px solid #eee' : 'none',
+                        borderBottom: idx < events.length - 1 ? '1px solid #e0e0e0' : 'none',
                         fontSize: '14px',
-                        color: '#555'
+                        color: '#333'
                     }}>
                         • {event}
                     </div>
@@ -1974,14 +2183,14 @@ function SocialAIMarketingEngine() {
     const Insights = ({ tips }) => {
         return (
             <div className="insights" style={{
-                background: '#f0f7ff',
+                background: '#e4e4e4',
                 borderRadius: '12px',
                 padding: '15px',
                 marginTop: '15px'
             }}>
-                <h4 style={{ margin: '0 0 10px 0' }}>💡 Insights & Tips</h4>
+                <h4 style={{ margin: '0 0 10px 0', color: '#333'}}>💡 Insights & Tips</h4>
                 {tips.map((tip, idx) => (
-                    <p key={idx} style={{ fontSize: '13px', color: '#555', margin: '5px 0' }}>
+                    <p key={idx} style={{ fontSize: '13px', color: '#333', margin: '5px 0' }}>
                         • {tip}
                     </p>
                 ))}
@@ -2067,6 +2276,57 @@ function SocialAIMarketingEngine() {
             loadReferralCount();
         }
     }, [user]);
+
+    // ✅ Save location on every page change
+    useEffect(() => {
+        if (user && selectedMode) {
+            saveUserLocation();
+        }
+    }, [location.pathname, user, selectedMode, saveUserLocation]);
+
+    // ✅ Restore location on app load Restores per user
+    useEffect(() => {
+        if (!user || !user.id) return;
+        
+        // ✅ Wait for profile to be loaded before restoring
+        if (profileLoading) {
+            console.log('⏳ Profile loading, waiting to restore...');
+            return;
+        }
+        
+        if (!selectedMode) {
+            const storageKey = `straun_userLocation_${user.id}`;
+            const saved = localStorage.getItem(storageKey);
+            
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    const ONE_HOUR = 60 * 60 * 1000;
+                    
+                    if (Date.now() - data.timestamp < ONE_HOUR) {
+                        console.log('🔄 Restoring location for user:', user.id);
+                        
+                        // ✅ Set mode
+                        setMode(data.mode);
+                        
+                        // ✅ Navigate to saved page
+                        if (data.path && data.path !== '/') {
+                            // Use a small delay to ensure mode is set first
+                            setTimeout(() => {
+                                navigate(data.path);
+                            }, 100);
+                        }
+                    } else {
+                        localStorage.removeItem(storageKey);
+                        console.log('⏰ Location expired for user:', user.id);
+                    }
+                } catch (e) {
+                    console.error('Error restoring location:', e);
+                    localStorage.removeItem(storageKey);
+                }
+            }
+        }
+    }, [user, selectedMode, setMode, navigate, profileLoading]);
 
     // ✅ Update search when URL changes (back/forward navigation)
     useEffect(() => {
@@ -2252,11 +2512,27 @@ function SocialAIMarketingEngine() {
     // Detect if running on Vercel (serverless environment)
     const isVercel = import.meta.env.PROD && typeof window !== 'undefined';
 
+    // COMPLETE FIXED NOTIFICATION useEffect
     useEffect(() => {
-        if (!user || !user.id) {
-            console.log('No user found for notification subscription');
+        // ✅ CHECK: Wait for auth to be ready
+        if (authLoading) {
+            console.log('[Notifications] Auth still loading, waiting...');
             return;
         }
+
+        // ✅ CHECK: Must have user with ID
+        if (!user || !user.id) {
+            console.log('[Notifications] No user found for notification subscription');
+            return;
+        }
+
+        // ✅ CHECK: Must be authenticated
+        if (!isAuthenticated) {
+            console.log('[Notifications] User not authenticated, skipping subscription');
+            return;
+        }
+
+        console.log('[Notifications] ✅ Setting up for user:', user.id);
 
         let notificationSubscription = null;
         let pollingInterval = null;
@@ -2264,12 +2540,13 @@ function SocialAIMarketingEngine() {
         let retryCount = 0;
         let lastCheckedTime = new Date().toISOString();
         let isPolling = false;
+        let mounted = true;
         const MAX_RETRIES = 3;
         const BASE_RETRY_DELAY = 1000;
 
-        // ========== POLLING FUNCTION (Fallback for Vercel) ==========
+        // ========== POLLING FUNCTION (Fallback) ==========
         const checkForNewNotifications = async () => {
-            if (isPolling) return;
+            if (isPolling || !mounted) return;
             isPolling = true;
             
             try {
@@ -2281,7 +2558,7 @@ function SocialAIMarketingEngine() {
                     .order('created_at', { ascending: false });
 
                 if (error) {
-                    console.error('Polling error:', error);
+                    console.error('[Notifications] Polling error:', error);
                     return;
                 }
 
@@ -2298,7 +2575,7 @@ function SocialAIMarketingEngine() {
                     fetchNotifications();
                 }
             } catch (error) {
-                console.error('Error polling notifications:', error);
+                console.error('[Notifications] Error polling:', error);
             } finally {
                 isPolling = false;
             }
@@ -2306,9 +2583,12 @@ function SocialAIMarketingEngine() {
 
         // ========== REALTIME WEBSOCKET FUNCTION ==========
         const connectToNotifications = async () => {
+            if (!mounted) return;
+            
             try {
                 if (notificationSubscription) {
                     await supabase.removeChannel(notificationSubscription);
+                    notificationSubscription = null;
                 }
 
                 notificationSubscription = supabase
@@ -2322,19 +2602,25 @@ function SocialAIMarketingEngine() {
                             filter: `user_id=eq.${user.id}`
                         },
                         async (payload) => {
+                            if (!mounted) return;
                             if (!payload.new || !payload.new.message) return;
+                            
+                            console.log('[Notifications] New notification:', payload.new.message);
                             playNotificationSound();
                             showToastNotification(payload.new.message);
                             await fetchNotifications();
                         }
                     )
                     .on('system', { event: 'disconnect' }, () => {
-                        console.log('⚠️ WebSocket disconnected, switching to polling mode');
+                        if (!mounted) return;
+                        console.log('[Notifications] ⚠️ WebSocket disconnected, switching to polling');
                         startPolling();
                     })
                     .subscribe((status, error) => {
+                        if (!mounted) return;
+                        
                         if (status === 'SUBSCRIBED') {
-                            console.log('✅ Realtime WebSocket connected');
+                            console.log('[Notifications] ✅ Realtime WebSocket connected');
                             retryCount = 0;
                             // Stop polling if WebSocket works
                             if (pollingInterval) {
@@ -2343,21 +2629,23 @@ function SocialAIMarketingEngine() {
                             }
                         }
                         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                            console.log('⚠️ WebSocket failed, using polling mode');
+                            console.log('[Notifications] ⚠️ WebSocket failed, using polling mode');
                             startPolling();
                         }
                     });
 
             } catch (error) {
-                console.error('WebSocket connection error:', error);
-                startPolling();
+                console.error('[Notifications] WebSocket connection error:', error);
+                if (mounted) {
+                    startPolling();
+                }
             }
         };
 
         // ========== START POLLING ==========
         const startPolling = () => {
-            if (pollingInterval) return;
-            console.log('📡 Using polling mode (checks every 10 seconds)');
+            if (pollingInterval || !mounted) return;
+            console.log('[Notifications] 📡 Using polling mode (checks every 10 seconds)');
             
             // Check immediately
             checkForNewNotifications();
@@ -2376,18 +2664,22 @@ function SocialAIMarketingEngine() {
 
         // ========== START REALTIME (with fallback) ==========
         const startRealtime = () => {
+            if (!mounted) return;
+            
             // Always try WebSocket first
             connectToNotifications();
             
             // Set a timeout - if WebSocket doesn't connect in 5 seconds, use polling
             const timeoutId = setTimeout(() => {
-                if (!notificationSubscription || notificationSubscription.state !== 'joined') {
-                    console.log('WebSocket connection timeout, using polling');
+                if (mounted && (!notificationSubscription || notificationSubscription.state !== 'joined')) {
+                    console.log('[Notifications] WebSocket connection timeout, using polling');
                     startPolling();
                 }
             }, 5000);
             
-            return () => clearTimeout(timeoutId);
+            return () => {
+                if (timeoutId) clearTimeout(timeoutId);
+            };
         };
 
         // ========== INITIALIZE ==========
@@ -2395,15 +2687,17 @@ function SocialAIMarketingEngine() {
 
         // ========== CLEANUP ==========
         return () => {
+            mounted = false;
             if (cleanupTimeout) cleanupTimeout();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
             if (notificationSubscription) {
                 supabase.removeChannel(notificationSubscription);
+                notificationSubscription = null;
             }
             stopPolling();
         };
         
-    }, [user, fetchNotifications, showToastNotification]);
+    }, [user, isAuthenticated, authLoading, fetchNotifications, showToastNotification]);
 
     useEffect(() => {
         if (showSettings) {
@@ -2522,13 +2816,20 @@ function SocialAIMarketingEngine() {
                     try {
                         const newProduct = payload.new;
                         
-                        // Get user's active search alerts
-                        const { data: userAlerts } = await supabase
+                        // ✅ CHANGE: Get user's active search alerts with supabase
+                        const result = await supabase
                             .from('search_alerts')
                             .select('*')
                             .eq('user_id', user.id)
                             .eq('is_active', true);
 
+                        // Check for error
+                        if (result.error) {
+                            console.error('Failed to fetch alerts:', result.error);
+                            return;
+                        }
+
+                        const userAlerts = result.data;
                         if (!userAlerts || userAlerts.length === 0) return;
 
                         const productNameLower = newProduct.name ? newProduct.name.toLowerCase() : '';
@@ -2559,23 +2860,30 @@ function SocialAIMarketingEngine() {
                                 }
                             }
                             
-                            // All checks passed - send notification
-                            await supabase.from('notifications').insert([{
+                            const notifResult = await supabase.from('notifications').insert([{
                                 user_id: user.id,
                                 sender_id: newProduct.seller_id,
                                 product_id: newProduct.id,
                                 product_image: newProduct.image_url,
                                 message: `🚨 ALERT MATCH! New "${newProduct.name}" ($${newProduct.price}) matches your saved search "${alert.search_term}"!`,
                                 link_type: 'search_alert_match',
-                                status: 'unread',
+                                is_read: false,  // ✅ FIXED
                                 created_at: new Date().toISOString()
                             }]);
                             
-                            // Update last notified time
-                            await supabase
+                            if (notifResult.error) {
+                                console.error('Failed to send notification:', notifResult.error);
+                            }
+                            
+                            // ✅ CHANGE: Update last notified time
+                            const updateResult = await supabase
                                 .from('search_alerts')
                                 .update({ last_notified_at: new Date().toISOString() })
                                 .eq('id', alert.id);
+                            
+                            if (updateResult.error) {
+                                console.error('Failed to update alert:', updateResult.error);
+                            }
                             
                             console.log(`✅ Alert notification sent for: ${alert.search_term}`);
                         }
@@ -2604,7 +2912,7 @@ function SocialAIMarketingEngine() {
                     event: 'INSERT',
                     schema: 'public',
                     table: 'products',
-                    filter: `seller_id=neq.${user.id}` // Not user's own products
+                    filter: `seller_id=neq.${user.id}`
                 },
                 async (payload) => {
                     try {
@@ -2614,13 +2922,18 @@ function SocialAIMarketingEngine() {
                             return;
                         }
                         
-                        // Get current user's interests
-                        const { data: currentProfile } = await supabase
+                        // ✅ CHANGE: Get current user's interests with supabase
+                        const { data: currentProfile, error: profileError } = await supabase
                             .from('profiles')
                             .select('interests')
                             .eq('user_id', user.id)
-                            .single();
+                            .maybeSingle();
                         
+                        if (profileError) {
+                            console.error('Failed to fetch profile:', profileError);
+                            return;
+                        }
+
                         if (!currentProfile?.interests) return;
                         
                         let userInterests = [];
@@ -2648,17 +2961,21 @@ function SocialAIMarketingEngine() {
                         });
                         
                         if (hasMatch) {
-                            // Send notification
-                            await supabase.from('notifications').insert([{
+                            // ✅ CHANGE: Send notification with supabase
+                            const notifResult = await supabase.from('notifications').insert([{
                                 user_id: user.id,
                                 sender_id: newProduct.seller_id,
                                 product_id: newProduct.id,
                                 product_image: newProduct.image_url,
                                 message: `🚀 NEW MATCH! "${newProduct.name}" was just listed ($${newProduct.price || '0'})!`,
                                 link_type: 'real_time_product_match',
-                                status: 'unread',
+                                is_read: false,  // ✅ FIXED
                                 created_at: new Date().toISOString()
                             }]);
+                            
+                            if (notifResult.error) {
+                                console.error('Failed to send match notification:', notifResult.error);
+                            }
                             
                             // Optional: Show popup alert
                             if (showNotifications) {
@@ -2692,12 +3009,17 @@ function SocialAIMarketingEngine() {
                     try {
                         const newBuyer = payload.new;
                         
-                        // Get seller's products
-                        const { data: sellerProducts } = await supabase
+                        const productsResult = await supabase
                             .from('products')
                             .select('name')
                             .eq('seller_id', user.id);
                         
+                        if (productsResult.error) {
+                            console.error('Failed to fetch products:', productsResult.error);
+                            return;
+                        }
+
+                        const sellerProducts = productsResult.data;
                         if (!sellerProducts || sellerProducts.length === 0) return;
                         
                         // Check if buyer has interests
@@ -2744,14 +3066,18 @@ function SocialAIMarketingEngine() {
                         }
                         
                         if (matchFound) {
-                            await supabase.from('notifications').insert([{
+                            const notifResult = await supabase.from('notifications').insert([{
                                 user_id: user.id,
                                 sender_id: newBuyer.user_id,
                                 message: `🎯 New potential customer! "${newBuyer.username}" is interested in products like "${matchedProduct}"`,
                                 link_type: 'real_time_buyer_match',
-                                status: 'unread',
+                                is_read: false,  // ✅ FIXED
                                 created_at: new Date().toISOString()
                             }]);
+                            
+                            if (notifResult.error) {
+                                console.error('Failed to send buyer match notification:', notifResult.error);
+                            }
                             
                             // Refresh notifications
                             fetchNotifications();
@@ -2775,7 +3101,7 @@ function SocialAIMarketingEngine() {
             localStorage.setItem('buyerFilters', JSON.stringify(filters));
         }
     }, [filters, selectedMode]);
-
+ 
     // Load filters from localStorage
     useEffect(() => {
         if (selectedMode === 'buyer') {
@@ -2908,6 +3234,29 @@ function SocialAIMarketingEngine() {
         };
     }, [user, isProfileComplete, showToastNotification]);
 
+    // Save profile completion status
+    useEffect(() => {
+        if (isProfileComplete) {
+            localStorage.setItem('straun_profileComplete', 'true');
+        } else {
+            localStorage.setItem('straun_profileComplete', 'false');
+        }
+    }, [isProfileComplete]);
+
+    // Save profile data (non-sensitive)
+    useEffect(() => {
+        if (profileData) {
+            // Only save non-sensitive data
+            const safeProfileData = {
+            location: profileData.location,
+            phone_number: profileData.phone_number,
+            username: profileData.username,
+            is_seller: profileData.is_seller,
+            is_buyer: profileData.is_buyer
+            };
+            localStorage.setItem('straun_profileData', JSON.stringify(safeProfileData));
+        }
+    }, [profileData]);
     
     const [previousSearchState, setPreviousSearchState] = useState({
         productSearch: '',
@@ -2918,8 +3267,18 @@ function SocialAIMarketingEngine() {
 
     // --- HANDLE MODE SELECTION ---
     const handleModeSelect = async (mode) => {
+        // ✅ Save location when selecting mode
+        const locationData = {
+            mode: mode,
+            path: '/app',
+            page: 'social',
+            timestamp: Date.now()
+        };
+        localStorage.setItem('straun_userLocation', JSON.stringify(locationData));
+        
         await withLoading(async () => {
-            setSelectedMode(mode);
+            // ✅ Use setMode from AuthContext instead of local setSelectedMode
+            setMode(mode);  // This sets it in AuthContext AND localStorage
             setIsProfileComplete(false);
             setError(null);
 
@@ -2962,7 +3321,8 @@ function SocialAIMarketingEngine() {
     // --- HANDLE SWITCH MODE ---
     const handleSwitchMode = async () => {
         await withLoading(async () => {
-            setSelectedMode(null);
+            // ✅ Clear mode using AuthContext
+            setMode(null);  // This clears it from AuthContext AND localStorage
             setIsProfileComplete(false);
             setProfileData(null);
             setProductsFound([]);
@@ -3201,7 +3561,7 @@ function SocialAIMarketingEngine() {
                                                 product_image: null,
                                                 message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
                                                 link_type: 'product_match',
-                                                status: 'unread',
+                                                is_read: false,  // ✅ FIXED
                                                 created_at: new Date().toISOString()
                                             }]);
                                         }
@@ -3244,6 +3604,21 @@ function SocialAIMarketingEngine() {
 
     // --- SIMPLIFIED SEARCH FUNCTION (LIKE PREVIOUS VERSION) ---
     const handleSearch = async () => {
+        // ✅ Prevent multiple concurrent searches
+        if (isSearchingRef.current) {
+            console.log('[Search] Already searching, skipping');
+            return;
+        }
+
+        // ✅ Clear any pending search
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+            searchTimeoutRef.current = null;
+        }
+
+        // ✅ Debounce search
+        searchTimeoutRef.current = setTimeout(async () => { isSearchingRef.current = true;
+
         // Show global loading spinner
         setGlobalLoading(true);
         setGlobalLoadingMessage(`Searching for "${productSearch}"...`);
@@ -3327,6 +3702,9 @@ function SocialAIMarketingEngine() {
             setGlobalLoading(false); // Hide global loading
             setGlobalLoadingMessage('');
         }
+         isSearchingRef.current = false;
+        searchTimeoutRef.current = null;
+    }, 300);
     };
 
     // --- REUSABLE FILTER FUNCTION ---
@@ -3364,7 +3742,7 @@ function SocialAIMarketingEngine() {
         return filteredQuery;
     };
 
-    // --- FIND PRODUCTS (BUYER MODE) ---
+    // --- FIND PRODUCTS (BUYER MODE) - 100% CORRECT ---
     const findProducts = useCallback(async (searchTerm, useFilters = false) => {
         console.log('🔍 Starting findProducts with search:', searchTerm);
         
@@ -3390,111 +3768,195 @@ function SocialAIMarketingEngine() {
             const sanitizedSearch = sanitizeProductName(searchTerm);
             
             if (!sanitizedSearch || sanitizedSearch.length < 2) {
-            setError('Please enter a product name with at least two characters.');
-            return;
+                setError('Please enter a product name with at least two characters.');
+                setSearchLoading(false);
+                return;
             }
 
             console.log('📋 Fetching products from database...');
             
-            // Start with base query
+            // ✅ USING ACTUAL COLUMNS FROM YOUR SCHEMA
+            // products: id, name, price, location, description, phone_number, seller_id, created_at, image_url
+            // profiles: user_id, username, location, phone_number, is_seller, is_buyer
+            
             let query = supabase
-            .from('products')
-            .select('name, price, location, description, seller_id, created_at, phone_number, image_url, id')
-            .ilike('name', `%${sanitizedSearch}%`);
+                .from('products')
+                .select(`
+                    id,
+                    name,
+                    price,
+                    location,
+                    description,
+                    phone_number,
+                    seller_id,
+                    created_at,
+                    image_url,
+                    status,
+                    views,
+                    sold,
+                    profiles:seller_id (
+                        user_id,
+                        username,
+                        location,
+                        phone_number,
+                        is_seller,
+                        is_buyer
+                    )
+                `)
+                .ilike('name', `%${sanitizedSearch}%`)
+                .neq('seller_id', user.id);
             
             // Apply filters if requested
             if (useFilters) {
-            query = applyFiltersToQuery(query, filters);
+                if (filters.minPrice && !isNaN(filters.minPrice)) {
+                    query = query.gte('price', Number(filters.minPrice));
+                }
+                if (filters.maxPrice && !isNaN(filters.maxPrice)) {
+                    query = query.lte('price', Number(filters.maxPrice));
+                }
+                if (filters.location && filters.location.trim()) {
+                    query = query.ilike('location', `%${filters.location.trim()}%`);
+                }
+                
+                switch (filters.sortBy) {
+                    case 'newest':
+                        query = query.order('created_at', { ascending: false });
+                        break;
+                    case 'price_low':
+                        query = query.order('price', { ascending: true });
+                        break;
+                    case 'price_high':
+                        query = query.order('price', { ascending: false });
+                        break;
+                    default:
+                        query = query.order('created_at', { ascending: false });
+                }
             } else {
-            // Default sorting by price ascending when no filters
-            query = query.order('price', { ascending: true });
+                query = query.order('price', { ascending: true });
             }
+
+            query = query.limit(50);
 
             const { data: products, error: fetchError } = await query;
 
             if (fetchError) {
-            console.error('❌ Error fetching products:', fetchError);
-            setError(`Failed to fetch products: ${fetchError.message}`);
-            return;
+                console.error('❌ Error fetching products:', fetchError);
+                setError(`Failed to fetch products: ${fetchError.message}`);
+                setSearchLoading(false);
+                return;
             }
 
             const productsData = products || [];
             console.log(`✅ Found ${productsData.length} products for: "${sanitizedSearch}"`);
             
+            // ✅ SIMILAR PRODUCTS - using actual UUID
             if (productsData.length === 0) {
-            console.log('⚠️ No products found in database');
-            await findSimilarProducts(sanitizedSearch);
-            } else {
-            if (productsData.length < 3) {
-                const excludeIds = productsData.map(p => p.id);
-                await findSimilarProducts(sanitizedSearch, excludeIds);
-            }
+                console.log('⚠️ No products found in database');
+                await findSimilarProducts(sanitizedSearch);
+            } else if (productsData.length < 3 && productsData[0]?.id) {
+                try {
+                    const firstProductId = productsData[0].id;
+                    
+                    // ✅ Check if it's a valid UUID format
+                    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                    if (uuidRegex.test(firstProductId)) {
+                        const { data: similarData, error: similarError } = await supabase
+                            .from('product_similarity')
+                            .select(`
+                                product_id_2,
+                                similarity_score,
+                                products:product_id_2 (
+                                    id,
+                                    name,
+                                    price,
+                                    location,
+                                    description,
+                                    phone_number,
+                                    seller_id,
+                                    created_at,
+                                    image_url,
+                                    profiles:seller_id (
+                                        user_id,
+                                        username,
+                                        location,
+                                        phone_number,
+                                        is_seller,
+                                        is_buyer
+                                    )
+                                )
+                            `)
+                            .eq('product_id_1', firstProductId)
+                            .order('similarity_score', { ascending: false })
+                            .limit(6);
+
+                        if (!similarError && similarData) {
+                            const similarProductsList = similarData
+                                .filter(item => item.products)
+                                .map(item => item.products);
+                            setSimilarProducts(similarProductsList);
+                            setShowSimilarProducts(similarProductsList.length > 0);
+                        }
+                    }
+                } catch (similarErr) {
+                    console.error('Error finding similar products:', similarErr);
+                }
             }
 
             if (productsData.length > 0) {
-            setShowSafetyWarning(true);
+                setShowSafetyWarning(true);
             }
             
-            // Save to cache only if not using filters
             if (!useFilters) {
-            setSearchCache(prev => ({
-                ...prev,
-                [cacheKey]: productsData
-            }));
+                setSearchCache(prev => ({
+                    ...prev,
+                    [cacheKey]: productsData
+                }));
             }
 
-            // Update products found state
             setProductsFound(productsData);
 
-            // 🔔 REAL-TIME MATCH NOTIFICATION
+            // ✅ NOTIFICATIONS - USING ACTUAL COLUMNS FROM YOUR SCHEMA
+            // notifications: user_id, message, link_type, is_read, created_at, buyer_phone, product_image
+            // NOTE: 'is_read' NOT 'read'
             if (productsData && productsData.length > 0 && selectedMode === 'buyer') {
-            try {
-                const uniqueSellerIds = [...new Set(productsData
-                .filter(p => p.seller_id && p.seller_id !== user.id)
-                .map(p => p.seller_id)
-                )];
-                
-                if (uniqueSellerIds.length > 0) {
-                for (const sellerId of uniqueSellerIds) {
-                    await supabase.from('notifications').insert([{
-                    user_id: sellerId,
-                    sender_id: user.id,
-                    message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
-                    link_type: 'search_match',
-                    status: 'unread',
-                    created_at: new Date().toISOString()
-                    }]);
+                try {
+                    const uniqueSellerIds = [...new Set(productsData
+                        .filter(p => p.seller_id && p.seller_id !== user.id)
+                        .map(p => p.seller_id)
+                    )];
+                    
+                    if (uniqueSellerIds.length > 0) {
+                        for (const sellerId of uniqueSellerIds) {
+                            const { error: notifError } = await supabase
+                                .from('notifications')
+                                .insert({
+                                    user_id: sellerId,
+                                    sender_id: user.id,
+                                    message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
+                                    link_type: 'search_match',
+                                    is_read: false,
+                                    created_at: new Date().toISOString()
+                                });
+                            
+                            if (notifError) {
+                                console.error('Error notifying seller:', notifError);
+                            }
+                        }
+                    }
+                } catch (notificationError) {
+                    console.error('Error notifying sellers:', notificationError);
                 }
-                }
-            } catch (notificationError) {
-                console.error('Error notifying sellers:', notificationError);
-            }
             }
 
-            // Log the search
-            try {
-            await supabase.from('searches').insert([
-                { 
-                buyer_id: user.id, 
-                seller_id: null,
-                product_name: sanitizedSearch,
-                search_type: 'product',
-                prospects_found: productsData.length,
-                created_at: new Date().toISOString()
-                }
-            ]);
-            } catch (logError) {
-            console.error('Error logging search:', logError);
-            }
         } catch (err) {
             console.error('❌ Find products error:', err);
             setError('An unexpected error occurred. Please try again.');
-    } finally {
-        setSearchLoading(false);
-    }
-    }, [user, searchCache, selectedMode, findSimilarProducts, filters , applyFiltersToQuery]); 
+        } finally {
+            setSearchLoading(false);
+        }
+    }, [user, searchCache, selectedMode, filters]);
 
-        // --- FIND PROSPECTS (SELLER MODE) ---
+    // --- FIND PROSPECTS (SELLER MODE) ---
     const findProspects = useCallback(async (searchTerm) => {
         console.log('🔍 Starting findProspects with search:', searchTerm);
 
@@ -3754,10 +4216,20 @@ function SocialAIMarketingEngine() {
         try {
             setSignOutLoading(true);
 
+            if (user && user.id) {
+                const storageKey = `straun_userLocation_${user.id}`;
+                localStorage.removeItem(storageKey);
+                
+                // Also clear other user-specific items
+                localStorage.removeItem(`straun_profileData_${user.id}`);
+                localStorage.removeItem(`straun_searchCache_${user.id}`);
+            }
+
+            clearAuthState();  
+            
             const { error } = await supabase.auth.signOut();
             if (error) throw error;
-            
-            setSelectedMode(null);
+ 
             setIsProfileComplete(false);
             setProfileData(null);
             setProspects([]);
@@ -3768,7 +4240,7 @@ function SocialAIMarketingEngine() {
             setHasMore(true);
             setSearchCache({});
             
-            navigate('/');
+            safeNavigate('/');
         } catch (error) {
             console.error('Sign out error:', error);
             setError('Error signing out. Please try again.');
@@ -3784,11 +4256,18 @@ function SocialAIMarketingEngine() {
     };
 
     // --- CONDITIONAL RENDERING ---
-    if (authLoading) {
+    // ✅ UPDATE THIS LOADING CHECK
+    if (authLoading || initialDataLoading || (profileLoading && !profileData)) {
         return (
             <div className="loading-container">
                 <div className="loading-spinner"></div>
-                <p>Loading authentication...</p>
+                <p>
+                    {authLoading 
+                        ? 'Loading authentication...' 
+                        : (profileLoading && !profileData) 
+                            ? 'Loading your profile...' 
+                            : 'Loading...'}
+                </p>
             </div>
         );
     }
@@ -4057,7 +4536,7 @@ function SocialAIMarketingEngine() {
                         <button
                             onClick={() => {
                                 setShowSellerDecision(false);
-                                setSelectedMode(null); // Go back to mode selection
+                                setMode(null); // Go back to mode selection
                             }}
                             style={{
                                 marginTop: '20px',
@@ -4078,7 +4557,7 @@ function SocialAIMarketingEngine() {
     }
 
     // --- SHOW SETUP FORM IF MODE SELECTED BUT PROFILE NOT COMPLETE ---
-    if (selectedMode && !isProfileComplete) {
+    if (selectedMode && !isProfileComplete && !profileLoading && !initialDataLoading) {
         return (
             <div className="app-container">
                 <div className="profile-setup-screen">
@@ -4985,7 +5464,7 @@ function SocialAIMarketingEngine() {
                                     {notifications.map(notification => (
                                         <div 
                                             key={notification.id} 
-                                            className={`notification-item ${notification.read ? 'read' : 'unread'}`}
+                                            className={`notification-item ${notification.is_read ? 'read' : 'unread'}`}
                                             onClick={() => markAsRead(notification.id)}
                                         >
                                             <div className="notification-message">
@@ -5163,7 +5642,6 @@ function SocialAIMarketingEngine() {
                                     className="search-input-large"
                                     disabled={searchLoading}
                                 />
-                                
                             </div>
                         
                             <button 
@@ -5192,9 +5670,7 @@ function SocialAIMarketingEngine() {
                                 </strong> 
                                 {selectedMode === 'seller' ? prospects.length : productsFound.length}
                             </div>
-
                         </div>
-
                     </div>
 
                     <div className="filter-container">
@@ -5312,7 +5788,6 @@ function SocialAIMarketingEngine() {
                         </div>
                     </div>
 
-
                     {error && (
                         <div className="error-alert">
                             <span className="error-icon">⚠️</span>
@@ -5320,7 +5795,7 @@ function SocialAIMarketingEngine() {
                         </div>
                     )}
                     
-                    {/* 🔴 SAFETY WARNING MESSAGE - Add this component */}
+                    {/* 🔴 SAFETY WARNING MESSAGE */}
                     {showSafetyWarning && (
                         <div 
                             className="safety-warning-message"
@@ -5390,6 +5865,10 @@ function SocialAIMarketingEngine() {
                     
                     <div className="separator"></div>
 
+                    {/* ============================================================ */}
+                    {/* ========== MODALS (Price Alerts, Saved Searches, etc.) ========== */}
+                    {/* ============================================================ */}
+
                     {showPriceAlerts ? (
                         <div style={{
                             position: 'fixed',
@@ -5442,7 +5921,7 @@ function SocialAIMarketingEngine() {
                                 <PriceAlertDashboard userId={user?.id} />
                             </div>
                         </div>
-                    ):showSavedSearches ? (
+                    ) : showSavedSearches ? (
                         <div style={{
                             position: 'fixed',
                             top: 0,
@@ -5473,7 +5952,7 @@ function SocialAIMarketingEngine() {
                                     <button
                                         onClick={() => {
                                             setShowSavedSearches(false);
-                                            fetchSavedSearches(); // Refresh when closing
+                                            fetchSavedSearches();
                                         }}
                                         style={{
                                             background: 'rgba(255,255,255,0.2)',
@@ -5681,7 +6160,6 @@ function SocialAIMarketingEngine() {
                                 />
                             </div>
                         </div>
-
                     ) : showReferralProgram ? (
                         <div style={{
                             position: 'fixed',
@@ -5841,117 +6319,95 @@ function SocialAIMarketingEngine() {
                             </div>
                         </div>
                     ) : (
-                    
-                    <div className="results-section">
-                        {selectedMode === 'seller' ? (
-                            <div className="seller-results-card">
-                                <div className="results-header">
-                                    <h3>
-                                        {selectedMode === 'seller' ? '📈 Marketing Prospects' : '🛒 Available Products'}
-                                        {selectedMode === 'buyer' && (
-                                            <button 
-                                                onClick={() => setIsFilterCollapsed(!isFilterCollapsed)}
-                                                className="filter-toggle-button"
-                                                style={{
-                                                    marginLeft: '15px',
-                                                    fontSize: '13px',
-                                                    padding: '6px 12px'
-                                                }}
-                                            >
-                                                <span className="filter-icon">🔻</span>
-                                                {isFilterCollapsed ? 'Show Filters' : 'Hide Filters'}
-                                            </button>
-                                        )}
-                                    </h3>
-                                    <div className="results-stats">
-                                        <span className="stat-item">
-                                            <strong>Your Location:</strong> {profileData?.location}
-                                        </span>
-                                        <span className="stat-item">
-                                            {prospects.length > 0 && (
-                                                <span className="same-location-count">
-                                                    ({prospects.filter(p => p.isSameLocation).length} in your area)
+                        /* ============================================================ */
+                        /* ========== RESULTS SECTION - FIXED RECOMMENDATIONS ========== */
+                        /* ============================================================ */
+                        
+                        <div className="results-section">
+    
+                            {/* ✅ CASE 1: SELLER MODE - Show prospects */}
+                            {selectedMode === 'seller' ? (
+                                <>
+                                    {/* Existing seller results */}
+                                    <div className="seller-results-card">
+                                        <div className="results-header">
+                                            <h3>📈 Marketing Prospects</h3>
+                                            <div className="results-stats">
+                                                <span className="stat-item">
+                                                    <strong>Your Location:</strong> {profileData?.location}
                                                 </span>
-                                            )}
-                                        </span>
-                                    </div>
-                                </div>
-                                
-                                {prospects.length === 0 ? (
-                                    <div className="empty-results">
-                                        <div className="empty-icon">🔍</div>
-                                        <h4>
-                                            {productSearch.trim() && !loading 
-                                                ? `No prospects found for "${productSearch}"`
-                                                : 'No prospects yet'}
-                                        </h4>
-                                        
-                                        {productSearch.trim() && !loading ? (
-                                            <>
-                                                <p>No customers have "{productSearch}" in their interests yet.</p>
-                                                
-                                                <div className="empty-tips">
-                                                    <p><strong>Try searching for:</strong></p>
-                                                    <ul>
-                                                        <li>"laptop" - Found in existing interests</li>
-                                                        <li>"fruits" - Found in existing interests</li>
-                                                        <li>Other common products</li>
-                                                    </ul>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <p>Enter a product above to find customers interested in buying it.</p>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <div className="prospects-grid">
-                                        {prospects.map((p, index) => (
-                                            <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
-                                                <div className="prospect-card-header">
-                                                    <div className="prospect-avatar">
-                                                        {p.email ? p.email.charAt(0).toUpperCase() : '?'}
-                                                    </div>
-                                                    <div className="prospect-identity">
-                                                        <h4>Potential Customer</h4>
-                                                        <p className="prospect-email">{p.email || 'No email'}</p>
-                                                        {p.isSameLocation && (
-                                                            <div className="location-match-badge">
-                                                                <span className="match-icon">📍</span>
-                                                                <span className="match-text">Same Location</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <div className="prospect-details">
-                                                    <div className="detail-item">
-                                                        <span className="detail-label">📍 Location:</span>
-                                                        <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
-                                                            {p.location || 'Not specified'}
-                                                            {p.isSameLocation && " (Your Area)"}
+                                                <span className="stat-item">
+                                                    {prospects.length > 0 && (
+                                                        <span className="same-location-count">
+                                                            ({prospects.filter(p => p.isSameLocation).length} in your area)
                                                         </span>
-                                                    </div>
-                                                    <div className="detail-item phone-detail">
-                                                        <span className="detail-label">📞 Phone:</span>
-                                                        <span className="detail-value">{p.phone_number || 'N/A'}</span>
-                                                    </div>
-                                                    <div className="detail-item">
-                                                        <span className="detail-label">🎯 Interested in:</span>
-                                                        <span className="detail-value highlight">{p.interest || 'Not specified'}</span>
-                                                    </div>
-                                                </div>
-                                                <div className="prospect-actions" style={{ 
-                                                    display: 'flex', 
-                                                    flexDirection: 'column', 
-                                                    gap: '10px', // Add gap between buttons
-                                                    marginTop: '15px'
-                                                }}>    
-                                                    {p.isSameLocation ? (
-                                                        <button className="connect-button priority">
-                                                            <span className="priority-icon">🔥</span>
-                                                            Priority Connection
-                                                        </button>
-                                                    ) : (
-                                                        <div>
+                                                    )}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        
+                                        {prospects.length === 0 ? (
+                                            <div className="empty-results">
+                                                <div className="empty-icon">🔍</div>
+                                                <h4>
+                                                    {productSearch.trim() && !loading 
+                                                        ? `No prospects found for "${productSearch}"`
+                                                        : 'No prospects yet'}
+                                                </h4>
+                                                
+                                                {productSearch.trim() && !loading ? (
+                                                    <>
+                                                        <p>No customers have "{productSearch}" in their interests yet.</p>
+                                                        <div className="empty-tips">
+                                                            <p><strong>Try searching for:</strong></p>
+                                                            <ul>
+                                                                <li>"laptop" - Found in existing interests</li>
+                                                                <li>"fruits" - Found in existing interests</li>
+                                                                <li>Other common products</li>
+                                                            </ul>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <p>Enter a product above to find customers interested in buying it.</p>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="prospects-grid">
+                                                {prospects.map((p, index) => (
+                                                    <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
+                                                        <div className="prospect-card-header">
+                                                            <div className="prospect-avatar">
+                                                                {p.email ? p.email.charAt(0).toUpperCase() : '?'}
+                                                            </div>
+                                                            <div className="prospect-identity">
+                                                                <h4>Potential Customer</h4>
+                                                                <p className="prospect-email">{p.email || 'No email'}</p>
+                                                                {p.isSameLocation && (
+                                                                    <div className="location-match-badge">
+                                                                        <span className="match-icon">📍</span>
+                                                                        <span className="match-text">Same Location</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="prospect-details">
+                                                            <div className="detail-item">
+                                                                <span className="detail-label">📍 Location:</span>
+                                                                <span className={`detail-value ${p.isSameLocation ? 'highlight-location' : ''}`}>
+                                                                    {p.location || 'Not specified'}
+                                                                    {p.isSameLocation && " (Your Area)"}
+                                                                </span>
+                                                            </div>
+                                                            <div className="detail-item phone-detail">
+                                                                <span className="detail-label">📞 Phone:</span>
+                                                                <span className="detail-value">{p.phone_number || 'N/A'}</span>
+                                                            </div>
+                                                            <div className="detail-item">
+                                                                <span className="detail-label">🎯 Interested in:</span>
+                                                                <span className="detail-value highlight">{p.interest || 'Not specified'}</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="prospect-actions" style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px' }}>
                                                             <button 
                                                                 onClick={() => saveToWishlist(p, 'prospect')}
                                                                 style={{
@@ -5970,11 +6426,9 @@ function SocialAIMarketingEngine() {
                                                                     gap: '8px',
                                                                     marginBottom: '5px'
                                                                 }}
-                                                                title="Save this product to your wishlist"
                                                             >
                                                                 💾 Save Prospect
                                                             </button>
-
                                                             <button 
                                                                 onClick={() => handleContact(p.id, p.phone_number, p.interest, 'seller', {
                                                                     id: null,   
@@ -5982,12 +6436,9 @@ function SocialAIMarketingEngine() {
                                                                     image_url: null
                                                                 })}
                                                                 disabled={limits?.CONTACT?.remaining === 0}
-                                                                title={limits?.CONTACT?.remaining === 0 ? 
-                                                                    `Contact limit reached. ${limits.CONTACT.reset_in ? `Resets in ${limits.CONTACT.reset_in} seconds` : 'Try again later'}` : 
-                                                                    ''}
                                                                 style={{
                                                                     width: '100%',
-                                                                    backgroundColor: '#25D366', // WhatsApp green
+                                                                    backgroundColor: '#25D366',
                                                                     color: 'white',
                                                                     border: 'none',
                                                                     padding: '12px',
@@ -6000,20 +6451,7 @@ function SocialAIMarketingEngine() {
                                                                     justifyContent: 'center',
                                                                     gap: '8px',
                                                                     marginBottom: '10px',
-                                                                    boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)',
-                                                                    transition: 'all 0.2s ease'
-                                                                }}
-                                                                onMouseEnter={(e) => {
-                                                                    if (limits?.CONTACT?.remaining !== 0) {
-                                                                        e.currentTarget.style.backgroundColor = '#128C7E';
-                                                                        e.currentTarget.style.transform = 'translateY(-2px)';
-                                                                    }
-                                                                }}
-                                                                onMouseLeave={(e) => {
-                                                                    if (limits?.CONTACT?.remaining !== 0) {
-                                                                        e.currentTarget.style.backgroundColor = '#25D366';
-                                                                        e.currentTarget.style.transform = 'translateY(0)';
-                                                                    }
+                                                                    boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)'
                                                                 }}
                                                             >
                                                                 <span style={{ fontSize: '16px' }}>💬</span>
@@ -6031,14 +6469,6 @@ function SocialAIMarketingEngine() {
                                                                     </span>
                                                                 )}
                                                             </button>
-
-                                                            <button 
-                                                                onClick={() => handleShareToStatus(p)}
-                                                                style={mainButtonStyle('#128C7E')}
-                                                            >
-                                                                📢 Post to Status
-                                                            </button>
-
                                                             <div style={{ display: 'flex', gap: '10px' }}>
                                                                 <button 
                                                                     onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
@@ -6046,7 +6476,6 @@ function SocialAIMarketingEngine() {
                                                                 >
                                                                     📞 Call
                                                                 </button>
-                                                                
                                                                 <button 
                                                                     onClick={() => {
                                                                         const smsMessage = `Hi, I saw you're interested in ${p.interest}. I have this available for sale. Are you interested?`;
@@ -6058,540 +6487,557 @@ function SocialAIMarketingEngine() {
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                    )}
-                                                </div>
+                                                    </div>
+                                                ))}
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="buyer-results-card">
-                                    <div className="results-header">
-                                        <h3>🛒 Available Products</h3>
-                                        <div className="results-stats">
-                                            <span className="stat-item">
-                                                <strong>Your Location:</strong> {profileData?.location}
-                                            </span>
-                                            <span className="stat-item">
-                                                <strong>Products Found:</strong> {productsFound.length}
-                                            </span>
-                                            <span className="stat-item">
-                                                <button 
-                                                    onClick={() => {
-                                                        setProductSearch('');  // Clear search
-                                                        fetchProducts();       // Fetch all products
-                                                    }} 
-                                                    
-                                                    className="refresh-data-button"
-                                                    disabled={productsFetchLoading}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        background: 'var(--primary-color)',
-                                                        color: 'white',
-                                                        border: 'none',
-                                                        borderRadius: 'var(--border-radius-sm)',
-                                                        cursor: productsFetchLoading ? 'not-allowed' : 'pointer',
-                                                        fontSize: '0.9rem'
-                                                    }}
-                                                >
-                                                    {productsFetchLoading ? 'Refreshing...' : '🔄 Refresh All Products'}
-                                                </button>
-                                            </span>
-                                        </div>
+                                        )}
                                     </div>
                                     
-                                    {productsFound.length === 0 ? (
-                                        <div className="empty-results">
-                                            <div className="empty-icon">🛒</div>
-                                            <h4>No products found for "{productSearch}"</h4>
-                                            <p>We couldn't find any products matching your search.</p>
+                                    {/* ✅ NEW: Show alternative prospects when no prospects found */}
+                                    {prospects.length === 0 && productSearch.trim() !== '' && user && (
+                                        <div className="recommendations-container">
+                                            <div className="no-results-message" style={{ 
+                                                textAlign: 'center', 
+                                                padding: '30px',
+                                                marginBottom: '15px'
+                                            }}>
+                                                <div style={{ fontSize: '48px', marginBottom: '10px' }}>👥</div>
+                                                <h4>No direct matches for "{productSearch}"</h4>
+                                                <p style={{ color: '#666', marginBottom: '15px' }}>
+                                                    Try these alternative buyers who might be interested:
+                                                </p>
+                                            </div>
                                             
-                                            {showSimilarProducts && similarProducts.length > 0 ? (
-                                                <div style={{ marginTop: '20px' }}>
-                                                    <p><strong>Try these similar products instead:</strong></p>
-                                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '15px' }}>
-                                                        {similarProducts.slice(0, 3).map((product, index) => (
-                                                            <button
-                                                                key={`empty-similar-${index}`}
-                                                                onClick={() => {
-                                                                    setProductSearch(product.name);
-                                                                    setTimeout(() => handleSearch(), 100);
-                                                                }}
-                                                                style={{
-                                                                    background: '#667eea',
-                                                                    color: 'white',
-                                                                    border: 'none',
-                                                                    padding: '8px 12px',
-                                                                    borderRadius: '6px',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: '13px',
+                                            {/* Show alternative prospects */}
+                                            <RecommendationsSection 
+                                                userId={user.id}
+                                                currentProductId={null}
+                                                onProductClick={handleProductClick}
+                                                isAlternativeProspects={true}
+                                                searchTerm={productSearch}
+                                            />
+                                            
+                                            {/* Button to Daily Deals */}
+                                            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+                                                <button
+                                                    onClick={() => setShowDailyDeals(true)}
+                                                    style={{
+                                                        padding: '12px 24px',
+                                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '12px',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 'bold',
+                                                        fontSize: '14px',
+                                                        boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                                                        transition: 'all 0.3s ease'
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                                                >
+                                                    🔥 View Daily Deals
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                /* ✅ CASE 2: BUYER MODE - Show products + recommendations */
+                                <>
+                                    {/* ✅ 2a: Show search results if any */}
+                                    {productsFound.length > 0 && (
+                                        <div className="buyer-results-card">
+                                            <div className="results-header">
+                                                <h3>🛒 Available Products</h3>
+                                                <div className="results-stats">
+                                                    <span className="stat-item">
+                                                        <strong>Your Location:</strong> {profileData?.location}
+                                                    </span>
+                                                    <span className="stat-item">
+                                                        <strong>Products Found:</strong> {productsFound.length}
+                                                    </span>
+                                                    <span className="stat-item">
+                                                        <button 
+                                                            onClick={() => {
+                                                                setProductSearch('');
+                                                                fetchProducts();
+                                                            }} 
+                                                            className="refresh-data-button"
+                                                            disabled={productsFetchLoading}
+                                                            style={{
+                                                                padding: '0.5rem 1rem',
+                                                                background: 'var(--primary-color)',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: 'var(--border-radius-sm)',
+                                                                cursor: productsFetchLoading ? 'not-allowed' : 'pointer',
+                                                                fontSize: '0.9rem'
+                                                            }}
+                                                        >
+                                                            {productsFetchLoading ? 'Refreshing...' : '🔄 Refresh All Products'}
+                                                        </button>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="products-grid">
+                                                {safeArray(productsFound).map((p, index) => (
+                                                    <div 
+                                                        key={p?.id || `product-${index}`} 
+                                                        className={`product-card ${index === 0 ? 'best-deal' : ''}`}
+                                                        onClick={() => {
+                                                            // ✅ Track view when product card is clicked
+                                                            if (p?.id) {
+                                                                supabase.rpc('increment_product_views', {
+                                                                    p_product_id: p.id
+                                                                }).catch(err => console.error('View tracking error:', err));
+                                                            }
+                                                            // Call handleProductClick to track with recommendation engine
+                                                            handleProductClick(p);
+                                                        }}
+                                                        style={{ cursor: 'pointer' }}
+                                                    >
+                                                        {index === 0 && <div className="best-deal-badge">🔥 Best Deal</div>}
+                                                            
+                                                        <div className="product-card-header">
+                                                            <h4 className="product-name">{safeString(p?.name) || 'Unnamed Product'}</h4>
+                                                            <div className="product-price">${safeNumber(p?.price)}</div>
+                                                        </div>
+                                                        
+                                                        <div className="product-card-body">
+                                                            {p?.description && (
+                                                                <div className="product-description">
+                                                                    <SafeHTML 
+                                                                        htmlContent={safeString(p?.description)} 
+                                                                        className="product-description-text"
+                                                                        allowLinks={true}      
+                                                                        allowImages={true}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                            
+                                                            {p?.image_url ? (
+                                                                <img 
+                                                                    src={safeString(p?.image_url)} 
+                                                                    alt={safeString(p?.name) || 'Product'}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation(); // ✅ Prevent card click from firing
+                                                                        setZoomedImage(safeString(p?.image_url));
+                                                                    }}
+                                                                    style={{ 
+                                                                        width: '70px', 
+                                                                        height: '70px', 
+                                                                        borderRadius: '10px', 
+                                                                        objectFit: 'cover', 
+                                                                        cursor: 'zoom-in',
+                                                                        marginTop: '10px',
+                                                                        border: '2px solid #333'
+                                                                    }} 
+                                                                />
+                                                            ) : (
+                                                                <div style={{
+                                                                    width: '70px',
+                                                                    height: '70px',
+                                                                    borderRadius: '10px',
+                                                                    backgroundColor: '#333',
                                                                     display: 'flex',
                                                                     alignItems: 'center',
-                                                                    gap: '5px'
-                                                                }}
-                                                            >
-                                                                <span>🔍</span>
-                                                                {product.name}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="empty-tips">
-                                                    <p><strong>Tips for better results:</strong></p>
-                                                    <ul>
-                                                        <li>Try broader product categories</li>
-                                                        <li>Check spelling of product names</li>
-                                                        <li>Consider related products</li>
-                                                    </ul>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <div className="products-grid">
-                                            {productsFound.map((p, index) => (
-                                                <div key={p.id || index} className={`product-card ${index === 0 ? 'best-deal' : ''}`}>
-                                                    {index === 0 && (
-                                                        <div className="best-deal-badge">🔥 Best Deal</div>
-                                                    )}
-                                                   
-                                                    <div className="product-card-header">
-                                                        <h4 className="product-name">{p.name || 'Unnamed Product'}</h4>
-                                                        <div className="product-price">
-                                                            ${p.price || '0'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="product-card-body">
-                                                        {p.description && (
-                                                            <div className="product-description">
-                                                                <SafeHTML 
-                                                                    htmlContent={p.description} 
-                                                                    className="product-description-text"
-                                                                    allowLinks={true}      
-                                                                    allowImages={true}
-                                                                />
-                                                            </div>
-                                                        )}
-                                                        
-                                                        {p.image_url ? (
-                                                            <img 
-                                                                src={p.image_url} 
-                                                                alt={p.name}
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setZoomedImage(p.image_url);
-                                                                }}
-                                                                
-                                                                style={{ 
-                                                                    width: '70px', 
-                                                                    height: '70px', 
-                                                                    borderRadius: '10px', 
-                                                                    objectFit: 'cover', 
-                                                                    cursor: 'zoom-in',
+                                                                    justifyContent: 'center',
                                                                     marginTop: '10px',
-                                                                    border: '2px solid #333'
-                                                                }} 
-                                                            />
-                                                        ) : (
-                                                            <div style={{
-                                                                width: '70px',
-                                                                height: '70px',
-                                                                borderRadius: '10px',
-                                                                backgroundColor: '#333',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                marginTop: '10px',
-                                                            }}>
-                                                                <span style={{ fontSize: '11px', color: '#888' }}>No Image</span>
-                                                            </div>
-                                                        )}
-                                                        
-                                                        <div className="product-location">
-                                                            <span className="location-icon">📍</span>
-                                                            {p.location || 'Location not specified'}
-                                                        </div>
-                                                        <div className="product-phone">
-                                                            <span className="phone-icon">📞</span>
-                                                            <strong>Seller Phone:</strong> {p.phone_number || 'N/A'}
-                                                        </div>
-                                                    </div>
-                                                    <div className="product-card-footer" style={{ 
-                                                        display: 'flex', 
-                                                        flexDirection: 'column', 
-                                                        gap: '10px', 
-                                                        marginTop: '15px',
-                                                        padding: '10px'
-                                                    }}>
-                                                        <button 
-                                                            onClick={() => saveToWishlist(p, 'product')}
-                                                            style={{
-                                                                width: '100%',
-                                                                backgroundColor: '#9c27b0',
-                                                                color: 'white',
-                                                                border: 'none',
-                                                                padding: '10px',
-                                                                borderRadius: '8px',
-                                                                fontWeight: 'bold',
-                                                                fontSize: '14px',
-                                                                cursor: 'pointer',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: '8px',
-                                                                marginBottom: '5px'
-                                                            }}
-                                                            title="Save this product to your wishlist"
-                                                        >
-                                                            💖 Save to Wishlist
-                                                        </button>
-
-                                                        <button 
-                                                            onClick={() => handleContact(p.seller_id, p.phone_number, p.name, 'buyer', p)}
-                                                            disabled={limits?.CONTACT?.remaining === 0}
-                                                            title={limits?.CONTACT?.remaining === 0 ? 
-                                                                `Contact limit reached. ${limits.CONTACT.reset_in ? `Resets in ${limits.CONTACT.reset_in} seconds` : 'Try again later'}` : 
-                                                                ''}
-                                                            style={{
-                                                                width: '100%',
-                                                                backgroundColor: '#25D366', // WhatsApp green
-                                                                color: 'white',
-                                                                border: 'none',
-                                                                padding: '12px',
-                                                                borderRadius: '8px',
-                                                                fontWeight: 'bold',
-                                                                fontSize: '14px',
-                                                                cursor: limits?.CONTACT?.remaining === 0 ? 'not-allowed' : 'pointer',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: '8px',
-                                                                marginBottom: '10px',
-                                                                boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)',
-                                                                transition: 'all 0.2s ease'
-                                                            }}
-                                                            onMouseEnter={(e) => {
-                                                                if (limits?.CONTACT?.remaining !== 0) {
-                                                                    e.currentTarget.style.backgroundColor = '#128C7E';
-                                                                    e.currentTarget.style.transform = 'translateY(-2px)';
-                                                                }
-                                                            }}
-                                                            onMouseLeave={(e) => {
-                                                                if (limits?.CONTACT?.remaining !== 0) {
-                                                                    e.currentTarget.style.backgroundColor = '#25D366';
-                                                                    e.currentTarget.style.transform = 'translateY(0)';
-                                                                }
-                                                            }}
-                                                        >
-                                                            <span style={{ fontSize: '16px' }}>💬</span>
-                                                            WhatsApp Seller
-                                                            {limits?.CONTACT && limits.CONTACT.remaining < 3 && (
-                                                                <span style={{
-                                                                    fontSize: '11px',
-                                                                    marginLeft: '5px',
-                                                                    padding: '2px 6px',
-                                                                    backgroundColor: limits.CONTACT.remaining === 0 ? '#ff4444' : '#ffaa00',
-                                                                    borderRadius: '10px',
-                                                                    fontWeight: 'bold'
                                                                 }}>
-                                                                    ({limits.CONTACT.remaining} left)
-                                                                </span>
+                                                                    <span style={{ fontSize: '11px', color: '#888' }}>No Image</span>
+                                                                </div>
                                                             )}
-                                                        </button>
-
-                                                        <button 
-                                                            onClick={() => handleShareToStatus(p)}
-                                                            style={mainButtonStyle('#128C7E')}
-                                                        >
-                                                            📢 Post to Status
-                                                        </button>
-
-                                                        <div style={{ display: 'flex', gap: '10px' }}>
-                                                            <button 
-                                                                onClick={() => window.open(`tel:${p.phone_number}`, '_self')}
-                                                                style={smallButtonStyle('#3182ce')}
-                                                            >
-                                                                📞 Call
-                                                            </button>
                                                             
-                                                            <button 
-                                                                onClick={() => {
-                                                                    const smsMessage = `Hi, I saw your ${p.name}. Is it available?`;
-                                                                    window.open(`sms:${p.phone_number}?body=${encodeURIComponent(smsMessage)}`, '_self');
-                                                                }}
-                                                                style={smallButtonStyle('#f6ad55')}
-                                                            >
-                                                                ✉️ SMS
-                                                            </button>
-                                                              
-                                                        </div>
-
-                                                        <PriceAlertButton 
-                                                            product={p}
-                                                            userId={user?.id}
-                                                            onAlertSet={(set) => {
-                                                                if (set) {
-                                                                    showToastNotification(`✅ Price alert set for ${p.name}`);
-                                                                }
-                                                            }}
-                                                        />
-
-                                                        {/* Chat Button */}
-                                                        <button
-                                                            onClick={() => {
-                                                                setSelectedChat({
-                                                                    otherUserId: p.seller_id,
-                                                                    otherUserName: p.seller?.username || 'Seller',
-                                                                    productId: p.id,
-                                                                    productName: p.name
-                                                                });
-                                                                setShowChat(true);
-                                                            }}
-                                                            style={{
-                                                                width: '100%',
-                                                                backgroundColor: '#667eea',
-                                                                color: 'white',
-                                                                border: 'none',
-                                                                padding: '10px',
-                                                                borderRadius: '8px',
-                                                                fontWeight: 'bold',
-                                                                fontSize: '14px',
-                                                                cursor: 'pointer',
-                                                                display: 'flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: '8px'
-                                                            }}
-                                                        >
-                                                            <span>💬</span>
-                                                            Message Seller
-                                                        </button>
-
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            <div style={{ 
-                                                gridColumn: '1 / -1', 
-                                                display: 'flex', 
-                                                justifyContent: 'center', 
-                                                marginTop: '20px' 
-                                            }}>
-                                                {hasMore && productsFound.length >= ITEMS_PER_PAGE && (
-                                                    <button 
-                                                        className="load-more-button"
-                                                        onClick={loadMoreProducts}
-                                                        disabled={loading}
-                                                        style={{
-                                                            padding: '10px 20px',
-                                                            backgroundColor: '#667eea',
-                                                            color: 'white',
-                                                            border: 'none',
-                                                            borderRadius: '6px',
-                                                            cursor: loading ? 'not-allowed' : 'pointer'
-                                                        }}
-                                                    >
-                                                        {loading ? 'Loading...' : 'Load More Products'}
-                                                    </button>
-                                                )}
-
-                                                {!hasMore && productsFound.length > 0 && (
-                                                    <p className="end-message">You've seen all current products!</p>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        )}
-
-                                        {/* Global Loading Spinner */}
-                                        {globalLoading && (
-                                            <div style={{
-                                                position: 'fixed',
-                                                top: 0,
-                                                left: 0,
-                                                right: 0,
-                                                bottom: 0,
-                                                backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                                                zIndex: 999999,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                backdropFilter: 'blur(4px)',
-                                                animation: 'fadeIn 0.2s ease'
-                                            }}>
-                                                <div style={{
-                                                    background: 'white',
-                                                    borderRadius: '20px',
-                                                    padding: '30px 40px',
-                                                    display: 'flex',
-                                                    flexDirection: 'column',
-                                                    alignItems: 'center',
-                                                    gap: '20px',
-                                                    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-                                                    minWidth: '280px',
-                                                    textAlign: 'center'
-                                                }}>
-                                                    <div className="global-spinner" style={{
-                                                        width: '60px',
-                                                        height: '60px',
-                                                        border: '4px solid #f3f3f3',
-                                                        borderTop: '4px solid #667eea',
-                                                        borderRight: '4px solid #764ba2',
-                                                        borderRadius: '50%',
-                                                        animation: 'spin 0.8s linear infinite'
-                                                    }}></div>
-                                                    <div style={{
-                                                        fontSize: '18px',
-                                                        fontWeight: 'bold',
-                                                        color: '#333'
-                                                    }}>
-                                                        {globalLoadingMessage}
-                                                    </div>
-                                                    <div style={{
-                                                        fontSize: '13px',
-                                                        color: '#666'
-                                                    }}>
-                                                        Please wait...
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
-                                        
-                                        {/* SIMILAR PRODUCTS SUGGESTIONS */}
-                                        {showSimilarProducts && similarProducts.length > 0 && (
-                                            <div className="similar-products-section">
-                                                <div className="section-header" style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'space-between',
-                                                    marginBottom: '20px',
-                                                    padding: '15px',
-                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                                    borderRadius: '10px',
-                                                    color: 'white'
-                                                }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                                        <span style={{ fontSize: '24px' }}>💡</span>
-                                                        <div>
-                                                            <h3 style={{ margin: 0, fontSize: '18px' }}>You might also like</h3>
-                                                            <p style={{ margin: '5px 0 0 0', fontSize: '14px', opacity: 0.9 }}>
-                                                                Similar products to "{productSearch}"
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <button 
-                                                        onClick={() => setShowSimilarProducts(false)}
-                                                        style={{
-                                                            background: 'rgba(255,255,255,0.2)',
-                                                            border: 'none',
-                                                            color: 'white',
-                                                            padding: '8px 12px',
-                                                            borderRadius: '6px',
-                                                            cursor: 'pointer',
-                                                            fontSize: '14px'
-                                                        }}
-                                                    >
-                                                        Hide suggestions
-                                                    </button>
-                                                </div>
-                                                
-                                                <div className="similar-products-grid" style={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                                                    gap: '20px',
-                                                    marginTop: '10px'
-                                                }}>
-                                                    {similarProducts.map((product, index) => (
-                                                        <div key={`similar-${product.id || index}`} className="similar-product-card" style={{
-                                                            background: '#f8f9fa',
-                                                            borderRadius: '10px',
-                                                            padding: '15px',
-                                                            border: '1px solid #e0e0e0',
-                                                            transition: 'all 0.3s ease'
-                                                        }}>
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                                                                <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
-                                                                    {product.name || 'Unnamed Product'}
-                                                                </h4>
-                                                                <span style={{
-                                                                    background: '#4CAF50',
-                                                                    color: 'white',
-                                                                    padding: '3px 8px',
-                                                                    borderRadius: '4px',
-                                                                    fontSize: '12px',
-                                                                    fontWeight: 'bold'
-                                                                }}>
-                                                                    ${product.price || '0'}
-                                                                </span>
+                                                            <div className="product-location">
+                                                                <span className="location-icon">📍</span>
+                                                                {safeString(p?.location) || 'Location not specified'}
                                                             </div>
-                                                            
-                                                            <div style={{ marginBottom: '10px' }}>
-                                                                <span style={{ fontSize: '12px', color: '#666', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                                                    📍 {product.location || 'Location not specified'}
-                                                                </span>
+                                                            <div className="product-phone">
+                                                                <span className="phone-icon">📞</span>
+                                                                <strong>Seller Phone:</strong> {safeString(p?.phone_number) || 'N/A'}
                                                             </div>
-                                                            
+                                                        </div>
+                                                        
+                                                        <div className="product-card-footer" style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px', padding: '10px' }}>
                                                             <button 
-                                                                onClick={() => {
-                                                                    setProductSearch(product.name);
-                                                                    setTimeout(() => handleSearch(), 100);
-                                                                }}
+                                                                onClick={() => saveToWishlist(p, 'product')}
                                                                 style={{
                                                                     width: '100%',
-                                                                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                                    backgroundColor: '#9c27b0',
                                                                     color: 'white',
                                                                     border: 'none',
                                                                     padding: '10px',
-                                                                    borderRadius: '6px',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: '14px',
+                                                                    borderRadius: '8px',
                                                                     fontWeight: 'bold',
-                                                                    marginTop: '10px',
-                                                                    transition: 'transform 0.2s'
+                                                                    fontSize: '14px',
+                                                                    cursor: 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '8px',
+                                                                    marginBottom: '5px'
                                                                 }}
-                                                                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                                                                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
                                                             >
-                                                                🔍 View this product
+                                                                💖 Save to Wishlist
                                                             </button>
+
+                                                            <button 
+                                                                onClick={() => handleContact(
+                                                                    p?.seller_id, 
+                                                                    p?.phone_number, 
+                                                                    p?.name || 'Product', 
+                                                                    'buyer', 
+                                                                    p
+                                                                )}
+                                                                disabled={safeNumber(limits?.CONTACT?.remaining) === 0}
+                                                                style={{
+                                                                    width: '100%',
+                                                                    backgroundColor: '#25D366',
+                                                                    color: 'white',
+                                                                    border: 'none',
+                                                                    padding: '12px',
+                                                                    borderRadius: '8px',
+                                                                    fontWeight: 'bold',
+                                                                    fontSize: '14px',
+                                                                    cursor: safeNumber(limits?.CONTACT?.remaining) === 0 ? 'not-allowed' : 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '8px',
+                                                                    marginBottom: '10px',
+                                                                    boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)'
+                                                                }}
+                                                            >
+                                                                <span style={{ fontSize: '16px' }}>💬</span>
+                                                                WhatsApp Seller
+                                                                {safeNumber(limits?.CONTACT?.remaining) < 3 && safeNumber(limits?.CONTACT?.remaining) > 0 && (
+                                                                    <span style={{
+                                                                        fontSize: '11px',
+                                                                        marginLeft: '5px',
+                                                                        padding: '2px 6px',
+                                                                        backgroundColor: '#ffaa00',
+                                                                        borderRadius: '10px',
+                                                                        fontWeight: 'bold'
+                                                                    }}>
+                                                                        ({safeNumber(limits?.CONTACT?.remaining)} left)
+                                                                    </span>
+                                                                )}
+                                                                {safeNumber(limits?.CONTACT?.remaining) === 0 && (
+                                                                    <span style={{
+                                                                        fontSize: '11px',
+                                                                        marginLeft: '5px',
+                                                                        padding: '2px 6px',
+                                                                        backgroundColor: '#ff4444',
+                                                                        borderRadius: '10px',
+                                                                        fontWeight: 'bold'
+                                                                    }}>
+                                                                        (Limit reached)
+                                                                    </span>
+                                                                )}
+                                                            </button>
+
+                                                            <div style={{ display: 'flex', gap: '10px' }}>
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const phone = safeString(p?.phone_number);
+                                                                        if (phone) window.open(`tel:${phone}`, '_self');
+                                                                    }}
+                                                                    style={smallButtonStyle('#3182ce')}
+                                                                    disabled={!safeString(p?.phone_number)}
+                                                                >
+                                                                    📞 Call
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => {
+                                                                        const phone = safeString(p?.phone_number);
+                                                                        const name = safeString(p?.name) || 'product';
+                                                                        if (phone) {
+                                                                            const smsMessage = `Hi, I saw your ${name}. Is it available?`;
+                                                                            window.open(`sms:${phone}?body=${encodeURIComponent(smsMessage)}`, '_self');
+                                                                        }
+                                                                    }}
+                                                                    style={smallButtonStyle('#f6ad55')}
+                                                                    disabled={!safeString(p?.phone_number)}
+                                                                >
+                                                                    ✉️ SMS
+                                                                </button>
+                                                            </div>
                                                         </div>
-                                                    ))}
+                                                    </div>
+                                                ))}
+                                                
+                                                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
+                                                    {hasMore && safeArray(productsFound).length >= ITEMS_PER_PAGE && (
+                                                        <button 
+                                                            className="load-more-button"
+                                                            onClick={loadMoreProducts}
+                                                            disabled={loading}
+                                                            style={{
+                                                                padding: '10px 20px',
+                                                                backgroundColor: '#667eea',
+                                                                color: 'white',
+                                                                border: 'none',
+                                                                borderRadius: '6px',
+                                                                cursor: loading ? 'not-allowed' : 'pointer'
+                                                            }}
+                                                        >
+                                                            {loading ? 'Loading...' : 'Load More Products'}
+                                                        </button>
+                                                    )}
+                                                    {!hasMore && safeArray(productsFound).length > 0 && (
+                                                        <p className="end-message">You've seen all current products!</p>
+                                                    )}
                                                 </div>
                                             </div>
-                                        )}
-
+                                        </div>
+                                    )}
+                                    
+                                    {/* ✅ 2b: Show SIMILAR products when search HAS results */}
+                                    {productsFound.length > 0 && user && (
+                                        <div style={{ marginTop: '30px' }}>
+                                            <RecommendationsSection 
+                                                userId={user.id}
+                                                currentProductId={null}
+                                                onProductClick={handleProductClick}
+                                                isSimilar={true}
+                                                searchTerm={productSearch}
+                                            />
+                                        </div>
+                                    )}
+                                    
+                                    {/* ✅ 2c: Show ALTERNATIVE products when search HAS NO results */}
+                                    {productsFound.length === 0 && productSearch.trim() !== '' && user && (
+                                        <div className="recommendations-container">
+                                            <div className="no-results-message" style={{ 
+                                                textAlign: 'center', 
+                                                padding: '30px',
+                                                marginBottom: '15px'
+                                            }}>
+                                                <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔍</div>
+                                                <h4>No products found for "{productSearch}"</h4>
+                                                <p style={{ color: '#666', marginBottom: '15px' }}>
+                                                    Try adjusting your search or check out these alternatives:
+                                                </p>
+                                            </div>
+                                            
+                                            <RecommendationsSection 
+                                                userId={user.id}
+                                                currentProductId={null}
+                                                onProductClick={handleProductClick}
+                                                isAlternative={true}
+                                                searchTerm={productSearch}
+                                            />
+                                            
+                                            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+                                                <button
+                                                    onClick={() => setShowDailyDeals(true)}
+                                                    style={{
+                                                        padding: '12px 24px',
+                                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '12px',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 'bold',
+                                                        fontSize: '14px',
+                                                        boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                                                        transition: 'all 0.3s ease'
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                                                >
+                                                    🔥 View Daily Deals
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {/* ✅ 2d: No search performed yet - Show helpful message */}
+                                    {productsFound.length === 0 && productSearch.trim() === '' && user && (
+                                        <div style={{ 
+                                            textAlign: 'center', 
+                                            padding: '40px',
+                                            color: '#666'
+                                        }}>
+                                            <p>Search for products to see results</p>
+                                            <p style={{ fontSize: '13px', marginTop: '5px' }}>
+                                                🔥 Try searching for popular items like "iPhone", "Headphones", or "Laptop"
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            
+                            {/* Global Loading Spinner */}
+                            {globalLoading && (
+                                <div style={{
+                                    position: 'fixed',
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    zIndex: 999999,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backdropFilter: 'blur(4px)',
+                                    animation: 'fadeIn 0.2s ease'
+                                }}>
+                                    <div style={{
+                                        background: 'white',
+                                        borderRadius: '20px',
+                                        padding: '30px 40px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        gap: '20px',
+                                        boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                                        minWidth: '280px',
+                                        textAlign: 'center'
+                                    }}>
+                                        <div className="global-spinner" style={{
+                                            width: '60px',
+                                            height: '60px',
+                                            border: '4px solid #f3f3f3',
+                                            borderTop: '4px solid #667eea',
+                                            borderRight: '4px solid #764ba2',
+                                            borderRadius: '50%',
+                                            animation: 'spin 0.8s linear infinite'
+                                        }} />
+                                        <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#333' }}>
+                                            {globalLoadingMessage}
+                                        </div>
+                                        <div style={{ fontSize: '13px', color: '#666' }}>
+                                            Please wait...
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* SIMILAR PRODUCTS SUGGESTIONS (from findSimilarProducts) */}
+                            {showSimilarProducts && similarProducts.length > 0 && (
+                                <div className="similar-products-section">
+                                    <div className="section-header" style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        marginBottom: '20px',
+                                        padding: '15px',
+                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                        borderRadius: '10px',
+                                        color: 'white'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <span style={{ fontSize: '24px' }}>💡</span>
+                                            <div>
+                                                <h3 style={{ margin: 0, fontSize: '18px' }}>You might also like</h3>
+                                                <p style={{ margin: '5px 0 0 0', fontSize: '14px', opacity: 0.9 }}>
+                                                    Similar products to "{productSearch}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => setShowSimilarProducts(false)}
+                                            style={{
+                                                background: 'rgba(255,255,255,0.2)',
+                                                border: 'none',
+                                                color: 'white',
+                                                padding: '8px 12px',
+                                                borderRadius: '6px',
+                                                cursor: 'pointer',
+                                                fontSize: '14px'
+                                            }}
+                                        >
+                                            Hide suggestions
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="similar-products-grid" style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                                        gap: '20px',
+                                        marginTop: '10px'
+                                    }}>
+                                        {similarProducts.map((product, index) => (
+                                            <div key={`similar-${product.id || index}`} className="similar-product-card" style={{
+                                                background: '#f8f9fa',
+                                                borderRadius: '10px',
+                                                padding: '15px',
+                                                border: '1px solid #e0e0e0',
+                                                transition: 'all 0.3s ease'
+                                            }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                                                    <h4 style={{ margin: 0, fontSize: '16px', color: '#333' }}>
+                                                        {product.name || 'Unnamed Product'}
+                                                    </h4>
+                                                    <span style={{
+                                                        background: '#4CAF50',
+                                                        color: 'white',
+                                                        padding: '3px 8px',
+                                                        borderRadius: '4px',
+                                                        fontSize: '12px',
+                                                        fontWeight: 'bold'
+                                                    }}>
+                                                        ${product.price || '0'}
+                                                    </span>
+                                                </div>
+                                                
+                                                <div style={{ marginBottom: '10px' }}>
+                                                    <span style={{ fontSize: '12px', color: '#666', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                        📍 {product.location || 'Location not specified'}
+                                                    </span>
+                                                </div>
+                                                
+                                                <button 
+                                                    onClick={() => {
+                                                        setProductSearch(product.name);
+                                                        setTimeout(() => handleSearch(), 100);
+                                                    }}
+                                                    style={{
+                                                        width: '100%',
+                                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        padding: '10px',
+                                                        borderRadius: '6px',
+                                                        cursor: 'pointer',
+                                                        fontSize: '14px',
+                                                        fontWeight: 'bold',
+                                                        marginTop: '10px',
+                                                        transition: 'transform 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                                                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                                                >
+                                                    🔍 View this product
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </div>
-                        
                     )}
-
-                    {/* Recommendations Section - Show when there are results */}
-                    {(productsFound.length > 0 || prospects.length > 0) && user && (
-                        <RecommendationsSection 
-                            userId={user.id}
-                            currentProductId={lastViewedProduct?.id}
-                            onProductClick={handleProductClick}
-                        />
-                    )}
-
                 </main>
 
                 
             <footer className="app-footer">
-            <div className="footer-content">
-                {/* CORRECT: Use Link from react-router-dom properly */}
-                <Link to="/terms" className="footer-link">
-                Terms of Service
-                </Link>
-                <Link to="/privacy" className="footer-link">  {/* ADD THIS */}
-                Privacy Policy
-                </Link>
-                <Link to="/help" className="footer-link">
-                Need Help?
-                </Link>
-                <span className="footer-text">© 2025 Straun Marketing</span>
-            </div>
+                <div className="footer-content">
+                    {/* CORRECT: Use Link from react-router-dom properly */}
+                    <Link to="/terms" className="footer-link">
+                    Terms of Service
+                    </Link>
+                    <Link to="/privacy" className="footer-link">  {/* ADD THIS */}
+                    Privacy Policy
+                    </Link>
+                    <Link to="/help" className="footer-link">
+                    Need Help?
+                    </Link>
+                    <span className="footer-text">© 2025 Straun Marketing</span>
+                </div>
             </footer>
 
             {zoomedImage && (

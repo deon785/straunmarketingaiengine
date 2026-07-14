@@ -1,358 +1,709 @@
+// RecommendationEngine.jsx - OPTIMIZED FOR SPEED
+
 import { supabase } from './lib/supabase';
+
+const fetchWithRetry = async (fetchFn, maxRetries = 2) => {
+    let lastError;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const result = await fetchFn();
+            if (result?.error?.status === 400) {
+                console.warn(`[Fetch] Query error (400):`, result.error.message);
+                return result;
+            }
+            return result;
+        } catch (err) {
+            lastError = err;
+            if (err?.status === 400 || err?.message?.includes('400')) {
+                console.warn(`[Fetch] 400 error, not retrying:`, err.message);
+                return { error: err, data: null };
+            }
+            console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+        }
+    }
+    throw lastError;
+};
 
 class RecommendationEngine {
     constructor(userId) {
         this.userId = userId;
-        this.cacheExpiry = 3600000; // 1 hour cache
+        this.fetchedRef = false;
+        this._cachedRecommendations = null;
+        
+        // ✅ LAYER 1: In-memory cache (fastest) - REDUCED TTL for fresher data
+        this._memoryCache = {};
+        this._memoryCacheTTL = 2 * 60 * 1000; // 2 minutes (was 5)
+        
+        // ✅ LAYER 2: LocalStorage cache (fast) - REDUCED SIZE
+        this._cachePrefix = 'rec_cache';
+        this._maxCacheSize = 2 * 1024 * 1024; // 2MB (was 5MB)
+        this._maxAgeDays = 7; // 7 days (was 30)
+        
+        // ✅ SKIP auto-cleanup on init to speed up loading
+        // this._autoCleanup(); // ← REMOVED - runs too slow
     }
 
-    // Track user behavior for better recommendations
-    async trackBehavior(productId, behaviorType, searchTerm = null) {
+    // ============================================
+    // AUTO-CLEANUP: Lazy cleanup (only when needed)
+    // ============================================
+    
+    _autoCleanup() {
         try {
-            await supabase.rpc('track_user_behavior', {
-                p_user_id: this.userId,
-                p_product_id: productId,
-                p_behavior_type: behaviorType,
-                p_search_term: searchTerm
-            });
+            // ✅ Only run if cache is large
+            const allKeys = Object.keys(localStorage);
+            const cacheKeys = allKeys.filter(key => 
+                key.startsWith(`${this._cachePrefix}_${this.userId}_`)
+            );
+            
+            if (cacheKeys.length === 0 || cacheKeys.length < 5) return;
+            
+            // ✅ Quick check: only clean if > 5 items
+            if (cacheKeys.length <= 5) return;
+            
+            console.log('🧹 Running lazy cleanup...');
+            
+            let totalSize = 0;
+            let cacheItems = [];
+            
+            for (const key of cacheKeys) {
+                try {
+                    const value = localStorage.getItem(key);
+                    if (value) {
+                        const size = new Blob([value]).size;
+                        totalSize += size;
+                        const data = JSON.parse(value);
+                        cacheItems.push({
+                            key: key,
+                            size: size,
+                            timestamp: data.timestamp || 0,
+                            productsCount: data.products?.length || 0
+                        });
+                    }
+                } catch (e) {
+                    // Skip invalid items
+                }
+            }
+            
+            // ✅ Only cleanup if exceeds limits
+            if (totalSize <= this._maxCacheSize && cacheItems.length <= 5) return;
+            
+            // Sort oldest first
+            cacheItems.sort((a, b) => a.timestamp - b.timestamp);
+            
+            // Remove oldest items until under limits
+            let removedCount = 0;
+            for (const item of cacheItems) {
+                if (cacheItems.length - removedCount <= 3 && 
+                    totalSize - item.size <= this._maxCacheSize * 0.5) {
+                    break;
+                }
+                localStorage.removeItem(item.key);
+                removedCount++;
+                totalSize -= item.size;
+            }
+            
+            if (removedCount > 0) {
+                console.log(`✅ Cleaned ${removedCount} old cache items`);
+            }
+            
         } catch (error) {
-            console.error('Error tracking behavior:', error);
+            // Silent fail - don't slow down the app
         }
     }
 
-    // Get personalized recommendations
-    async getPersonalizedRecommendations(limit = 10) {
-        // Check cache first
-        const cached = await this.getCachedRecommendations('personalized');
-        if (cached) return cached;
+    // ============================================
+    // LAYER 1: IN-MEMORY CACHE (FASTEST)
+    // ============================================
+    
+    getFromMemoryCache(type, limit) {
+        const key = `${type}_${limit}`;
+        const cached = this._memoryCache[key];
+        
+        if (cached) {
+            if (Date.now() - cached.timestamp < this._memoryCacheTTL) {
+                return cached.data;
+            }
+            delete this._memoryCache[key];
+        }
+        return null;
+    }
+
+    saveToMemoryCache(type, limit, data) {
+        const key = `${type}_${limit}`;
+        this._memoryCache[key] = {
+            data: data,
+            timestamp: Date.now()
+        };
+    }
+
+    clearMemoryCache() {
+        this._memoryCache = {};
+    }
+
+    // ============================================
+    // LAYER 2: LOCALSTORAGE CACHE (FAST)
+    // ============================================
+    
+    getFromLocalCache(type = 'personalized') {
+        try {
+            const cacheKey = `${this._cachePrefix}_${this.userId}_${type}`;
+            const cached = localStorage.getItem(cacheKey);
+            
+            if (!cached) return null;
+            
+            const data = JSON.parse(cached);
+            
+            if (data.expiresAt && Date.now() > data.expiresAt) {
+                localStorage.removeItem(cacheKey);
+                return null;
+            }
+            
+            return data.products;
+            
+        } catch (error) {
+            return null;
+        }
+    }
+
+    saveToLocalCache(products, type = 'personalized') {
+        try {
+            // ✅ Compress data - only essential fields
+            const compressed = products.slice(0, 20).map(p => ({
+                id: p.id,
+                name: p.name,
+                price: p.price,
+                image: p.image_url,
+                location: p.location,
+                views: p.views,
+                seller_id: p.seller_id
+            }));
+            
+            const cacheData = {
+                products: compressed,
+                timestamp: Date.now(),
+                expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000), // 3 days (was 7)
+                version: '1.0'
+            };
+            
+            const cacheKey = `${this._cachePrefix}_${this.userId}_${type}`;
+            localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            
+        } catch (error) {
+            // Silent fail
+        }
+    }
+
+    // ============================================
+    // CORE METHODS WITH OPTIMIZED CACHING
+    // ============================================
+
+    // ✅ OPTIMIZED: Get personalized recommendations
+    async getPersonalizedRecommendations(limit = 12) {
+        // Check memory cache first
+        const memoryData = this.getFromMemoryCache('personalized', limit);
+        if (memoryData) return memoryData;
+
+        // Check local cache
+        const localData = this.getFromLocalCache('personalized');
+        if (localData && localData.length > 0) {
+            this.saveToMemoryCache('personalized', limit, localData);
+            return localData;
+        }
+
+        if (!this.userId) return [];
 
         try {
-            // Get user's interests and behavior
-            const [userProfile, userSearches, userSaves, userViews] = await Promise.all([
-                this.getUserProfile(),
-                this.getUserSearches(),
-                this.getUserSavedItems(),
-                this.getUserViewedProducts()
+            const [interests, behaviorKeywords] = await Promise.all([
+                this.getUserInterests(),
+                this.getUserBehaviorKeywords()
             ]);
-
-            // Extract keywords from user behavior
-            const keywords = this.extractKeywords(userProfile, userSearches, userSaves);
             
-            // Build recommendation query based on keywords
+            const allKeywords = [...interests, ...behaviorKeywords];
+            const uniqueKeywords = [...new Set(allKeywords.filter(k => k && k.trim().length > 0))];
+            
             let query = supabase
                 .from('products')
-                .select(`
-                    *,
-                    profiles!seller_id (
-                        username,
-                        location,
-                        rating
-                    )
-                `)
+                .select('*')
+                .eq('status', 'active')
                 .neq('seller_id', this.userId)
                 .limit(limit);
 
-            // Add keyword filters if available
-            if (keywords.length > 0) {
-                const orConditions = keywords
-                    .slice(0, 5)
-                    .map(k => `name.ilike.%${k}%`)
+            if (uniqueKeywords.length > 0) {
+                const orConditions = uniqueKeywords
+                    .slice(0, 10)
+                    .map(k => `name.ilike.%${k.trim()}%`)
                     .join(',');
                 query = query.or(orConditions);
             }
 
-            // Add collaborative filtering (products liked by similar users)
-            const similarUsers = await this.getSimilarUsers();
-            if (similarUsers.length > 0) {
-                const { data: collabProducts } = await supabase
-                    .from('saved_items')
-                    .select('product_id, products(*)')
-                    .in('user_id', similarUsers)
-                    .not('product_id', 'in', userSaves.map(s => s.product_id).filter(Boolean))
-                    .limit(limit);
+            const result = await fetchWithRetry(() => query);
 
-                if (collabProducts && collabProducts.length > 0) {
-                    const recommendations = collabProducts.map(c => c.products);
-                    await this.cacheRecommendations('personalized', recommendations);
-                    return recommendations;
+            if (result?.error) {
+                return this.getTrendingProducts(limit);
+            }
+
+            let products = [];
+            if (result?.data && result.data.length > 0) {
+                const sellerIds = [...new Set(result.data.map(p => p.seller_id).filter(Boolean))];
+                let sellersMap = {};
+                
+                if (sellerIds.length > 0) {
+                    const { data: sellers } = await supabase
+                        .from('profiles')
+                        .select('user_id, username, location')
+                        .in('user_id', sellerIds);
+                    
+                    if (sellers) {
+                        sellersMap = sellers.reduce((map, seller) => {
+                            map[seller.user_id] = seller;
+                            return map;
+                        }, {});
+                    }
+                }
+
+                products = result.data.map(product => ({
+                    ...product,
+                    profiles: sellersMap[product.seller_id] || null
+                }));
+
+                this.saveToLocalCache(products, 'personalized');
+                this.saveToMemoryCache('personalized', limit, products);
+                return products;
+            }
+
+            const trending = await this.getTrendingProducts(limit);
+            if (trending && trending.length > 0) {
+                this.saveToMemoryCache('personalized', limit, trending);
+            }
+            return trending;
+
+        } catch (error) {
+            const trending = await this.getTrendingProducts(limit);
+            return trending || [];
+        }
+    }
+
+    // ✅ OPTIMIZED: Get trending products
+    async getTrendingProducts(limit = 10) {
+        const memoryData = this.getFromMemoryCache('trending', limit);
+        if (memoryData) return memoryData;
+
+        const localData = this.getFromLocalCache('trending');
+        if (localData && localData.length > 0) {
+            this.saveToMemoryCache('trending', limit, localData);
+            return localData;
+        }
+
+        if (!this.userId) return [];
+
+        try {
+            const { data: products, error } = await fetchWithRetry(() => supabase
+                .from('products')
+                .select('*')
+                .eq('status', 'active')
+                .order('views', { ascending: false })
+                .limit(limit)
+            );
+
+            if (error || !products || products.length === 0) {
+                return [];
+            }
+
+            const sellerIds = [...new Set(products.map(p => p.seller_id).filter(Boolean))];
+            let sellersMap = {};
+            
+            if (sellerIds.length > 0) {
+                const { data: sellers } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location')
+                    .in('user_id', sellerIds);
+                
+                if (sellers) {
+                    sellersMap = sellers.reduce((map, seller) => {
+                        map[seller.user_id] = seller;
+                        return map;
+                    }, {});
                 }
             }
 
-            const { data: recommendations, error } = await query;
-            
-            if (!error && recommendations) {
-                // Sort by relevance score
-                const scored = this.scoreRecommendations(recommendations, userSaves, userViews);
-                const sorted = scored.sort((a, b) => b.score - a.score).slice(0, limit);
-                
-                await this.cacheRecommendations('personalized', sorted);
-                return sorted;
-            }
+            const result = products.map(product => ({
+                ...product,
+                profiles: sellersMap[product.seller_id] || null
+            }));
 
-            return [];
+            this.saveToLocalCache(result, 'trending');
+            this.saveToMemoryCache('trending', limit, result);
+            return result;
 
         } catch (error) {
-            console.error('Error getting recommendations:', error);
-            return this.getFallbackRecommendations(limit);
+            return [];
         }
     }
 
-    // Get similar products based on current product
-    async getSimilarProducts(productId, limit = 6) {
+    // ✅ Get user interests - OPTIMIZED
+    async getUserInterests() {
+        if (!this.userId) return [];
+        
         try {
-            // First, try to get from similarity table
-            const { data: similar, error } = await supabase
+            const { data, error } = await fetchWithRetry(() => supabase
+                .from('profiles')
+                .select('interests')
+                .eq('user_id', this.userId)
+                .maybeSingle()
+            );
+            
+            if (error || !data?.interests) return [];
+            
+            let interests = [];
+            if (Array.isArray(data.interests)) {
+                interests = data.interests;
+            } else if (typeof data.interests === 'string') {
+                try {
+                    interests = JSON.parse(data.interests);
+                } catch (e) {
+                    interests = [data.interests];
+                }
+            }
+            
+            return interests.filter(i => i && i.trim().length > 0).slice(0, 10);
+        } catch (err) {
+            return [];
+        }
+    }
+
+    // ✅ Get user behavior keywords - OPTIMIZED
+    async getUserBehaviorKeywords() {
+        if (!this.userId) return [];
+        
+        try {
+            const { data, error } = await fetchWithRetry(() => supabase
+                .from('user_behavior')
+                .select('search_term')
+                .eq('user_id', this.userId)
+                .order('created_at', { ascending: false })
+                .limit(20)
+            );
+            
+            if (error || !data) return [];
+            
+            const keywords = new Set();
+            data.forEach(record => {
+                if (record.search_term) {
+                    record.search_term.split(' ').forEach(word => {
+                        if (word.length > 2) keywords.add(word.toLowerCase().trim());
+                    });
+                }
+            });
+            
+            return Array.from(keywords).slice(0, 10);
+        } catch (err) {
+            return [];
+        }
+    }
+
+    // ✅ Get alternative products - OPTIMIZED
+    async getAlternativeProducts(searchTerm, limit = 10) {
+        if (!this.userId || !searchTerm) {
+            return this.getPersonalizedRecommendations(limit);
+        }
+
+        try {
+            const keywords = searchTerm.split(' ').filter(w => w.length > 2).slice(0, 5);
+            
+            if (keywords.length === 0) {
+                return this.getPersonalizedRecommendations(limit);
+            }
+
+            const orConditions = keywords
+                .map(k => `name.ilike.%${k.trim()}%`)
+                .join(',');
+
+            let query = supabase
+                .from('products')
+                .select('*')
+                .eq('status', 'active')
+                .neq('seller_id', this.userId)
+                .limit(limit);
+
+            if (orConditions) {
+                query = query.or(orConditions);
+            }
+
+            const { data: products, error } = await fetchWithRetry(() => query);
+
+            if (error || !products || products.length === 0) {
+                return this.getPersonalizedRecommendations(limit);
+            }
+
+            const sellerIds = [...new Set(products.map(p => p.seller_id).filter(Boolean))];
+            let sellersMap = {};
+            
+            if (sellerIds.length > 0) {
+                const { data: sellers } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location')
+                    .in('user_id', sellerIds);
+                
+                if (sellers) {
+                    sellersMap = sellers.reduce((map, seller) => {
+                        map[seller.user_id] = seller;
+                        return map;
+                    }, {});
+                }
+            }
+
+            return products.map(product => ({
+                ...product,
+                profiles: sellersMap[product.seller_id] || null,
+                is_alternative: true
+            }));
+
+        } catch (error) {
+            return this.getPersonalizedRecommendations(limit);
+        }
+    }
+
+    // ✅ Get similar products - OPTIMIZED
+    async getSimilarProducts(productId, limit = 6) {
+        if (!this.userId || !productId) {
+            return this.getPersonalizedRecommendations(limit);
+        }
+
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(productId)) {
+            return this.getPersonalizedRecommendations(limit);
+        }
+
+        try {
+            const { data: similarProducts, error } = await fetchWithRetry(() => supabase
                 .from('product_similarity')
                 .select(`
-                    product_id_2,
-                    similarity_score,
-                    products:product_id_2 (*)
+                    product_id_2, 
+                    similarity_score, 
+                    products:product_id_2 (
+                        id,
+                        name,
+                        price,
+                        location,
+                        seller_id,
+                        image_url,
+                        profiles:seller_id (
+                            user_id,
+                            username,
+                            location
+                        )
+                    )
                 `)
                 .eq('product_id_1', productId)
                 .order('similarity_score', { ascending: false })
-                .limit(limit);
+                .limit(limit)
+            );
 
-            if (!error && similar && similar.length > 0) {
-                return similar.map(s => ({
-                    ...s.products,
-                    similarity_score: s.similarity_score
-                }));
+            if (error || !similarProducts || similarProducts.length === 0) {
+                return this.getPersonalizedRecommendations(limit);
             }
 
-            // Fallback: Find products with similar names/categories
-            const { data: currentProduct } = await supabase
-                .from('products')
-                .select('name, category')
-                .eq('id', productId)
-                .single();
-
-            if (currentProduct) {
-                const keywords = currentProduct.name.split(' ').slice(0, 3);
-                const { data: fallback } = await supabase
-                    .from('products')
-                    .select('*')
-                    .neq('id', productId)
-                    .or(keywords.map(k => `name.ilike.%${k}%`).join(','))
-                    .limit(limit);
-
-                return fallback || [];
-            }
-
-            return [];
+            return similarProducts.map(item => ({
+                ...item.products,
+                similarity_score: item.similarity_score,
+                is_similar: true
+            }));
 
         } catch (error) {
-            console.error('Error getting similar products:', error);
+            return this.getPersonalizedRecommendations(limit);
+        }
+    }
+
+    // ✅ Get random products - OPTIMIZED
+    async getRandomProducts(limit = 10) {
+        if (!this.userId) return [];
+
+        try {
+            const { data: products, error } = await supabase
+                .from('products')
+                .select('*')
+                .eq('status', 'active')
+                .neq('seller_id', this.userId)
+                .limit(limit)
+                .order('created_at', { ascending: false });
+
+            if (error || !products || products.length === 0) {
+                return [];
+            }
+
+            return products;
+        } catch (error) {
             return [];
         }
     }
 
-    // Get trending products
-    async getTrendingProducts(limit = 10) {
-        const cached = await this.getCachedRecommendations('trending');
-        if (cached) return cached;
+    // ✅ Track behavior - OPTIMIZED (no await, fire and forget)
+    async trackBehavior(productId, behaviorType, searchTerm = null) {
+        if (!this.userId) return;
 
         try {
-            const { data: trending, error } = await supabase
-                .rpc('get_trending_products', { limit_count: limit });
-
-            if (!error && trending) {
-                await this.cacheRecommendations('trending', trending);
-                return trending;
-            }
-
-            // Fallback: Get most viewed products
-            const { data: fallback } = await supabase
-                .from('products')
-                .select('*, profiles(username, location)')
-                .order('views', { ascending: false })
-                .limit(limit);
-
-            return fallback || [];
-
-        } catch (error) {
-            console.error('Error getting trending:', error);
-            return [];
-        }
-    }
-
-    // Get "frequently bought together" recommendations
-    async getFrequentlyBoughtTogether(productId, limit = 4) {
-        try {
-            const { data: combinations } = await supabase
+            // Fire and forget - don't wait for response
+            supabase
                 .from('user_behavior')
-                .select('product_id')
-                .eq('behavior_type', 'contact')
-                .in('product_id', 
-                    supabase
-                        .from('user_behavior')
-                        .select('product_id')
-                        .eq('product_id', productId)
-                )
-                .limit(limit * 2);
+                .insert({
+                    user_id: this.userId,
+                    product_id: productId || null,
+                    behavior_type: behaviorType,
+                    search_term: searchTerm || null,
+                    created_at: new Date().toISOString()
+                })
+                .then(() => {
+                    // Success - do nothing
+                })
+                .catch(() => {
+                    // Fail silently
+                });
+        } catch (error) {
+            // Ignore errors
+        }
+    }
 
-            if (combinations && combinations.length > 0) {
-                const productIds = [...new Set(combinations.map(c => c.product_id))];
-                const { data: products } = await supabase
-                    .from('products')
-                    .select('*')
-                    .in('id', productIds)
-                    .neq('id', productId)
-                    .limit(limit);
+    // ✅ Clear ALL caches
+    clearAllCaches() {
+        this.clearMemoryCache();
+        try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+                if (key.startsWith(`${this._cachePrefix}_${this.userId}_`)) {
+                    localStorage.removeItem(key);
+                }
+            });
+        } catch (error) {
+            // Ignore
+        }
+        this.fetchedRef = false;
+        this._cachedRecommendations = null;
+    }
 
-                return products || [];
+    // ✅ Get alternative prospects - OPTIMIZED
+    async getAlternativeProspects(searchTerm, limit = 10) {
+        if (!this.userId || !searchTerm) {
+            return [];
+        }
+
+        try {
+            const keywords = searchTerm.split(' ').filter(w => w.length > 2).slice(0, 5);
+            
+            if (keywords.length === 0) {
+                return [];
             }
 
-            return [];
+            const { data: allBuyers, error } = await fetchWithRetry(() => supabase
+                .from('profiles')
+                .select('user_id, username, location, interests, phone_number')
+                .not('interests', 'is', null)
+                .neq('user_id', this.userId)
+                .eq('is_active', true)
+                .limit(20)
+            );
+
+            if (error || !allBuyers || allBuyers.length === 0) {
+                return [];
+            }
+
+            const { data: sellerProfile } = await supabase
+                .from('profiles')
+                .select('location')
+                .eq('user_id', this.userId)
+                .maybeSingle();
+            
+            const sellerLocation = sellerProfile?.location || '';
+
+            const matchingBuyers = allBuyers.filter(buyer => {
+                if (!buyer.interests) return false;
+                
+                let interests = [];
+                if (Array.isArray(buyer.interests)) {
+                    interests = buyer.interests;
+                } else if (typeof buyer.interests === 'string') {
+                    try {
+                        interests = JSON.parse(buyer.interests);
+                    } catch (e) {
+                        interests = [buyer.interests];
+                    }
+                }
+                
+                return interests.some(interest => {
+                    if (!interest) return false;
+                    const interestLower = interest.toLowerCase();
+                    return keywords.some(keyword => 
+                        interestLower.includes(keyword.toLowerCase())
+                    );
+                });
+            });
+
+            const scoredBuyers = matchingBuyers.map(buyer => {
+                let score = 0;
+                let interests = [];
+                if (Array.isArray(buyer.interests)) {
+                    interests = buyer.interests;
+                } else if (typeof buyer.interests === 'string') {
+                    try {
+                        interests = JSON.parse(buyer.interests);
+                    } catch (e) {
+                        interests = [buyer.interests];
+                    }
+                }
+                
+                const interestText = interests.join(' ').toLowerCase();
+                keywords.forEach(keyword => {
+                    if (interestText.includes(keyword.toLowerCase())) {
+                        score += 1;
+                    }
+                });
+                
+                if (buyer.location && sellerLocation && 
+                    buyer.location.toLowerCase() === sellerLocation.toLowerCase()) {
+                    score += 3;
+                }
+                
+                return { ...buyer, score, is_alternative: true };
+            });
+
+            const sorted = scoredBuyers.sort((a, b) => b.score - a.score);
+            const limited = sorted.slice(0, limit);
+
+            return limited.map(buyer => {
+                let interests = [];
+                if (Array.isArray(buyer.interests)) {
+                    interests = buyer.interests;
+                } else if (typeof buyer.interests === 'string') {
+                    try {
+                        interests = JSON.parse(buyer.interests);
+                    } catch (e) {
+                        interests = [buyer.interests];
+                    }
+                }
+                
+                return {
+                    id: buyer.user_id,
+                    email: buyer.username || 'User',
+                    location: buyer.location || 'Location not specified',
+                    interest: interests.slice(0, 3).join(', ') || searchTerm,
+                    interests: interests,
+                    phone_number: buyer.phone_number || '',
+                    isSameLocation: buyer.location && sellerLocation && 
+                        buyer.location.toLowerCase() === sellerLocation.toLowerCase(),
+                    score: buyer.score,
+                    is_alternative: true
+                };
+            });
 
         } catch (error) {
-            console.error('Error getting bought together:', error);
             return [];
         }
     }
 
-    // Helper methods
-    async getUserProfile() {
-        const { data } = await supabase
-            .from('profiles')
-            .select('interests, location')
-            .eq('user_id', this.userId)
-            .single();
-        return data;
-    }
-
-    async getUserSearches() {
-        const { data } = await supabase
-            .from('searches')
-            .select('product_name')
-            .eq('buyer_id', this.userId)
-            .order('created_at', { ascending: false })
-            .limit(20);
-        return data || [];
-    }
-
-    async getUserSavedItems() {
-        const { data } = await supabase
-            .from('saved_items')
-            .select('product_id, product_name')
-            .eq('user_id', this.userId)
-            .eq('item_type', 'product');
-        return data || [];
-    }
-
-    async getUserViewedProducts() {
-        const { data } = await supabase
-            .from('user_behavior')
-            .select('product_id')
-            .eq('user_id', this.userId)
-            .eq('behavior_type', 'view')
-            .order('created_at', { ascending: false })
-            .limit(30);
-        return data || [];
-    }
-
-    async getSimilarUsers() {
-        const userSaves = await this.getUserSavedItems();
-        const savedProductIds = userSaves.map(s => s.product_id);
-        
-        if (savedProductIds.length === 0) return [];
-
-        const { data } = await supabase
-            .from('saved_items')
-            .select('user_id')
-            .in('product_id', savedProductIds)
-            .neq('user_id', this.userId)
-            .limit(10);
-
-        return [...new Set(data?.map(d => d.user_id) || [])];
-    }
-
-    extractKeywords(profile, searches, saves) {
-        const keywords = new Set();
-        
-        // Add interests from profile
-        if (profile?.interests) {
-            const interests = Array.isArray(profile.interests) 
-                ? profile.interests 
-                : JSON.parse(profile.interests || '[]');
-            interests.forEach(i => keywords.add(i.toLowerCase()));
-        }
-        
-        // Add search terms
-        searches.forEach(s => {
-            if (s.product_name) {
-                s.product_name.split(' ').forEach(word => {
-                    if (word.length > 2) keywords.add(word.toLowerCase());
-                });
-            }
-        });
-        
-        // Add saved product names
-        saves.forEach(s => {
-            if (s.product_name) {
-                s.product_name.split(' ').forEach(word => {
-                    if (word.length > 2) keywords.add(word.toLowerCase());
-                });
-            }
-        });
-        
-        return Array.from(keywords);
-    }
-
-    scoreRecommendations(products, savedItems, viewedItems) {
-        const savedIds = new Set(savedItems.map(s => s.product_id));
-        const viewedIds = new Set(viewedItems.map(v => v.product_id));
-        
-        return products.map(product => {
-            let score = 0;
-            
-            // Higher score for products similar to saved ones
-            if (savedIds.has(product.id)) score += 10;
-            
-            // Higher score for viewed but not saved
-            if (viewedIds.has(product.id) && !savedIds.has(product.id)) score += 3;
-            
-            // Boost for products with good ratings
-            if (product.profiles?.rating > 4) score += 2;
-            
-            // Boost for nearby products
-            if (product.location === profileData?.location) score += 2;
-            
-            return { ...product, score };
-        });
-    }
-
-    async getCachedRecommendations(type) {
-        const { data } = await supabase
-            .from('recommendations_cache')
-            .select('recommended_products')
-            .eq('user_id', this.userId)
-            .eq('recommendation_type', type)
-            .gt('expires_at', new Date().toISOString())
-            .maybeSingle();
-
-        return data?.recommended_products || null;
-    }
-
-    async cacheRecommendations(type, recommendations) {
-        await supabase
-            .from('recommendations_cache')
-            .upsert({
-                user_id: this.userId,
-                recommendation_type: type,
-                recommended_products: recommendations,
-                expires_at: new Date(Date.now() + this.cacheExpiry).toISOString()
-            });
-    }
-
-    async getFallbackRecommendations(limit) {
-        const { data } = await supabase
-            .from('products')
-            .select('*, profiles(username, location, rating)')
-            .neq('seller_id', this.userId)
-            .order('created_at', { ascending: false })
-            .limit(limit);
-        
-        return data || [];
+    resetCache() {
+        this.fetchedRef = false;
+        this._cachedRecommendations = null;
+        this.clearAllCaches();
     }
 }
 

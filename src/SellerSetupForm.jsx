@@ -1,64 +1,154 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
 import { supabase } from './lib/supabase';
 import DOMPurify from 'dompurify';
 import ReactGA from "react-ga4";
 import ImageUploader from './ImageUploader';
 
+// ✅ fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
+
 const SellerSetupForm = ({ onProfileComplete, existingData }) => {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [fetchingProducts, setFetchingProducts] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
-  const [productDetails, setProductDetails] = useState({
-    name: '',
-    location: '',
-    price: '',
-    description: '',
-    phone_number: '',
-  });
-
   const [items, setItems] = useState([]);
   
-  const handleSaveProduct = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
+  const isFirstRender = useRef(true);
+  const userFetchedRef = useRef(false);
 
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const { error } = await supabase
-      .from('products')
-      .insert([
-        { 
-          name: productDetails.name,
-          price: productDetails.price,
-          image_url: imageUrl,
-          seller_id: user.id 
-        }
-      ]);
-
-      if (!error) {
-      alert("Product listed successfully!");
-      // Reset form
-      setProductDetails({
-        name: '',
-        location: '',
-        price: '',
-        description: '',
-        phone_number: '',
-      });
-      setImageUrl('');
-    } else {
-      alert("Error saving product: " + error.message);
+  // ============ REACT HOOK FORM ============
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    watch,
+    setValue,
+    getValues
+  } = useForm({
+    mode: 'onSubmit', // Only validate on submit
+    defaultValues: {
+      name: '',
+      location: existingData?.location || '',
+      price: '',
+      description: '',
+      phone_number: existingData?.phone_number || '',
     }
-    setSubmitting(false);
-  };
-  
-  const handleDeletePhoto = async () => {
+  });
+
+  // Watch values for character counters (no re-renders of whole form)
+  const nameValue = watch('name', '');
+  const priceValue = watch('price', '');
+  const locationValue = watch('location', '');
+  const phoneValue = watch('phone_number', '');
+  const descriptionValue = watch('description', '');
+
+  // ============ VALIDATION FUNCTIONS ============
+  const isValidImageUrl = useCallback((url) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // ============ FETCH USER ============
+  useEffect(() => {
+    const getUser = async () => {
+      if (userFetchedRef.current) return;
+      userFetchedRef.current = true;
+      
+      setUserLoading(true);
+      try {
+        const storedUser = localStorage.getItem('user');
+        
+        if (storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+          
+          if (existingData && isFirstRender.current) {
+            const updates = {
+              location: existingData.location || '',
+              phone_number: existingData.phone_number || '',
+            };
+            reset(updates);
+            isFirstRender.current = false;
+          }
+        } else {
+          const { data: { user: supabaseUser }, error: userError } = await fetchWithRetry(() =>
+            supabase.auth.getUser()
+          );
+          
+          if (userError) {
+            console.error('Error getting user from Supabase:', userError);
+            setError('Please sign in to continue.');
+            return;
+          }
+          
+          if (supabaseUser) {
+            localStorage.setItem('user', JSON.stringify(supabaseUser));
+            setUser(supabaseUser);
+          }
+        }
+      } catch (error) {
+        console.error('Error in getUser:', error);
+        setError('Failed to load user session.');
+      } finally {
+        setUserLoading(false);
+      }
+    };
+    
+    getUser();
+  }, [existingData, reset]);
+
+  // ============ FETCH PRODUCTS ============
+  const fetchProducts = useCallback(async () => {
+    setFetchingProducts(true);
+    setError(null);
+    try {
+      const { data, error } = await fetchWithRetry(() =>
+        supabase
+          .from('products')
+          .select('*')
+      );
+
+      if (error) throw error;
+      setItems(data || []);
+    } catch (err) {
+      setError("Failed to load products. Please check your connection.");
+      console.error("Technical details:", err.message);
+    } finally {
+      setFetchingProducts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  // ============ IMAGE HANDLERS ============
+  const handleDeletePhoto = useCallback(async () => {
     if (!imageUrl) return;
     
-    // If it's a Supabase storage URL, delete from storage
     if (imageUrl.includes('supabase.co/storage')) {
       const fileName = imageUrl.split('/').pop();
 
@@ -73,201 +163,27 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       }
     }
     
-    // Clear the image URL regardless
     setImageUrl('');
     setError(null);
-    
-  };
+  }, [imageUrl]);
 
-  const fetchProducts = async () => {
-    setFetchingProducts(true);
-    setError(null);
-    try {
-      const { data, error: supabaseError } = await supabase
-        .from('products')
-        .select('*');
-
-      if (supabaseError) throw supabaseError;
-      setItems(data || []);
-    } catch (err) {
-      setError("Failed to load products. Please check your connection.");
-      console.error("Technical details:", err.message);
-    } finally {
-      setFetchingProducts(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const getInputStyle = () => ({
-    width: '100%',
-    padding: '16px 20px',
-    border: '2px solid #4a5568',
-    borderRadius: '12px',
-    fontSize: '18px',
-    backgroundColor: '#000000',
-    color: '#ffffff',
-    boxSizing: 'border-box',
-    marginTop: '8px',
-    marginBottom: '5px',
-    height: '56px'
-  });
-
-  const getTextareaStyle = () => ({
-    ...getInputStyle(),
-    height: 'auto',
-    minHeight: '150px',
-    resize: 'vertical'
-  });
-
-  useEffect(() => {
-    const getUser = async () => {
-      setUserLoading(true);
-      try {
-        const storedUser = localStorage.getItem('user');
-        
-        if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          setUser(parsedUser);
-        } else {
-          const { data: { user: supabaseUser }, error: userError } = await supabase.auth.getUser();
-          
-          if (userError) {
-            console.error('Error getting user from Supabase:', userError);
-            setError('Please sign in to continue.');
-            return;
-          }
-          
-          if (supabaseUser) {
-            localStorage.setItem('user', JSON.stringify(supabaseUser));
-            setUser(supabaseUser);
-          }
-        }
-    
-        if (existingData) {
-          setProductDetails(prev => ({
-            ...prev,
-            location: existingData.location || '',
-            phone_number: existingData.phone_number || '',
-          }));
-        }
-      } catch (error) {
-        console.error('Error in getUser:', error);
-        setError('Failed to load user session.');
-      } finally {
-       setUserLoading(false);
-      }
-    };
-    
-    getUser();
-  }, [existingData]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    
-    let sanitizedValue = value;
-    
-    switch(name) {
-      case 'description':
-        sanitizedValue = DOMPurify.sanitize(value, {
-          ALLOWED_TAGS: [],
-          ALLOWED_ATTR: [],
-          KEEP_CONTENT: true
-        });
-        break;
-        
-      case 'location':
-      case 'name':
-        sanitizedValue = value.replace(/[<>"'`&;\\]/g, '');
-        break;
-        
-      case 'price':
-        sanitizedValue = value.replace(/[^\d.]/g, '');
-        const parts = sanitizedValue.split('.');
-        if (parts.length > 2) {
-          sanitizedValue = parts[0] + '.' + parts.slice(1).join('');
-        }
-        break;
-        
-      case 'phone_number':
-        sanitizedValue = value.replace(/[^\d+ ]/g, '');
-        break;
-        
-      default:
-        sanitizedValue = value;
+  // ============ FORM SUBMISSION ============
+  const onSubmit = useCallback(async (data) => {
+    // Check offline status
+    if (!navigator.onLine) {
+      setError('You are offline. Please connect to the internet to list your product.');
+      return;
     }
     
-    setProductDetails(prev => ({ 
-      ...prev, 
-      [name]: sanitizedValue 
-    }));
-  };
-
-  const validateForm = () => {
-    if (!productDetails.name.trim()) return 'Product name is required';
-    if (!productDetails.price.trim()) return 'Price is required';
-    if (parseFloat(productDetails.price) <= 0) return 'Price must be greater than 0';
-    if (!productDetails.location.trim()) return 'Location is required';
-    if (!productDetails.phone_number.trim()) return 'Phone number is required';
-    if (!productDetails.description.trim()) return 'Product description is required';
-    
-    // Enhanced image validation
-    if (!imageUrl.trim()) return 'Product image is required. Please upload an image.';
-    
-    // Check if imageUrl is a valid URL
-    if (imageUrl.trim() && !isValidImageUrl(imageUrl)) {
-      return 'Invalid image URL. Please upload a valid image.';
-    }
-    
-    return null;
-  };
-
-  // Add this helper function
-  const isValidImageUrl = (url) => {
-    try {
-      new URL(url);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    const validationError = validateForm();
-    if (validationError) {
-      setError(validationError);
-      
-      // Scroll to image section if image is missing
-      if (validationError.includes('image')) {
-        setTimeout(() => {
-          document.querySelector('.image-upload-section')?.scrollIntoView({ 
-            behavior: 'smooth' 
-          });
-        }, 100);
-      }
-      
+    // Check image
+    if (!imageUrl) {
+      setError('Product image is required. Please upload an image.');
+      document.querySelector('.image-upload-section')?.scrollIntoView({ 
+        behavior: 'smooth' 
+      });
       return;
     }
 
-    // Additional validation: Check if image is accessible
-    if (imageUrl) {
-      try {
-        const img = new Image();
-        img.onerror = () => {
-          setError('The uploaded image cannot be accessed. Please upload a valid image.');
-          return;
-        };
-        img.src = imageUrl;
-      } catch (err) {
-        setError('Invalid image URL. Please upload a valid image.');
-        return;
-      }
-    }
-    
     if (!user) {
       console.error('User not found in state');
       setError('Please sign in to continue.');
@@ -289,34 +205,37 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       console.log("📤 SellerSetupForm submitting...");
 
       const finalSanitizedData = {
-        name: productDetails.name.trim().substring(0, 200),
-        location: productDetails.location.trim().substring(0, 100),
-        price: productDetails.price ? parseFloat(productDetails.price) : null,
-        description: DOMPurify.sanitize(productDetails.description.trim(), {
+        name: data.name.trim().substring(0, 200),
+        location: data.location.trim().substring(0, 100),
+        price: data.price ? parseFloat(data.price) : null,
+        description: DOMPurify.sanitize(data.description.trim(), {
           ALLOWED_TAGS: [],
           ALLOWED_ATTR: [],
           KEEP_CONTENT: true
         }).substring(0, 1000),
-        phone_number: productDetails.phone_number.trim().replace(/[^\d+]/g, '').substring(0, 20)
+        phone_number: data.phone_number.trim().replace(/[^\d+]/g, '').substring(0, 20)
       };
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert([
-          {
-            user_id: user.id,
-            username: user.email,
-            location: finalSanitizedData.location,
-            phone_number: finalSanitizedData.phone_number,
-            updated_at: new Date().toISOString(),
-            is_seller: true,
-            seller_setup_completed: true
-          },
-        ], { onConflict: 'user_id' });
+      // Update profile
+      const profileResult = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .upsert([
+            {
+              user_id: user.id,
+              username: user.email,
+              location: finalSanitizedData.location,
+              phone_number: finalSanitizedData.phone_number,
+              updated_at: new Date().toISOString(),
+              is_seller: true,
+              seller_setup_completed: true
+            },
+          ], { onConflict: 'user_id' })
+      );
 
-      if (profileError) {
-        console.error('Profile upsert error:', profileError);
-        throw profileError;
+      if (profileResult.error) {
+        console.error('Profile upsert error:', profileResult.error);
+        throw profileResult.error;
       }
 
       const productData = {
@@ -331,24 +250,27 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         image_url: imageUrl
       };
 
-      const { data: insertedData, error: insertError } = await supabase
-        .from('products')
-        .insert([productData])
-        .select();
+      const productResult = await fetchWithRetry(() =>
+        supabase
+          .from('products')
+          .insert([productData])
+          .select()
+      );
 
-      if (insertError) {
-        console.error('📛 FULL Supabase Product Insert Error:', insertError);
+      if (productResult.error) {
+        console.error('📛 Supabase Product Insert Error:', productResult.error);
         
-        if (insertError.code === '42501') {
+        if (productResult.error.code === '42501') {
           throw new Error('Permission denied. Check RLS policies for products table.');
-        } else if (insertError.code === '23502') {
+        } else if (productResult.error.code === '23502') {
           throw new Error('Missing required fields. Check products table schema.');
-        } else if (insertError.code === '22P02') {
+        } else if (productResult.error.code === '22P02') {
           throw new Error('Invalid data type. Check price format (should be number).');
         }
-        throw insertError;
+        throw productResult.error;
       }
 
+      const insertedData = productResult.data;
       if (!insertedData || insertedData.length === 0) {
         throw new Error('Product saved but no data returned.');
       }
@@ -362,6 +284,16 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
+      // Reset form after successful submission
+      reset({
+        name: '',
+        location: finalSanitizedData.location,
+        price: '',
+        description: '',
+        phone_number: finalSanitizedData.phone_number,
+      });
+      setImageUrl('');
+      
       onProfileComplete({
         location: finalSanitizedData.location,
         phone_number: finalSanitizedData.phone_number,
@@ -372,9 +304,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       });
 
       setTimeout(() => {
-        window.location.href = '/social-media'; // Full reload to refresh state
-        // OR if you want to use React Router navigation:
-        // navigate('/social-media');
+        navigate('/app');
       }, 1000);
 
     } catch (err) {
@@ -388,20 +318,53 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [user, imageUrl, submitting, navigate, onProfileComplete, reset]);
 
-  const handleReset = () => {
-    setProductDetails({
+  const handleReset = useCallback(() => {
+    reset({
       name: '',
-      location: '',
+      location: existingData?.location || '',
       price: '',
       description: '',
-      phone_number: '',
+      phone_number: existingData?.phone_number || '',
     });
     setImageUrl('');
     setError(null);
+  }, [reset, existingData]);
+
+  // ============ STYLES ============
+  const inputStyle = {
+    width: '100%',
+    padding: '16px 20px',
+    border: '2px solid #4a5568',
+    borderRadius: '12px',
+    fontSize: '18px',
+    backgroundColor: '#000000',
+    color: '#ffffff',
+    boxSizing: 'border-box',
+    marginTop: '8px',
+    marginBottom: '5px',
+    height: '56px'
   };
 
+  const inputErrorStyle = {
+    ...inputStyle,
+    borderColor: '#f87171',
+  };
+
+  const textareaStyle = {
+    ...inputStyle,
+    height: 'auto',
+    minHeight: '150px',
+    resize: 'vertical'
+  };
+
+  const textareaErrorStyle = {
+    ...textareaStyle,
+    borderColor: '#f87171',
+  };
+
+  // ============ RENDER ============
   if (userLoading) {
     return (
       <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-xl mx-auto my-8">
@@ -418,7 +381,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
           <div className="mt-4 p-4 bg-red-900 border border-red-700 rounded-lg">
             <p className="text-center text-red-200">{error}</p>
             <button 
-              onClick={() => window.location.href = '/signup'}
+              onClick={() => navigate('/')}
               className="mt-4 w-full py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
             >
               Go to Signup
@@ -431,7 +394,6 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
 
   return (
     <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-2xl mx-auto my-8 font-sans safe-top no-cut">
-
       <h3 className="text-3xl font-bold mb-4 text-purple-400">
         Complete Seller Setup (List Product)
       </h3>
@@ -461,105 +423,150 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
+        {/* Product Name */}
         <div className="form-group">
           <label htmlFor="name">Product Name *</label>
           <input
             type="text"
             id="name"
-            name="name"
-            value={productDetails.name}
-            onChange={handleChange}
-            required
+            style={errors.name ? inputErrorStyle : inputStyle}
+            {...register('name', {
+              required: 'Product name is required',
+              minLength: {
+                value: 3,
+                message: 'Product name must be at least 3 characters'
+              },
+              maxLength: {
+                value: 100,
+                message: 'Product name cannot exceed 100 characters'
+              }
+            })}
             disabled={submitting || userLoading}
             placeholder="e.g., Weighted Blanket"
-            minLength="3"
-            maxLength="100"
-            style={getInputStyle()}
           />
+          {errors.name && (
+            <p className="text-red-400 text-sm mt-1">{errors.name.message}</p>
+          )}
           <small className="text-gray-400 text-sm">
-            Min 3 characters, max 100 characters
+            {nameValue.length}/100 characters
           </small>
         </div>
 
+        {/* Price */}
         <div className="form-group">
           <label htmlFor="price">Price ($) *</label>
           <input
             type="text"
             id="price"
-            name="price"
-            value={productDetails.price}
-            onChange={handleChange}
-            required
+            style={errors.price ? inputErrorStyle : inputStyle}
+            {...register('price', {
+              required: 'Price is required',
+              validate: {
+                isValidNumber: (value) => {
+                  const num = parseFloat(value);
+                  if (isNaN(num)) return 'Please enter a valid number';
+                  if (num <= 0) return 'Price must be greater than 0';
+                  if (num > 999999.99) return 'Price is too high';
+                  return true;
+                }
+              }
+            })}
             disabled={submitting || userLoading}
             placeholder="e.g., 49.99"
-            pattern="^\d+(\.\d{1,2})?$"
-            title="Enter a valid price (e.g., 49.99)"
-            style={getInputStyle()}
           />
+          {errors.price && (
+            <p className="text-red-400 text-sm mt-1">{errors.price.message}</p>
+          )}
           <small className="text-gray-400 text-sm">
             Enter price in USD (e.g., 49.99). Max 999999.99
           </small>
         </div>
 
+        {/* Location */}
         <div className="form-group">
           <label htmlFor="location">Location *</label>
           <input
             type="text"
             id="location"
-            name="location"
-            value={productDetails.location}
-            onChange={handleChange}
-            required
+            style={errors.location ? inputErrorStyle : inputStyle}
+            {...register('location', {
+              required: 'Location is required',
+              minLength: {
+                value: 2,
+                message: 'Location must be at least 2 characters'
+              },
+              maxLength: {
+                value: 100,
+                message: 'Location cannot exceed 100 characters'
+              }
+            })}
             disabled={submitting || userLoading}
             placeholder="e.g., New York, NY or Johannesburg"
-            minLength="2"
-            maxLength="100"
-            style={getInputStyle()}
           />
+          {errors.location && (
+            <p className="text-red-400 text-sm mt-1">{errors.location.message}</p>
+          )}
+          <small className="text-gray-400 text-sm">
+            {locationValue.length}/100 characters
+          </small>
         </div>
 
+        {/* Phone Number */}
         <div className="form-group">
           <label htmlFor="phone_number">Phone Number *</label>
           <input
             type="tel"
             id="phone_number"
-            name="phone_number"
-            value={productDetails.phone_number}
-            onChange={handleChange}
-            required
+            style={errors.phone_number ? inputErrorStyle : inputStyle}
+            {...register('phone_number', {
+              required: 'Phone number is required',
+              pattern: {
+                value: /^[\+]?[1-9][\d\s\-\(\)\.]{8,}$/,
+                message: 'Please enter a valid phone number'
+              }
+            })}
             disabled={submitting || userLoading}
             placeholder="+263 712 345 678"
-            pattern="^[\d+][\d\s]+$"
-            title="Enter a valid phone number (digits, +, and spaces only)"
-            style={getInputStyle()}
           />
+          {errors.phone_number && (
+            <p className="text-red-400 text-sm mt-1">{errors.phone_number.message}</p>
+          )}
           <small className="text-gray-400 text-sm">
             Format: +country code followed by number (digits, +, and spaces only)
           </small>
         </div>
 
+        {/* Description */}
         <div className="form-group">
           <label htmlFor="description">Product Description *</label>
           <textarea
             id="description"
-            name="description"
-            value={productDetails.description}
-            onChange={handleChange}
-            required
-            disabled={submitting || userLoading}
             rows="6"
+            style={errors.description ? textareaErrorStyle : textareaStyle}
+            {...register('description', {
+              required: 'Product description is required',
+              minLength: {
+                value: 10,
+                message: 'Description must be at least 10 characters'
+              },
+              maxLength: {
+                value: 1000,
+                message: 'Description cannot exceed 1000 characters'
+              }
+            })}
+            disabled={submitting || userLoading}
             placeholder="Describe your product in detail. Include features, condition, brand, and any other relevant information."
-            minLength="10"
-            maxLength="1000"
-            style={getTextareaStyle()}
-          ></textarea>
+          />
+          {errors.description && (
+            <p className="text-red-400 text-sm mt-1">{errors.description.message}</p>
+          )}
           <small className="text-gray-400 text-sm">
-            Min 10 characters, max 1000 characters. HTML tags will be removed.
+            {descriptionValue.length}/1000 characters. Min 10 characters. HTML tags will be removed.
           </small>
         </div>
 
-        {/* ADDED: Image Upload Section */}
+        {/* Image Upload Section */}
         <div className="my-8 border-t border-gray-700 pt-6 image-upload-section">
           <h4 className="text-xl font-bold mb-4 text-blue-400 text-center">
             📷 UPLOAD PRODUCT IMAGE (REQUIRED)
@@ -587,6 +594,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
                   <button 
                     onClick={handleDeletePhoto}
                     className="absolute top-[-10px] right-[-10px] bg-red-600 text-white border-none rounded-full w-8 h-8 cursor-pointer font-bold flex items-center justify-center"
+                    type="button"
                   >
                     ✕
                   </button>
@@ -602,21 +610,22 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
           </div>
         </div>
 
+        {/* Submit Button */}
         <button
           type="submit"
-          disabled={submitting || userLoading || !imageUrl || validateForm() !== null}
+          disabled={submitting || userLoading || !imageUrl}
           style={{
             width: '100%',
             padding: '16px',
-            background: (submitting || userLoading || !imageUrl || validateForm() !== null)  
+            background: (submitting || userLoading || !imageUrl)  
               ? '#374151'
               : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            color: (submitting || userLoading || !imageUrl || validateForm() !== null) ? '#9CA3AF' : 'white',
+            color: (submitting || userLoading || !imageUrl) ? '#9CA3AF' : 'white',
             border: 'none',
             borderRadius: '8px',
             fontSize: '18px',
             fontWeight: '700',
-            cursor: (submitting || userLoading || !imageUrl || validateForm() !== null) ? 'not-allowed' : 'pointer',
+            cursor: (submitting || userLoading || !imageUrl) ? 'not-allowed' : 'pointer',
             transition: 'all 0.3s ease',
             opacity: submitting || userLoading ? 0.7 : 1,
             display: 'flex',
@@ -646,10 +655,8 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
               </svg>
               Processing...
             </div>
-            ) : !imageUrl ? (
+          ) : !imageUrl ? (
             'Upload Image to Continue'
-          ) : validateForm() !== null ? (
-            'Please Complete All Fields'
           ) : (
             'Complete Setup & List Product'
           )}
@@ -674,21 +681,27 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
         disabled={submitting || userLoading}
         className="w-full py-4 mt-4 rounded-lg text-white font-bold text-lg transition-all duration-300"
         style={{
-              width: '100%',
-              padding: '16px',
-              background: submitting || userLoading 
-                  ? '#374151'
-                  : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-              cursor: submitting || userLoading ? 'not-allowed' : 'pointer',
-              opacity: submitting || userLoading ? 0.7 : 1,
-              boxShadow: '0 4px 15px rgba(43, 235, 117, 0.3)',
-              letterSpacing: '0.5px'
-          }}
+          width: '100%',
+          padding: '16px',
+          background: submitting || userLoading 
+              ? '#374151'
+              : 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+          cursor: submitting || userLoading ? 'not-allowed' : 'pointer',
+          opacity: submitting || userLoading ? 0.7 : 1,
+          boxShadow: '0 4px 15px rgba(43, 235, 117, 0.3)',
+          letterSpacing: '0.5px'
+        }}
       >
-          Reset Form
+        Reset Form
       </button>
     </div>
   );
 };
 
-export default SellerSetupForm
+export default React.memo(SellerSetupForm, (prevProps, nextProps) => {
+  // Only re-render if these specific props change
+  return (
+    prevProps.existingData?.location === nextProps.existingData?.location &&
+    prevProps.existingData?.phone_number === nextProps.existingData?.phone_number
+  );
+});

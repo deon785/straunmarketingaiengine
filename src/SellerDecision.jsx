@@ -3,6 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import './SellerDecision.css';
 
+// ✅ Add fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
+
 const SellerDecision = () => {
   const [loading, setLoading] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
@@ -10,53 +25,136 @@ const SellerDecision = () => {
   const [tempPhone, setTempPhone] = useState('');
   const [profileData, setProfileData] = useState(null);
   const [checking, setChecking] = useState(true);
+  const [error, setError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
   const navigate = useNavigate();
 
-  // Fetch existing profile on load
-  useEffect(() => {
-    const fetchProfile = async () => {
+  const safeNavigate = (path) => {
+    try {
+      navigate(path);
+    } catch (err) {
+      console.warn('[SellerDecision] Navigation failed:', err);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (user) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('location, phone_number, is_seller, seller_setup_completed')
-            .eq('user_id', user.id)
-            .single();
-          
-          setProfileData(profile);
-        }
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-      } finally {
-        setChecking(false);
+        window.location.href = path;
+      } catch (fallbackErr) {
+        console.error('[SellerDecision] Fallback navigation failed:', fallbackErr);
+        setError('Unable to navigate. Please refresh the page.');
       }
-    };
-    
+    }
+  };
+
+  // ✅ Use fetchWithRetry
+  const fetchProfile = async (attempt = 0) => {
+    try {
+      const { data: userData, error: userError } = await fetchWithRetry(() =>
+        supabase.auth.getUser()
+      );
+      
+      if (userError) {
+        console.warn('[SellerDecision] User fetch error:', userError);
+        if (attempt < 3) {
+          setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
+          return;
+        }
+        setError('Please log in to continue');
+        setChecking(false);
+        return;
+      }
+      
+      const user = userData?.user;
+      
+      if (!user) {
+        setError('User not found. Please log in again.');
+        setChecking(false);
+        return;
+      }
+      
+      const { data: profileResult, error: profileError } = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .select('location, phone_number, is_seller, seller_setup_completed')
+          .eq('user_id', user.id)
+          .maybeSingle()
+      );
+      
+      if (profileError) {
+        console.warn('[SellerDecision] Profile fetch error:', profileError);
+        if (attempt < 3) {
+          setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
+          return;
+        }
+        setError('Failed to load profile. Please refresh the page.');
+        setChecking(false);
+        return;
+      }
+      
+      setProfileData({
+        location: profileResult?.location || '',
+        phone_number: profileResult?.phone_number || '',
+        is_seller: profileResult?.is_seller || false,
+        seller_setup_completed: profileResult?.seller_setup_completed || false
+      });
+      
+      setError(null);
+      setRetryCount(0);
+      
+    } catch (err) {
+      console.error('[SellerDecision] Unexpected error:', err);
+      if (attempt < 3) {
+        setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
+        return;
+      }
+      setError('Failed to load profile. Please refresh the page.');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  useEffect(() => {
     fetchProfile();
   }, []);
 
   const handleAddProducts = () => {
-    navigate('/seller-form');
+    try {
+      navigate('/seller-form');
+    } catch (err) {
+      console.error('[SellerDecision] Navigation error:', err);
+      setError('Unable to open seller form. Please try again.');
+    }
   };
 
+  // ✅ Add offline check and use fetchWithRetry
   const handleSkipForNow = async () => {
+    if (!navigator.onLine) {
+      setError('You are offline. Please connect to the internet to continue.');
+      return;
+    }
+    
     setLoading(true);
+    setError(null);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await fetchWithRetry(() =>
+        supabase.auth.getUser()
+      );
       
-      if (!user) {
-        alert('Please log in again');
+      if (userError) {
+        setError('Please log in to continue');
+        setLoading(false);
         return;
       }
       
-      // Check if profile has required fields
+      const user = userData?.user;
+      
+      if (!user) {
+        setError('User not found. Please log in again.');
+        setLoading(false);
+        return;
+      }
+      
       const hasLocation = profileData?.location && profileData.location.trim() !== '';
       const hasPhone = profileData?.phone_number && profileData.phone_number.trim() !== '';
       
-      // If missing location or phone, show modal to collect
       if (!hasLocation || !hasPhone) {
         setTempLocation(profileData?.location || '');
         setTempPhone(profileData?.phone_number || '');
@@ -65,93 +163,162 @@ const SellerDecision = () => {
         return;
       }
       
-      // Profile is complete, just update seller flags
       await completeSkip(user.id);
       
-    } catch (error) {
-      console.error('Error checking profile:', error);
-      alert('Failed to skip. Please try again.');
+    } catch (err) {
+      console.error('[SellerDecision] Skip error:', err);
+      setError('Failed to skip. Please try again.');
       setLoading(false);
     }
   };
 
+  // ✅ Use fetchWithRetry
   const completeSkip = async (userId) => {
     try {
-      // Only update seller flags, preserve existing location and phone
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          is_seller: true,
-          seller_setup_completed: true,
-          updated_at: new Date().toISOString()
-          // IMPORTANT: Do NOT overwrite location and phone!
-        })
-        .eq('user_id', userId);
+      const { error: updateError } = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .update({
+            is_seller: true,
+            seller_setup_completed: true,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', userId)
+      );
       
-      if (error) throw error;
+      if (updateError) {
+        console.error('[SellerDecision] Update error:', updateError);
+        setError('Failed to update profile. Please try again.');
+        setLoading(false);
+        return;
+      }
       
-      // Navigate to social media page
-      navigate('/social-media');
+      safeNavigate('/app');
       
-    } catch (error) {
-      console.error('Error updating profile:', error);
-      alert('Failed to skip. Please try adding products instead.');
+    } catch (err) {
+      console.error('[SellerDecision] Complete skip error:', err);
+      setError('Failed to skip. Please try again.');
       setLoading(false);
     }
   };
 
+  // ✅ Add offline check and use fetchWithRetry
   const saveLocationAndPhone = async () => {
+    if (!navigator.onLine) {
+      setError('You are offline. Please connect to the internet to save your information.');
+      return;
+    }
+    
     if (!tempLocation.trim()) {
-      alert('Please enter your location');
+      setError('Please enter your location');
       return;
     }
     if (!tempPhone.trim()) {
-      alert('Please enter your phone number');
+      setError('Please enter your phone number');
       return;
     }
     
     setLoading(true);
+    setError(null);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userData, error: userError } = await fetchWithRetry(() =>
+        supabase.auth.getUser()
+      );
       
-      if (!user) {
-        alert('Please log in again');
+      if (userError) {
+        setError('Please log in to continue');
+        setLoading(false);
         return;
       }
       
-      // Update profile with location and phone AND seller flags
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          location: tempLocation.trim(),
-          phone_number: tempPhone.trim(),
-          is_seller: true,
-          seller_setup_completed: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', user.id);
+      const user = userData?.user;
       
-      if (error) throw error;
+      if (!user) {
+        setError('User not found. Please log in again.');
+        setLoading(false);
+        return;
+      }
+      
+      const { error: updateError } = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .update({
+            location: tempLocation.trim(),
+            phone_number: tempPhone.trim(),
+            is_seller: true,
+            seller_setup_completed: true,
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id)
+      );
+      
+      if (updateError) {
+        console.error('[SellerDecision] Save error:', updateError);
+        setError('Failed to save information. Please try again.');
+        setLoading(false);
+        return;
+      }
       
       setShowLocationModal(false);
-      navigate('/social-media');
+      safeNavigate('/app');
       
-    } catch (error) {
-      console.error('Error saving profile:', error);
-      alert('Failed to save information. Please try again.');
-    } finally {
+    } catch (err) {
+      console.error('[SellerDecision] Save error:', err);
+      setError('Failed to save information. Please check your connection.');
       setLoading(false);
     }
   };
 
+  const handleRetry = () => {
+    setError(null);
+    setChecking(true);
+    setRetryCount(prev => prev + 1);
+    fetchProfile(0);
+  };
+
   if (checking) {
     return (
-      <div className="seller-decision-page">
-        <div className="decision-container">
-          <div className="decision-card" style={{ textAlign: 'center', padding: '40px' }}>
-            <div style={{ fontSize: '24px', marginBottom: '15px' }}>⏳</div>
+      <div className="seller-decision-page" style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+      }}>
+        <div className="decision-container" style={{
+          width: '100%',
+          maxWidth: '500px',
+          margin: '20px'
+        }}>
+          <div className="decision-card" style={{
+            background: 'white',
+            borderRadius: '20px',
+            padding: '40px',
+            textAlign: 'center',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.1)'
+          }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              border: '3px solid #f3f3f3',
+              borderTop: '3px solid #667eea',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto 15px auto'
+            }} />
             <p>Loading your profile...</p>
+            {retryCount > 0 && (
+              <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+                Attempting to connect... ({retryCount}/3)
+              </p>
+            )}
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
           </div>
         </div>
       </div>
@@ -159,110 +326,187 @@ const SellerDecision = () => {
   }
 
   return (
-    <>
-      <div className="seller-decision-page">
-        <div className="decision-container">
-          <div className="decision-card">
-            <div className="header" style={{ textAlign: 'center', marginBottom: '35px' }}>
-              <div style={{
-                fontSize: '32px',
-                fontWeight: '700',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                marginBottom: '8px'
-              }}>
-                Welcome Seller! 🎉
-              </div>
-              <div style={{ color: '#666', fontSize: '16px', fontWeight: '400' }}>
-                Would you like to add your products now?
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '30px', textAlign: 'center' }}>
-              <p style={{ color: '#718096', fontSize: '14px', lineHeight: '1.6' }}>
-                You can add your products now to start selling immediately,<br />
-                or skip and add them later from your dashboard.
-              </p>
-              {profileData?.location && profileData?.phone_number && (
-                <p style={{ color: '#4CAF50', fontSize: '12px', marginTop: '10px' }}>
-                  ✓ Your profile is complete (Location and Phone saved)
-                </p>
-              )}
-              {(!profileData?.location || !profileData?.phone_number) && (
-                <p style={{ color: '#ff9800', fontSize: '12px', marginTop: '10px' }}>
-                  ⚠️ You'll need to provide your location and phone number to continue
-                </p>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-              <button
-                onClick={handleAddProducts}
-                disabled={loading}
-                style={{
-                  width: '100%',
-                  padding: '18px',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  opacity: loading ? 0.7 : 1
-                }}
-                onMouseEnter={(e) => !loading && (e.target.style.transform = 'translateY(-2px)')}
-                onMouseLeave={(e) => !loading && (e.target.style.transform = 'translateY(0)')}
-              >
-                📦 ADD PRODUCTS NOW
-              </button>
-
-              <button
-                onClick={handleSkipForNow}
-                disabled={loading}
-                style={{
-                  width: '100%',
-                  padding: '18px',
-                  background: 'transparent',
-                  color: '#667eea',
-                  border: '2px solid #667eea',
-                  borderRadius: '12px',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  opacity: loading ? 0.7 : 1
-                }}
-                onMouseEnter={(e) => !loading && (e.target.style.background = 'rgba(102, 126, 234, 0.05)')}
-                onMouseLeave={(e) => !loading && (e.target.style.background = 'transparent')}
-              >
-                {loading ? '⏳ Processing...' : '⏰ SKIP FOR NOW'}
-              </button>
-            </div>
-
-            <div style={{ 
-              marginTop: '30px', 
-              padding: '20px',
-              backgroundColor: '#f7fafc',
-              borderRadius: '10px',
-              fontSize: '13px',
-              color: '#718096',
-              textAlign: 'center'
+    <div className="seller-decision-page" style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      padding: '20px'
+    }}>
+      <div className="decision-container" style={{
+        width: '100%',
+        maxWidth: '500px',
+        margin: '0 auto'
+      }}>
+        <div className="decision-card" style={{
+          background: 'white',
+          borderRadius: '20px',
+          padding: '32px 28px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.1)'
+        }}>
+          <div className="header" style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <div style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              marginBottom: '8px'
             }}>
-              <p>You can always add products later from your seller dashboard</p>
+              Welcome Seller! 🎉
+            </div>
+            <div style={{ color: '#666', fontSize: '15px', fontWeight: '400' }}>
+              Would you like to add your products now?
             </div>
           </div>
+
+          {error && (
+            <div style={{
+              background: '#fee2e2',
+              color: '#dc2626',
+              padding: '12px 15px',
+              borderRadius: '8px',
+              marginBottom: '20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              border: '1px solid #fecaca'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>⚠️</span> {error}
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button 
+                  onClick={handleRetry}
+                  style={{
+                    background: '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    padding: '4px 12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '12px'
+                  }}
+                >
+                  Retry
+                </button>
+                <button 
+                  onClick={() => setError(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#dc2626',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: '24px', textAlign: 'center' }}>
+            <p style={{ color: '#718096', fontSize: '14px', lineHeight: '1.5' }}>
+              You can add your products now to start selling immediately,<br />
+              or skip and add them later from your dashboard.
+            </p>
+            {profileData?.location && profileData?.phone_number && (
+              <p style={{ color: '#16a34a', fontSize: '12px', marginTop: '10px' }}>
+                ✓ Your profile is complete (Location and Phone saved)
+              </p>
+            )}
+            {(!profileData?.location || !profileData?.phone_number) && (
+              <p style={{ color: '#f59e0b', fontSize: '12px', marginTop: '10px' }}>
+                ⚠️ You'll need to provide your location and phone number to continue
+              </p>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <button
+              onClick={handleAddProducts}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                opacity: loading ? 0.7 : 1
+              }}
+              onMouseEnter={(e) => !loading && (e.target.style.transform = 'translateY(-2px)')}
+              onMouseLeave={(e) => !loading && (e.target.style.transform = 'translateY(0)')}
+            >
+              📦 ADD PRODUCTS NOW
+            </button>
+
+            <button
+              onClick={handleSkipForNow}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'transparent',
+                color: '#667eea',
+                border: '2px solid #667eea',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                transition: 'all 0.3s ease',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                opacity: loading ? 0.7 : 1
+              }}
+              onMouseEnter={(e) => !loading && (e.target.style.background = 'rgba(102, 126, 234, 0.05)')}
+              onMouseLeave={(e) => !loading && (e.target.style.background = 'transparent')}
+            >
+              {loading ? '⏳ Processing...' : '⏰ SKIP FOR NOW'}
+            </button>
+          </div>
+
+          <div style={{ 
+            marginTop: '24px', 
+            padding: '16px',
+            backgroundColor: '#f7fafc',
+            borderRadius: '10px',
+            fontSize: '12px',
+            color: '#718096',
+            textAlign: 'center'
+          }}>
+            <p>You can always add products later from your seller dashboard</p>
+          </div>
+
+          <button
+            onClick={() => safeNavigate('/')}
+            style={{
+              marginTop: '20px',
+              width: '100%',
+              background: 'none',
+              border: 'none',
+              color: '#666',
+              cursor: 'pointer',
+              fontSize: '13px',
+              textDecoration: 'underline',
+              padding: '8px'
+            }}
+          >
+            ← Back to mode selection
+          </button>
         </div>
       </div>
 
-      {/* Modal - Only shows if profile is missing location or phone */}
       {showLocationModal && (
         <div style={{
           position: 'fixed',
@@ -276,7 +520,7 @@ const SellerDecision = () => {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '20px'
-        }} onClick={() => setShowLocationModal(false)}>
+        }}>
           <div style={{
             backgroundColor: 'white',
             borderRadius: '16px',
@@ -284,8 +528,8 @@ const SellerDecision = () => {
             width: '100%',
             padding: '24px',
             position: 'relative'
-          }} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ margin: '0 0 10px 0', color: '#333' }}>📝 Complete Your Profile</h2>
+          }}>
+            <h2 style={{ margin: '0 0 10px 0', color: '#333', fontSize: '22px' }}>📝 Complete Your Profile</h2>
             <p style={{ marginBottom: '20px', color: '#666', fontSize: '14px' }}>
               To use Seller mode, we need your location and phone number.
             </p>
@@ -329,13 +573,29 @@ const SellerDecision = () => {
               />
             </div>
             
+            {error && (
+              <div style={{
+                background: '#fee2e2',
+                color: '#dc2626',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                marginBottom: '15px',
+                fontSize: '13px'
+              }}>
+                {error}
+              </div>
+            )}
+            
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
-                onClick={() => setShowLocationModal(false)}
+                onClick={() => {
+                  setShowLocationModal(false);
+                  setError(null);
+                }}
                 style={{
                   flex: 1,
                   padding: '12px',
-                  backgroundColor: '#ccc',
+                  backgroundColor: '#e5e7eb',
                   color: '#333',
                   border: 'none',
                   borderRadius: '8px',
@@ -351,12 +611,13 @@ const SellerDecision = () => {
                 style={{
                   flex: 1,
                   padding: '12px',
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  background: loading ? '#94a3b8' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
                   cursor: loading ? 'not-allowed' : 'pointer',
-                  fontWeight: 'bold'
+                  fontWeight: 'bold',
+                  transition: 'all 0.3s ease'
                 }}
               >
                 {loading ? 'Saving...' : 'Continue'}
@@ -365,8 +626,8 @@ const SellerDecision = () => {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 };
 
-export default SellerDecision;
+export default React.memo(SellerDecision);

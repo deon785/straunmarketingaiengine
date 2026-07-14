@@ -1,5 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from './lib/supabase';
+import { supabase } from './lib/supabase'; 
+
+// Add this helper function
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const [referralCode, setReferralCode] = useState('');
@@ -14,45 +29,60 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     const [shareLoading, setShareLoading] = useState(false);
     const [recentReferrals, setRecentReferrals] = useState([]);
     const [showShareModal, setShowShareModal] = useState(false);
+    const [error, setError] = useState(null);
 
-    // ✅ OPTIMIZATION 1: Memoize load functions to prevent unnecessary re-renders
+    const generateReferralCode = useCallback(() => {
+        const name = userName?.split('@')[0] || 'USER';
+        const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+        return `${name.substring(0, 6)}${random}`.toUpperCase();
+    }, [userName]);
+
+    // Load referral data
     const loadReferralData = useCallback(async () => {
         if (!userId) return;
         
         try {
             setLoading(true);
+            setError(null);
             
-            // 1. Get user's profile with referral code
-            let { data: profile, error: profileError } = await supabase
+            // 1. Get user's profile with referral code - use maybeSingle()
+            const profileResult = await fetchWithRetry(() =>
+            supabase
                 .from('profiles')
                 .select('referral_code')
                 .eq('user_id', userId)
-                .maybeSingle(); // ✅ Use maybeSingle() instead of single() to avoid errors
+                .maybeSingle()
+            ); // ✅ Use maybeSingle()
             
-            let currentCode = profile?.referral_code;
+            let currentCode = profileResult.data?.referral_code;
             
             if (!currentCode) {
                 currentCode = generateReferralCode();
-                const { error: updateError } = await supabase
+                // ✅ Use fetchWithRetry
+                const updateResult = await fetchWithRetry(() =>
+                supabase
                     .from('profiles')
                     .update({ referral_code: currentCode })
-                    .eq('user_id', userId);
-                
-                if (updateError) {
-                    console.error('Error updating referral code:', updateError);
+                    .eq('user_id', userId)
+                );
+            
+                if (updateResult.error) {
+                    console.error('Error updating referral code:', updateResult.error);
                 }
             }
             
             setReferralCode(currentCode);
             
-            // ✅ OPTIMIZATION 2: Get ALL data in parallel (faster!)
+            // Get all data in parallel
+            // ✅ Use fetchWithRetry for both queries
             const [referralsResult, recentResult] = await Promise.all([
-                // Get all referrals count
+            fetchWithRetry(() =>
                 supabase
                     .from('referrals')
-                    .select('status, points_earned', { count: 'exact' })
-                    .eq('referrer_id', userId),
-                // Get recent completed referrals
+                    .select('status, points_earned')
+                    .eq('referrer_id', userId)
+            ),
+            fetchWithRetry(() =>
                 supabase
                     .from('referrals')
                     .select(`
@@ -66,7 +96,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                     .eq('referrer_id', userId)
                     .eq('status', 'completed')
                     .order('completed_at', { ascending: false })
-                    .limit(5)
+                    .limit(5))
             ]);
             
             const referrals = referralsResult.data || [];
@@ -84,21 +114,23 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 total: referrals.length,
                 completed: completedReferrals.length,
                 points: totalPoints,
-                rank: prev.rank // Preserve rank, will update from leaderboard
+                rank: prev.rank
             }));
             
-            // ✅ OPTIMIZATION 3: Get usernames in ONE query
+            // Get usernames in ONE query
             const referredUserIds = recent.filter(r => r.referred_user_id).map(r => r.referred_user_id);
             let userMap = {};
             
             if (referredUserIds.length > 0) {
-                const { data: users } = await supabase
+                const usersResult = await fetchWithRetry(() =>
+                supabase
                     .from('profiles')
                     .select('user_id, username, email')
-                    .in('user_id', referredUserIds);
+                    .in('user_id', referredUserIds)
+                );
                 
-                if (users) {
-                    userMap = users.reduce((map, user) => {
+                if (!usersResult.error && usersResult.data) {
+                    userMap = usersResult.data.reduce((map, user) => {
                         map[user.user_id] = user;
                         return map;
                     }, {});
@@ -114,34 +146,37 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
         } catch (error) {
             console.error('Error loading referral data:', error);
+            setError('Failed to load referral data');
         } finally {
             setLoading(false);
         }
-    }, [userId]);
+    }, [userId, generateReferralCode]);
 
     const loadLeaderboard = useCallback(async () => {
         if (!userId) return;
         
         try {
-            // ✅ OPTIMIZATION 4: Use aggregation in SQL instead of JS
-            // First, get all completed referrals with referrer info
-            const { data: allReferrals, error } = await supabase
+            const allReferralsResult = await fetchWithRetry(() =>
+            supabase
                 .from('referrals')
                 .select('referrer_id, points_earned')
                 .eq('status', 'completed')
-                .limit(500); // ✅ Add limit to prevent massive data transfer
+                .limit(500)
+            );
             
-            if (error) {
-                console.error('Leaderboard error:', error);
+            if (allReferralsResult.error) {
+                console.error('Leaderboard error:', allReferralsResult.error);
                 return;
             }
             
-            if (!allReferrals || allReferrals.length === 0) {
+            const allReferrals = allReferralsResult.data || [];
+            
+            if (allReferrals.length === 0) {
                 setLeaderboard([]);
                 return;
             }
             
-            // Aggregate in JS (still efficient with limited data)
+            // Aggregate in JS
             const referrerMap = new Map();
             
             allReferrals.forEach(ref => {
@@ -157,18 +192,20 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                 entry.total_points += ref.points_earned || 50;
             });
             
-            // Get usernames for top referrers only (limit to 50)
+            // Get usernames for top referrers
             const topReferrerIds = Array.from(referrerMap.keys()).slice(0, 50);
             let userMap = {};
             
             if (topReferrerIds.length > 0) {
-                const { data: users } = await supabase
+                const usersResult = await fetchWithRetry(() =>
+                supabase
                     .from('profiles')
                     .select('user_id, username, email')
-                    .in('user_id', topReferrerIds);
+                    .in('user_id', topReferrerIds)
+                );
                 
-                if (users) {
-                    userMap = users.reduce((map, user) => {
+                if (!usersResult.error && usersResult.data) {
+                    userMap = usersResult.data.reduce((map, user) => {
                         map[user.user_id] = user;
                         return map;
                     }, {});
@@ -177,7 +214,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             
             // Build leaderboard array
             let leaderboardData = Array.from(referrerMap.values())
-                .filter(entry => userMap[entry.referrer_id]) // Only include users we have names for
+                .filter(entry => userMap[entry.referrer_id])
                 .map(entry => ({
                     referrer_id: entry.referrer_id,
                     username: userMap[entry.referrer_id]?.username || 'User',
@@ -197,7 +234,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             // Limit to top 20
             const topLeaderboard = leaderboardData.slice(0, 20);
             
-            // Update user's rank - find position
+            // Update user's rank
             const userRank = leaderboardData.findIndex(entry => entry.referrer_id === userId) + 1;
             setStats(prev => ({ ...prev, rank: userRank > 0 ? userRank : 0 }));
             
@@ -208,52 +245,69 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
         }
     }, [userId]);
 
-    const generateReferralCode = useCallback(() => {
-        const name = userName?.split('@')[0] || 'USER';
-        const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-        return `${name.substring(0, 6)}${random}`.toUpperCase();
-    }, [userName]);
-
     const getReferralLink = useCallback(() => {
         return `${window.location.origin}/signup?ref=${referralCode}`;
     }, [referralCode]);
 
     const copyToClipboard = useCallback((text) => {
+        if (!text) return;
         navigator.clipboard.writeText(text);
         alert('✅ Referral link copied to clipboard! Share it with friends.');
     }, []);
 
-    // ✅ OPTIMIZATION 5: Load data in parallel on mount
+    // Load data on mount
     useEffect(() => {
         if (!userId) return;
         
-        // Load both in parallel
         Promise.all([
             loadReferralData(),
             loadLeaderboard()
         ]);
         
-        // Real-time subscription (keep this - it's good)
-        const subscription = supabase
-            .channel('referral-updates')
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'referrals',
-                filter: `referrer_id=eq.${userId}`
-            }, () => {
-                // Refresh both when new referral comes in
-                Promise.all([
-                    loadReferralData(),
-                    loadLeaderboard()
-                ]);
-            })
-            .subscribe();
+        // Real-time subscription - use supabase
+        let subscription = null;
+        
+        try {
+            subscription = supabase
+                .channel('referral-updates')
+                .on('postgres_changes', {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'referrals',
+                    filter: `referrer_id=eq.${userId}`
+                }, () => {
+                    Promise.all([
+                        loadReferralData(),
+                        loadLeaderboard()
+                    ]);
+                })
+                .subscribe((status, err) => {
+                    if (status === 'CHANNEL_ERROR') {
+                        console.error('Referral channel error:', err);
+                    }
+                });
+        } catch (err) {
+            console.error('Failed to create referral channel:', err);
+        }
             
-        return () => supabase.removeChannel(subscription);
+        return () => {
+            if (subscription) {
+                try {
+                    supabase.removeChannel(subscription);
+                } catch (err) {
+                    console.error('Error removing channel:', err);
+                }
+            }
+        };
     }, [userId, loadReferralData, loadLeaderboard]);
 
     const shareReferral = async () => {
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet to share.');
+            return;
+        }
+        
         const link = getReferralLink();
         const message = `🎁 Join me on Straun Marketing! Use my referral link to get bonus points on signup: ${link}`;
 
@@ -281,6 +335,12 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     };
 
     const shareViaWhatsApp = () => {
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet to share.');
+            return;
+        }
+        
         const link = getReferralLink();
         const message = encodeURIComponent(`🎁 Join me on Straun Marketing! Use my referral link to get bonus points on signup! Also, by using my link, your products could be featured in Daily Deals! 🚀\n\n${link}`);
         window.open(`https://wa.me/?text=${message}`, '_blank');
@@ -288,6 +348,12 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
     };
 
     const shareViaSMS = () => {
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            alert('You are offline. Please connect to the internet to share.');
+            return;
+        }
+        
         const link = getReferralLink();
         const message = encodeURIComponent(`Join Straun Marketing! Use my referral link to get bonus points on signup: ${link}`);
         window.open(`sms:?body=${message}`, '_blank');
@@ -324,12 +390,46 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             <div style={styles.loadingContainer}>
                 <div style={styles.spinner}></div>
                 <p>Loading referral program...</p>
+                <style>{`
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                `}</style>
             </div>
         );
     }
 
     return (
         <div style={styles.container}>
+            {/* Error Message */}
+            {error && (
+                <div style={{
+                    background: '#ff4444',
+                    color: 'white',
+                    padding: '10px 15px',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <span>⚠️ {error}</span>
+                    <button 
+                        onClick={() => setError(null)}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'white',
+                            cursor: 'pointer',
+                            fontSize: '18px'
+                        }}
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
+
             <div style={styles.header}>
                 <h3 style={styles.title}>👥 Referral Program</h3>
                 <p style={styles.subtitle}>Invite friends and earn rewards!</p>
@@ -357,10 +457,11 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
             <div style={styles.referralSection}>
                 <label style={styles.label}>Your Referral Code:</label>
                 <div style={styles.codeContainer}>
-                    <code style={styles.code}>{referralCode}</code>
+                    <code style={styles.code}>{referralCode || 'Loading...'}</code>
                     <button 
                         onClick={() => copyToClipboard(referralCode)}
                         style={styles.copyButton}
+                        disabled={!referralCode}
                     >
                         Copy
                     </button>
@@ -459,7 +560,7 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
                                 <span style={styles.recentIcon}>✅</span>
                                 <span>{ref.referred?.username || ref.referred?.email?.split('@')[0] || 'New User'}</span>
                                 <span style={styles.recentDate}>
-                                    {new Date(ref.completed_at || ref.created_at).toLocaleDateString()}
+                                    {ref.completed_at || ref.created_at ? new Date(ref.completed_at || ref.created_at).toLocaleDateString() : 'Recent'}
                                 </span>
                             </div>
                         ))}
@@ -529,11 +630,11 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
 
 const styles = {
     container: {
-        background: '#1e1e1e',  // Dark background
+        background: '#1e1e1e',
         borderRadius: '16px',
         padding: '20px',
         margin: '20px 0',
-        color: '#ffffff'  // White text
+        color: '#ffffff'
     },
     header: {
         textAlign: 'center',
@@ -542,11 +643,11 @@ const styles = {
     title: {
         fontSize: '22px',
         margin: '0 0 5px 0',
-        color: '#ffffff'  // White text
+        color: '#ffffff'
     },
     subtitle: {
         fontSize: '13px',
-        color: '#b0b0b0'  // Light gray text
+        color: '#b0b0b0'
     },
     statsGrid: {
         display: 'grid',
@@ -564,15 +665,15 @@ const styles = {
     statValue: {
         fontSize: '28px',
         fontWeight: 'bold',
-        color: '#667eea'  // Keep accent color
+        color: '#667eea'
     },
     statLabel: {
         fontSize: '12px',
-        color: '#b0b0b0',  // Light gray
+        color: '#b0b0b0',
         marginTop: '5px'
     },
     referralSection: {
-        background: '#2d2d2d',  // Dark gray background
+        background: '#2d2d2d',
         padding: '20px',
         borderRadius: '12px',
         marginBottom: '25px',
@@ -598,7 +699,7 @@ const styles = {
         fontFamily: 'monospace',
         fontSize: '14px',
         border: '1px solid #404040',
-        color: '#4CAF50'  // Green text for code
+        color: '#4CAF50'
     },
     copyButton: {
         background: '#667eea',
@@ -641,7 +742,7 @@ const styles = {
         cursor: 'pointer'
     },
     milestoneSection: {
-        background: '#2d2d2d',  // Dark background
+        background: '#2d2d2d',
         padding: '15px',
         borderRadius: '12px',
         marginBottom: '25px',
@@ -861,28 +962,31 @@ const styles = {
     }
 };
 
-// Add keyframes animation
-const styleSheet = document.createElement("style");
-styleSheet.textContent = `
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    @keyframes slideUp {
-        from {
-            opacity: 0;
-            transform: translateY(50px);
+// Add keyframes animation (with duplicate prevention)
+if (!document.getElementById('referral-styles')) {
+    const styleSheet = document.createElement("style");
+    styleSheet.id = 'referral-styles';
+    styleSheet.textContent = `
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
-        to {
-            opacity: 1;
-            transform: translateY(0);
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
-    }
-    @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
-    }
-`;
-document.head.appendChild(styleSheet);
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    `;
+    document.head.appendChild(styleSheet);
+}
 
-export default ReferralProgram;
+export default React.memo(ReferralProgram);

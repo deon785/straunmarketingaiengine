@@ -1,22 +1,57 @@
 // SimpleAdmin.jsx
 import React, { useState, useEffect } from 'react';
-import { supabase } from './lib/supabase';
+import { supabase } from './lib/supabase'; 
 import AdminDashboard from './AdminDashboard'; // Your existing admin dashboard
+
+// ✅ Add fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 const SimpleAdmin = () => {
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
     const [userEmail, setUserEmail] = useState('');
     const [showAccessDenied, setShowAccessDenied] = useState(false);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         checkAdminAccess();
     }, []);
 
     const checkAdminAccess = async () => {
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            setError('You are offline. Please connect to the internet to verify admin access.');
+            setShowAccessDenied(true);
+            setLoading(false);
+            return;
+        }
+
         try {
-            // Get current user
-            const { data: { user } } = await supabase.auth.getUser();
+            setError(null);
+            
+            // ✅ Use fetchWithRetry
+            const userResult = await fetchWithRetry(() => supabase.auth.getUser());
+            
+            if (userResult.error) {
+                console.error('Error getting user:', userResult.error);
+                setError('Unable to verify admin status. Please try again.');
+                setShowAccessDenied(true);
+                return;
+            }
+            
+            const user = userResult.data?.user;
             
             if (!user) {
                 setShowAccessDenied(true);
@@ -26,20 +61,41 @@ const SimpleAdmin = () => {
             setUserEmail(user.email || '');
             
             // Check if email matches admin email
-            const isAdminUser = user.email === 'deonmahachi8@gmail.com';
+            const adminEmail = 'deonmahachi8@gmail.com';
+            const isAdminUser = user.email === adminEmail;
             
             setIsAdmin(isAdminUser);
             
             if (!isAdminUser) {
-                console.log(`Access denied. User email: ${user.email}, Required: deonmahachi8@gmail.com`);
+                console.log(`Access denied. User email: ${user.email}, Required: ${adminEmail}`);
             }
             
         } catch (error) {
             console.error('Error checking admin access:', error);
+            setError(error.message || 'Failed to verify admin access');
             setShowAccessDenied(true);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            // ✅ Clear state
+            setIsAdmin(false);
+            setUserEmail('');
+            setError(null);
+            
+            await supabase.auth.signOut();
+            window.location.href = '/';
+        } catch (err) {
+            console.error('Error signing out:', err);
+            setError('Failed to sign out. Please try again.');
+        }
+    };
+
+    const handleGoToApp = () => {
+        window.location.href = '/app';
     };
 
     if (loading) {
@@ -91,6 +147,33 @@ const SimpleAdmin = () => {
                     This admin dashboard is restricted to <strong>deonmahachi8@gmail.com</strong> only.
                 </p>
                 
+                {/* Error Message with Retry Button */}
+                {error && (
+                    <div style={{ 
+                        background: 'rgba(255,0,0,0.3)', 
+                        padding: '10px 20px', 
+                        borderRadius: '8px',
+                        marginTop: '10px'
+                    }}>
+                        <p style={{ margin: 0, fontSize: '14px' }}>⚠️ {error}</p>
+                        <button
+                            onClick={checkAdminAccess}
+                            style={{
+                                marginTop: '10px',
+                                padding: '8px 16px',
+                                background: 'white',
+                                color: '#667eea',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontSize: '14px'
+                            }}
+                        >
+                            🔄 Retry
+                        </button>
+                    </div>
+                )}
+                
                 {userEmail && (
                     <div style={{ 
                         background: 'rgba(255,255,255,0.1)', 
@@ -102,9 +185,9 @@ const SimpleAdmin = () => {
                     </div>
                 )}
                 
-                <div style={{ display: 'flex', gap: '15px', marginTop: '30px' }}>
+                <div style={{ display: 'flex', gap: '15px', marginTop: '30px', flexWrap: 'wrap', justifyContent: 'center' }}>
                     <button
-                        onClick={() => window.location.href = '/app'}
+                        onClick={handleGoToApp}
                         style={{
                             padding: '12px 30px',
                             background: 'white',
@@ -123,7 +206,7 @@ const SimpleAdmin = () => {
                     </button>
                     
                     <button
-                        onClick={() => supabase.auth.signOut().then(() => window.location.href = '/signup')}
+                        onClick={handleSignOut}
                         style={{
                             padding: '12px 30px',
                             background: 'transparent',

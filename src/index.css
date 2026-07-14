@@ -5,14 +5,14 @@
 
   color-scheme: light dark;
   color: rgba(255, 255, 255, 0.87);
-  background-color: #242424; /* Keep dark background */
+  background-color: #242424;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   
-  --header-height: 4.375rem; /* 70px = 4.375rem */
+  --header-height: 4.375rem;
   --safe-area-top: env(safe-area-inset-top, 0px);
 }
 
@@ -22,7 +22,7 @@ body {
   padding: 0 !important;
   min-width: 320px;
   min-height: 100vh;
-  background-color: #242424; /* Dark background */
+  background-color: #242424;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
       sans-serif;
@@ -30,20 +30,23 @@ body {
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.87);
-  
-  /* REMOVED: padding-top: calc(var(--header-height) + var(--safe-area-top)); */
-  padding-top: 0 !important; /* Ensure no top padding */
+  padding-top: 0 !important;
+  overflow-x: hidden;
 }
 
-/* Add this after the body styles */
+/* Add this to your html rule */
 html {
   background-color: #242424 !important;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable !important;
+  scroll-behavior: smooth;
+  scroll-padding-top: 0; /* ← CHANGE FROM 70px TO 0 */
+  height: 100%;
 }
 
-/* Add this to remove any potential white borders */
 #root {
   background-color: #242424 !important;
   width: 100%;
@@ -52,25 +55,14 @@ html {
   padding: 0;
 }
 
-/* Add this to ensure no element overflows */
 * {
   max-width: 100%;
 }
 
-/* Add this for any content containers */
-main, .form-container, .page-container {
-  background-color: #000000 !important;
-}
+/* ============ HEADER CONTROL - SPECIFIC PAGES ONLY ============ */
 
-:not(.social-media-page) header,
-:not(.social-media-page) nav,
-:not(.social-media-page) .navbar,
-:not(.social-media-page) .app-header,
-:not(.social-media-page) .top-navigation,
-:not(.social-media-page) .top-bar,
-:not(.social-media-page) .site-header,
-:not(.social-media-page) .social-header
-:not(.social-media-page) .main-header {
+/* Hide app-header on signup page */
+.signup-page .app-header {
   display: none !important;
   height: 0 !important;
   visibility: hidden !important;
@@ -78,15 +70,19 @@ main, .form-container, .page-container {
   opacity: 0 !important;
 }
 
-/* Show navigation ONLY on social media pages */
+/* Hide app-header on mode selection page */
+.mode-selection-page .app-header {
+  display: none !important;
+  height: 0 !important;
+  visibility: hidden !important;
+  position: absolute !important;
+  opacity: 0 !important;
+}
+
+/* Show header ONLY on social media pages */
 .social-media-page header,
-.social-media-page nav,
-.social-media-page .navbar,
 .social-media-page .app-header,
-.social-media-page .top-navigation,
-.social-media-page .top-bar,
-.social-media-page .site-header,
-.social-media-page .main-header {
+.social-media-page .social-header {
   display: flex !important;
   height: auto !important;
   visibility: visible !important;
@@ -94,30 +90,27 @@ main, .form-container, .page-container {
   opacity: 1 !important;
 }
 
-.social-media-page .page-wrapper {
-  padding-top: 0 !important; /* We'll handle spacing in App.css */
-}
+/* ============ SIGNUP PAGE ============ */
 
-/* First image content container - start at top */
 .signup-page main,
 .signup-page .form-container {
-  padding-top: 0 !important; /* Changed from padding-bottom */
+  padding-top: 0 !important;
   padding-bottom: 1rem !important;
 }
 
-/* Specific spacing for the first image content */
 .signup-page .max-w-2xl,
 .signup-page .max-w-xl {
   margin-top: 0 !important;
-  padding-top: 0 !important; /* Add this */
+  padding-top: 0 !important;
   padding: 1.5rem !important;
-  min-height: 100vh; /* Changed from calc(100vh - var(--header-height) - 2rem) */
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-/* Remove top spacing for mode selection page */
+/* ============ MODE SELECTION PAGE ============ */
+
 .mode-selection-page main,
 .mode-selection-page .form-container,
 .mode-selection-page .page-container {
@@ -125,74 +118,69 @@ main, .form-container, .page-container {
   margin-top: 0 !important;
 }
 
-/* Center the content vertically without header */
 .mode-selection-page .auth-container {
   min-height: 100vh;
   padding-top: 0;
   margin-top: 0;
 }
 
-/* Remove any header spacing if there's a hidden header */
 .mode-selection-page .app-header,
 .mode-selection-page .top-navigation {
   display: none !important;
   height: 0 !important;
 }
 
-/* ============ REMOVE UNNECESSARY SPACING ============ */
+/* ============ MAIN CONTENT ============ */
 
-/* Main content area - no top padding needed */
 main {
-  padding: 0 1rem 2rem 1rem; /* Top padding removed */
+  padding: 0 1rem 2rem 1rem;
   max-width: 1280px;
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
 }
 
-/* All form containers - remove top spacing */
 .form-container, 
 .max-w-2xl, 
 .max-w-xl,
 .page-container {
-  margin-top: 0 !important; /* Changed from 1rem */
-  padding-top: 0 !important; /* Changed from 1rem */
-  scroll-margin-top: 0; /* Changed from calc(var(--header-height) + 1rem) */
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  scroll-margin-top: 0;
 }
 
-/* Remove utility classes for spacing */
 .safe-top {
-  margin-top: 0 !important; /* Changed from calc(var(--header-height) + 1rem) */
+  margin-top: 0 !important;
 }
 
 .page-start {
-  padding-top: 0 !important; /* Changed from calc(var(--header-height) + 2rem) */
+  padding-top: 0 !important;
 }
 
 .no-cut {
-  scroll-margin-top: 0; /* Changed from var(--header-height) */
+  scroll-margin-top: 0;
   position: relative;
   z-index: 1;
 }
 
-/* Ensure content starts at top */
 *:first-child {
-  scroll-margin-top: 0; /* Changed from var(--header-height) */
+  scroll-margin-top: 0;
 }
 
-/* Fix for mobile screens */
+/* ============ MOBILE ADJUSTMENTS ============ */
+
 @media (max-width: 768px) {
   :root {
-    --header-height: 0rem; /* Keep at 0 */
+    --header-height: 0rem;
   }
   
   body {
-    padding-top: 0 !important; /* Removed calc(var(--header-height) + var(--safe-area-top) + 0.5rem) */
+    padding-top: 0 !important;
   }
   
   .signup-page main,
   .signup-page .form-container {
-    padding-top: 0 !important; /* Changed from calc(3.5rem + 0.5rem) */
+    padding-top: 0 !important;
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
   }
@@ -200,19 +188,18 @@ main {
   .signup-page .max-w-2xl,
   .signup-page .max-w-xl {
     padding: 1rem !important;
-    padding-top: 0 !important; /* Add this */
+    padding-top: 0 !important;
   }
 }
 
-/* Very small screens */
 @media (max-width: 480px) {
   .signup-page main,
   .signup-page .form-container {
-    padding-top: 0 !important; /* Changed from calc(3rem + 0.25rem) */
+    padding-top: 0 !important;
   }
   
   .signup-page .max-w-2xl {
     padding: 0.75rem !important;
-    padding-top: 0 !important; /* Add this */
+    padding-top: 0 !important;
   }
 }

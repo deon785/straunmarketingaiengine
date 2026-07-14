@@ -1,8 +1,12 @@
-import { useState, useEffect } from 'react';
+// signup.jsx - COMPLETE CORRECTED VERSION
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from './lib/supabase';
+import { useBouncer } from './hooks/useBouncer';
 import './Signup.css';
 import { Link } from 'react-router-dom'; 
+import { useNavigation } from './NavigationContext.jsx';
+import { useAuthActions } from './AuthContext.jsx';
+import { supabase } from './lib/supabase';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faPhone, 
@@ -17,97 +21,566 @@ import {
   faGift
 } from '@fortawesome/free-solid-svg-icons';
 
+// Helper function
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
+
+// ============ MEMOIZED INPUT COMPONENTS ============
+
+// 1. Email Input - NO ERROR PROP (errors handled inside)
+const EmailInput = React.memo(({ inputRef, disabled }) => {
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      <label htmlFor="email" style={{
+        display: 'block',
+        color: '#444',
+        fontSize: '14px',
+        fontWeight: '500',
+        marginBottom: '8px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px'
+      }}>
+        EMAIL ADDRESS
+      </label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          ref={inputRef}
+          disabled={disabled}
+          placeholder="your.email@example.com"
+          autoComplete="email"
+          className="form-input"
+          style={{
+            width: '100%',
+            padding: '16px 20px 16px 45px',
+            borderRadius: '12px',
+            fontSize: '16px',
+            background: '#000000',
+            border: '1px solid #000000',
+            color: '#ffffff',
+            WebkitTextFillColor: '#ffffff',
+            transition: 'none'
+          }}
+        />
+        <FontAwesomeIcon 
+          icon={faEnvelope} 
+          style={{
+            position: 'absolute',
+            left: '20px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#999999',
+            fontSize: '18px'
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+EmailInput.displayName = 'EmailInput';
+
+// 2. Password Input - Handles its own showPassword state!
+const PasswordInput = React.memo(({ inputRef, disabled, isSignUp }) => {
+  const [showPassword, setShowPassword] = useState(false);
+  
+  const toggleVisibility = useCallback(() => {
+    setShowPassword(prev => !prev);
+  }, []);
+  
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      <label htmlFor="password" style={{
+        display: 'block',
+        color: '#444',
+        fontSize: '14px',
+        fontWeight: '500',
+        marginBottom: '8px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px'
+      }}>
+        PASSWORD
+      </label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type={showPassword ? "text" : "password"}
+          id="password"
+          name="password"
+          ref={inputRef}
+          disabled={disabled}
+          placeholder="At least 6 characters"
+          autoComplete={isSignUp ? "new-password" : "current-password"}
+          className="form-input"
+          style={{
+            width: '100%',
+            padding: '16px 50px 16px 45px',
+            borderRadius: '12px',
+            fontSize: '16px',
+            background: '#000000',
+            border: '1px solid #000000',
+            color: '#ffffff',
+            WebkitTextFillColor: '#ffffff',
+            transition: 'none'
+          }}
+        />
+        <FontAwesomeIcon 
+          icon={faLock} 
+          style={{
+            position: 'absolute',
+            left: '20px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#999999',
+            fontSize: '18px'
+          }}
+        />
+        
+        <button
+          type="button"
+          onClick={toggleVisibility}
+          disabled={disabled}
+          style={{
+            position: 'absolute',
+            right: '15px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            background: 'transparent',
+            border: 'none',
+            color: '#999',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            padding: '5px 10px',
+            fontSize: '14px',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            borderRadius: '6px',
+            opacity: disabled ? 0.5 : 1
+          }}
+        >
+          <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} />
+          {showPassword ? 'Hide' : 'Show'}
+        </button>
+      </div>
+    </div>
+  );
+});
+PasswordInput.displayName = 'PasswordInput';
+
+// 3. Phone Input
+const PhoneInput = React.memo(({ inputRef, disabled }) => {
+  return (
+    <div style={{ marginBottom: '24px' }}>
+      <label htmlFor="phone" style={{
+        display: 'block',
+        color: '#444',
+        fontSize: '14px',
+        fontWeight: '500',
+        marginBottom: '8px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px'
+      }}>
+        PHONE NUMBER 
+        <span style={{
+          display: 'inline-block',
+          background: '#f0f2ff',
+          color: '#667eea',
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '10px',
+          marginLeft: '8px',
+          fontWeight: '500'
+        }}>
+          OPTIONAL
+        </span>
+      </label>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="tel"
+          id="phone"
+          name="phone"
+          ref={inputRef}
+          disabled={disabled}
+          placeholder="+263 123 456 789"
+          autoComplete="off"
+          className="form-input"
+          style={{
+            width: '100%',
+            padding: '16px 20px 16px 45px',
+            borderRadius: '12px',
+            fontSize: '16px',
+            background: '#000000',
+            border: '1px solid #000000',
+            color: '#ffffff',
+            WebkitTextFillColor: '#ffffff',
+            transition: 'none'
+          }}
+        />
+        <FontAwesomeIcon 
+          icon={faPhone} 
+          style={{
+            position: 'absolute',
+            left: '20px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#999999',
+            fontSize: '18px'
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+PhoneInput.displayName = 'PhoneInput';
+
+// 4. Terms Checkbox
+const TermsCheckbox = React.memo(({ inputRef, disabled }) => {
+  return (
+    <div style={{ 
+      marginBottom: '20px',
+      fontSize: '14px', 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: '10px',
+      padding: '10px',
+      backgroundColor: '#f9fafb',
+      borderRadius: '8px',
+      border: '1px solid #edf2f7'
+    }}>
+      <input 
+        type="checkbox" 
+        id="terms"
+        ref={inputRef}
+        disabled={disabled}
+        style={{ 
+          cursor: disabled ? 'not-allowed' : 'pointer', 
+          width: '18px', 
+          height: '18px',
+          accentColor: '#667eea'
+        }}
+      />
+      <label htmlFor="terms" style={{ 
+        color: '#4a5568', 
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '5px'
+      }}>
+        <FontAwesomeIcon 
+          icon={faCheck} 
+          style={{ 
+            color: '#cbd5e0',
+            fontSize: '14px'
+          }} 
+        />
+        I agree to the{" "}
+        <Link 
+          to="/terms" 
+          style={{ color: '#667eea', fontWeight: '600' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Terms of Service
+        </Link>{" "}
+        and{" "}
+        <Link 
+          to="/privacy"
+          style={{ color: '#667eea', fontWeight: '600' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Privacy Policy
+        </Link>
+      </label>
+    </div>
+  );
+});
+TermsCheckbox.displayName = 'TermsCheckbox';
+
+// 5. Submit Button
+const SubmitButton = React.memo(({ loading, isSignUp }) => {
+  return (
+    <button
+      type="submit"
+      disabled={loading}
+      className="auth-button primary"
+      style={{
+        width: '100%',
+        padding: '18px',
+        background: loading 
+          ? '#cbd5e0' 
+          : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: 'white',
+        border: 'none',
+        borderRadius: '12px',
+        fontSize: '16px',
+        fontWeight: '600',
+        cursor: loading ? 'not-allowed' : 'pointer',
+        transition: 'all 0.3s ease',
+        textTransform: 'uppercase',
+        letterSpacing: '1px',
+        marginTop: '10px',
+        opacity: loading ? 0.7 : 1
+      }}
+    >
+      {loading ? (
+        <>
+          <FontAwesomeIcon icon={faSpinner} spin />
+          {' '}
+          {isSignUp ? 'Creating Account...' : 'Signing In...'}
+        </>
+      ) : (
+        <>
+          <FontAwesomeIcon icon={isSignUp ? faUserPlus : faSignInAlt} />
+          {' '}
+          {isSignUp ? 'SIGN UP' : 'SIGN IN'}
+        </>
+      )}
+    </button>
+  );
+});
+SubmitButton.displayName = 'SubmitButton';
+
+// 6. Referral Banner
+const ReferralBanner = React.memo(({ show, isSignUp }) => {
+  if (!show || !isSignUp) return null;
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      background: 'linear-gradient(135deg, #667eea, #764ba2)',
+      color: 'white',
+      padding: '12px 24px',
+      borderRadius: '50px',
+      fontSize: '14px',
+      fontWeight: '600',
+      zIndex: 1000,
+      boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      animation: 'slideDown 0.5s ease'
+    }}>
+      <FontAwesomeIcon icon={faGift} />
+      🎁 You were referred! Get 25 bonus points on signup!
+    </div>
+  );
+});
+ReferralBanner.displayName = 'ReferralBanner';
+
+// 7. Form Actions
+const AuthFormActions = React.memo(({ 
+  isSignUp, 
+  loading, 
+  onSwitchMode, 
+  onForgotPassword 
+}) => {
+  return (
+    <div style={{
+      textAlign: 'center',
+      marginTop: '30px',
+      paddingTop: '25px',
+      borderTop: '1px solid #eee',
+      color: '#666',
+      fontSize: '14px'
+    }}>
+      {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+      {' '}
+      <button
+        type="button"
+        onClick={onSwitchMode}
+        disabled={loading}
+        style={{
+          background: 'none',
+          border: 'none',
+          color: '#667eea',
+          fontWeight: '600',
+          cursor: loading ? 'not-allowed' : 'pointer',
+          fontSize: '15px',
+          padding: '5px 10px',
+          borderRadius: '6px',
+          transition: 'all 0.3s ease',
+          marginRight: '10px',
+          textTransform: 'uppercase',
+          opacity: loading ? 0.5 : 1
+        }}
+      >
+        {isSignUp ? 'SIGN IN' : 'SIGN UP'}
+      </button>
+      
+      {!isSignUp && (
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={loading}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#718096',
+            fontWeight: '500',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            fontSize: '14px',
+            padding: '5px 10px',
+            borderRadius: '6px',
+            transition: 'all 0.3s ease',
+            opacity: loading ? 0.5 : 1
+          }}
+        >
+          Forgot password?
+        </button>
+      )}
+    </div>
+  );
+});
+AuthFormActions.displayName = 'AuthFormActions';
+
+// 8. Footer
+const AuthFooter = React.memo(() => {
+  return (
+    <footer style={{
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      textAlign: 'center',
+      padding: '8px 8px',
+      background: 'rgba(0, 0, 0, 0.9)',
+      color: '#ccc',
+      fontSize: '11px',
+      zIndex: 1000,
+      height: '40px',
+      lineHeight: '20px',
+    }}>
+      <p style={{ margin: 0, padding: 0 }}>&copy; 2025 Straun Marketing AI Engine.</p>
+      <div style={{ marginTop: 0 }}>
+        <Link to="/privacy" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px', fontSize: '11px' }}>Privacy</Link>
+        <span style={{ color: '#666' }}>|</span>
+        <Link to="/terms" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px', fontSize: '11px' }}>Terms</Link>
+      </div>
+    </footer>
+  );
+});
+AuthFooter.displayName = 'AuthFooter';
+
+// ============ MAIN AUTH COMPONENT ============
 const Auth = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
   const [isSignUp, setIsSignUp] = useState(true);
-  const [showPassword, setShowPassword] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [referralCode, setReferralCode] = useState(null);
   const [showReferralBonus, setShowReferralBonus] = useState(false);
+  
   const navigate = useNavigate();
+  const { resetNavigation } = useNavigation();
+  const retryCountRef = useRef(0);
 
-  useEffect(() => {
-      // Clear reset mode when not on reset page
-      if (!window.location.pathname.includes('/reset-password')) {
-          sessionStorage.removeItem('passwordResetMode');
-      }
-  }, []);
+  // 🚪 BOUNCER
+  const bouncer = useBouncer({
+    email: '',
+    password: '',
+    phone: '',
+    terms: false,
+  });
 
-  // Get referral code from URL on component mount
-  useEffect(() => {
+  // ✅ PRE-REGISTER ALL FIELDS ONCE - Stable refs!
+  const emailRegister = useMemo(() => bouncer.register('email'), [bouncer]);
+  const passwordRegister = useMemo(() => bouncer.register('password'), [bouncer]);
+  const phoneRegister = useMemo(() => bouncer.register('phone'), [bouncer]);
+  const termsRegister = useMemo(() => bouncer.register('terms'), [bouncer]);
+  
+  // ============ STABLE CALLBACKS ============
+  
+  const storeUserInLocalStorage = useCallback(async (userData) => {
+    if (!userData?.user) return;
+    
+    try {
+      const { data: profile, error } = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .select('role, referral_code')
+          .eq('user_id', userData.user.id)
+          .maybeSingle()
+      );
 
-    if (sessionStorage.getItem('passwordResetMode') === 'true') {
-        console.log('Password reset mode - ignoring auth changes');
-        return;
-    }
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const ref = urlParams.get('ref');
-    if (ref) {
-      setReferralCode(ref.toUpperCase());
-      setShowReferralBonus(true);
-      console.log('📢 Referral code detected:', ref);
-    }
-  }, []);
-
-  // Helper function to store user in localStorage
-  const storeUserInLocalStorage = async (userData) => {
-    if (userData?.user) {
-      // Fetch the profile to get role
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role, referral_code')  // ← Select 'role', not 'is_admin'
-        .eq('user_id', userData.user.id)
-        .single();
-      
       const userToStore = {
         id: userData.user.id,
         email: userData.user.email,
-        phone: userData.user.phone || phone || null,
+        phone: userData.user.phone || null,
         created_at: userData.user.created_at,
         last_login: new Date().toISOString(),
-        role: profile?.role || 'user',  // ← Store the role (will be 'user' or 'is_admin')
+        role: profile?.role || 'user',
         referral_code: profile?.referral_code || null
       };
       localStorage.setItem('user', JSON.stringify(userToStore));
-      console.log('✅ User stored in localStorage:', userToStore.email, 'Role:', userToStore.role);
+      console.log('✅ User stored:', userToStore.email);
+    } catch (err) {
+      console.error('[Auth] Failed to store user:', err);
     }
-  };
+  }, []);
 
-  const isAdminEmail = (email) => {
-    // Define your admin emails here - you can make this configurable
-    const adminEmails = [ 
-      'deonmahachi8@gmail.com'
-      // Add more admin emails as needed
-    ];
-    
+  const isAdminEmail = useCallback((email) => {
+    const adminEmails = ['deonmahachi8@gmail.com'];
     return adminEmails.includes(email?.toLowerCase());
-  };
+  }, []);
 
-  // Handle referral points awarding
-  const processReferral = async (userId, referralCodeValue) => {
+  const generateReferralCode = useCallback(async (userId, email) => {
+    const base = email.split('@')[0].substring(0, 6).toUpperCase();
+    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const code = `${base}${random}`;
+    
+    const isAdmin = isAdminEmail(email);
+    const roleValue = isAdmin ? 'is_admin' : 'user';
+    
     try {
-      console.log('🎁 Processing referral for user:', userId, 'Code:', referralCodeValue);
-      
-      // Find the referrer using the referral code
-      const { data: referrer, error: referrerError } = await supabase
+      const { error } = await fetchWithRetry(() => supabase
         .from('profiles')
-        .select('user_id')
-        .eq('referral_code', referralCodeValue)
-        .single();
+        .update({ 
+          referral_code: code,
+          role: roleValue
+        })
+        .eq('user_id', userId));
       
-      if (referrerError) {
+      if (error) {
+        console.error('Error setting referral code:', error);
+      } else {
+        console.log('✅ Referral code generated:', code);
+      }
+    } catch (err) {
+      console.error('[Auth] Failed to generate referral code:', err);
+    }
+    
+    return code;
+  }, [isAdminEmail]);
+
+  const processReferral = useCallback(async (userId, referralCodeValue) => {
+    try {
+      console.log('🎁 Processing referral for user:', userId);
+      
+      const { data: referrer, error: referrerError } = await fetchWithRetry(() =>
+        supabase
+          .from('profiles')
+          .select('user_id')
+          .eq('referral_code', referralCodeValue)
+          .maybeSingle()
+      );
+          
+      if (referrerError || !referrer) {
         console.log('No referrer found with code:', referralCodeValue);
         return;
       }
       
-      console.log('✅ Referrer found:', referrer.user_id);
-      
-      // Create referral record
       const { error: referralError } = await supabase
         .from('referrals')
         .insert({
@@ -124,24 +597,16 @@ const Auth = () => {
         return;
       }
       
-      console.log('✅ Referral record created');
-      
-      // Award points to referrer (50 points)
       const { error: referrerRewardError } = await supabase
         .from('referral_rewards')
         .insert({
           user_id: referrer.user_id,
-          referral_id: null, // Will be updated after we get the ID
+          referral_id: null,
           points_earned: 50,
           reward_type: 'referral'
         });
       
-      if (referrerRewardError) {
-        console.error('Error awarding referrer points:', referrerRewardError);
-      } else {
-        console.log('✅ Awarded 50 points to referrer');
-        
-        // Send notification to referrer
+      if (!referrerRewardError) {
         await supabase
           .from('notifications')
           .insert({
@@ -151,7 +616,6 @@ const Auth = () => {
           });
       }
       
-      // Award bonus to new user (25 points)
       const { error: newUserRewardError } = await supabase
         .from('referral_rewards')
         .insert({
@@ -161,9 +625,7 @@ const Auth = () => {
           reward_type: 'signup_bonus'
         });
       
-      if (newUserRewardError) {
-        console.error('Error awarding new user bonus:', newUserRewardError);
-      } else {
+      if (!newUserRewardError) {
         console.log('✅ Awarded 25 bonus points to new user');
       }
       
@@ -175,98 +637,47 @@ const Auth = () => {
     } catch (error) {
       console.error('Error processing referral:', error);
     }
-  };
+  }, []);
 
-  // Generate unique referral code for new user AND set admin status
-  const generateReferralCode = async (userId, email) => {
-    const base = email.split('@')[0].substring(0, 6).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    const code = `${base}${random}`;
+  // ============ VALIDATION (Inside crew - only on submit) ============
+  const validateForm = useCallback((values) => {
+    const { email, password, phone, terms } = values;
+    const errors = {};
     
-    // Check if this is an admin email
-    const isAdmin = isAdminEmail(email);
-    
-    // Set role based on admin check
-    const roleValue = isAdmin ? 'is_admin' : 'user';  // ← This is the fix
-    
-    const { error } = await supabase
-      .from('profiles')
-      .update({ 
-        referral_code: code,
-        role: roleValue  // ← Use 'role' column, set to 'is_admin' or 'user'
-      })
-      .eq('user_id', userId);
-    
-    if (error) {
-      console.error('Error setting referral code:', error);
-    } else {
-      console.log('✅ Referral code generated:', code);
-      if (isAdmin) {
-        console.log('👑 Admin user detected - role set to: is_admin');
-      }
+    if (!email) {
+      errors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = 'Please enter a valid email address';
     }
     
-    return code;
-  };
-
-  // Input validation
-  const validateInputs = () => {
-    if (!email || !password) {
-      setMessage({ text: 'Email and password are required', type: 'error' });
-      return false;
+    if (!password) {
+      errors.password = 'Password is required';
+    } else if (password.length < 6) {
+      errors.password = 'Password must be at least 6 characters';
     }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setMessage({ text: 'Please enter a valid email address', type: 'error' });
-      return false;
+    
+    if (isSignUp && !terms) {
+      errors.terms = 'You must agree to Terms of Service and Privacy Policy';
     }
-
-    if (password.length < 6) {
-      setMessage({ text: 'Password must be at least 6 characters', type: 'error' });
-      return false;
-    }
-
-    if (isSignUp && !agreedToTerms) {
-      setMessage({ text: 'You must agree to Terms of Service and Privacy Policy', type: 'error' });
-      return false;
-    }
-
+    
     if (isSignUp && phone) {
       const cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
-      const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
-      if (!phoneRegex.test(cleanedPhone)) {
-        setMessage({ text: 'Please enter a valid phone number', type: 'error' });
-        return false;
+      if (!/^[\+]?[1-9][\d]{0,15}$/.test(cleanedPhone)) {
+        errors.phone = 'Please enter a valid phone number';
       }
     }
+    
+    return errors;
+  }, [isSignUp]);
 
-    return true;
-  };
-  
-  const handleFormSwitch = () => {
-    setIsSignUp(!isSignUp);
-    setMessage({ text: '', type: '' });
-    setPhone('');
-    setAgreedToTerms(false);
-    setShowReferralBonus(false);
-  };
-  
-  // Handle Sign Up with Referral Integration
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-    setMessage({ text: '', type: '' });
-    
-    if (!validateInputs()) return;
-    
-    setLoading(true);
+  // ============ SIGN UP ============
+  const handleSignUp = useCallback(async (values) => {
+    const { email, password, phone } = values;
+    const cleanedPhone = phone ? phone.replace(/[\s\-\(\)\.]/g, '') : null;
 
     try {
-      const cleanedPhone = phone ? phone.replace(/[\s\-\(\)\.]/g, '') : null;
+      setLoading(true);
       
-      console.log('Attempting signup with:', { email, phone: cleanedPhone, referralCode });
-      
-      // Create user account
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -276,165 +687,134 @@ const Auth = () => {
         },
       });
 
-      if (authError) {
-        console.error('Supabase signup error:', authError);
-        throw authError;
-      }
-
-      console.log("[SignUp] Signup successful, user ID:", authData.user?.id);
+      if (authError) throw authError;
 
       if (authData.user) {
-        // Create or update profile
+        // Create profile
         try {
-          const { data: existingProfile, error: checkError } = await supabase
+          const { error: insertError } = await supabase
             .from('profiles')
-            .select('user_id')
-            .eq('user_id', authData.user.id)
-            .single();
+            .insert([{
+              user_id: authData.user.id,
+              email: email,
+              phone_number: cleanedPhone || null,
+              role: isAdminEmail(email) ? 'is_admin' : 'user'
+            }]);
 
-          if (checkError && checkError.code === 'PGRST116') {
-            // Check if this is an admin email
-            const isAdmin = isAdminEmail(email);
-            
-            // Create new profile with role
-            const { error: insertError } = await supabase
-              .from('profiles')
-              .insert([
-                {
-                  user_id: authData.user.id,
-                  email: email,
-                  phone_number: cleanedPhone || null,
-                  role: isAdmin ? 'is_admin' : 'user'  // ← Add this line to set the role
-                },
-              ]);
-
-            if (insertError) {
-              console.error('Profile creation error:', insertError);
-            } else {
-              console.log('✅ Profile created successfully with role:', isAdmin ? 'is_admin' : 'user');
-            }
+          if (insertError) {
+            console.error('Profile creation error:', insertError);
           }
-          
-          // Generate referral code for new user
-          await generateReferralCode(authData.user.id, email);
-          
-          // Process referral if there's a referral code
-          if (referralCode) {
-            await processReferral(authData.user.id, referralCode);
-          }
-          
         } catch (profileError) {
           console.error('Profile creation failed:', profileError);
         }
 
-        // Check if email confirmation is required
-        if (authData.user.identities && authData.user.identities.length === 0) {
-          setMessage({
-            text: 'User already exists with this email. Please sign in instead.',
-            type: 'info',
-          });
-          setIsSignUp(false);
-          setAgreedToTerms(false);
-          return;
+        // Generate referral code
+        await generateReferralCode(authData.user.id, email);
+        
+        if (referralCode) {
+          await processReferral(authData.user.id, referralCode);
         }
 
-        if (authData.user.confirmed_at === null) {
-          setMessage({
-            text: referralCode 
-              ? '📧 Please check your email to confirm your account! Your referral bonus will be activated after confirmation.'
-              : '📧 Please check your email to confirm your account!',
-            type: 'success',
-          });
-          
-          setEmail('');
-          setPassword('');
-          setPhone('');
-          setAgreedToTerms(false);
-          
-          setTimeout(() => {
-            setIsSignUp(false);
-          }, 3000);
-        } else {
-          // Auto sign in
+        // ✅ Check if user is confirmed
+        if (authData.user.confirmed_at) {
+          // User is confirmed - sign them in
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email,
             password,
           });
-          
+
           if (signInError) {
-            console.error('Auto-signin error:', signInError);
             setMessage({
               text: 'Account created! Please sign in.',
               type: 'info',
             });
             setIsSignUp(false);
-            setAgreedToTerms(false);
-          } else {
-            storeUserInLocalStorage(signInData);
-            setMessage({
-              text: referralCode 
-                ? '🎉 Account created successfully! You received 25 bonus points from a referral!'
-                : 'Account created successfully! Redirecting...',
-              type: 'success',
-            });
-            
+            bouncer.reset();
+            setLoading(false);
+            return;
+          }
+
+          // Store user
+          storeUserInLocalStorage(signInData);
+          
+          setMessage({
+            text: 'Account created successfully!',
+            type: 'success',
+          });
+
+          resetNavigation();
+          
+          // ✅ IMPORTANT: Wait for auth state to update
+          setLoading(false);
+          
+          // Poll for auth state to be ready
+          let authReady = false;
+          let attempts = 0;
+          const maxAttempts = 10;
+          
+          while (attempts < maxAttempts && !authReady) {
+            attempts++;
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session) {
+                authReady = true;
+                console.log('✅ Auth session ready after', attempts, 'attempts');
+                break;
+              }
+            } catch (err) {
+              console.log('⏳ Waiting for auth session...', attempts);
+            }
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+
+          // ✅ Now navigate with a slight delay to ensure state propagation
+          if (authReady) {
+            console.log('🚀 Navigating to /app');
+            // Small delay to ensure React state updates
             setTimeout(() => {
               navigate('/app', { replace: true });
-            }, 1500);
+            }, 300);
+          } else {
+            console.warn('⚠️ Auth not ready after polling, using fallback');
+            // Fallback: try to navigate anyway
+            setTimeout(() => {
+              // Force check session one more time
+              supabase.auth.getSession().then(({ data: { session } }) => {
+                if (session) {
+                  navigate('/app', { replace: true });
+                } else {
+                  // Last resort - navigate to seller decision directly
+                  navigate('/seller-decision', { replace: true });
+                }
+              });
+            }, 2000);
           }
+        } else {
+          // Email confirmation required
+          setMessage({
+            text: '✅ Account created! Please check your email to verify.',
+            type: 'success',
+          });
+          bouncer.reset();
+          setLoading(false);
+          setTimeout(() => {
+            setIsSignUp(false);
+          }, 3000);
         }
       }
-      
     } catch (error) {
       console.error('Sign up error:', error);
-      
-      if (error.message && error.message.includes('already registered')) {
-        setMessage({
-          text: 'Email already registered. Please sign in instead.',
-          type: 'error',
-        });
-        setIsSignUp(false);
-        setAgreedToTerms(false);
-      } else if (error.message && error.message.includes('User already registered')) {
-        setMessage({
-          text: 'User already exists. Please sign in.',
-          type: 'error',
-        });
-        setIsSignUp(false);
-        setAgreedToTerms(false);
-      } else if (error.message && error.message.includes('Password should be at least')) {
-        setMessage({
-          text: 'Password must be at least 6 characters long.',
-          type: 'error',
-        });
-      } else {
-        setMessage({
-          text: error.message || 'Sign up failed. Please try again.',
-          type: 'error',
-        });
-      }
-    } finally {
+      setMessage({
+        text: error.message || 'Sign up failed. Please try again.',
+        type: 'error',
+      });
       setLoading(false);
     }
-  };
-  
-  // Handle Sign In
-  const handleSignIn = async (e) => {
-    e.preventDefault();
-    setMessage({ text: '', type: '' });
-    
-    if (!email || !password) {
-      setMessage({ text: 'Email and password are required', type: 'error' });
-      return;
-    }
-    
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setMessage({ text: 'Please enter a valid email address', type: 'error' });
-      return;
-    }
-    
-    setLoading(true);
+  }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer]);
+
+  // ============ SIGN IN ============
+  const handleSignIn = useCallback(async (values) => {
+    const { email, password } = values;
 
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -444,7 +824,6 @@ const Auth = () => {
 
       if (error) throw error;
 
-      // This function now correctly fetches and stores the role
       await storeUserInLocalStorage(data);
       
       setMessage({
@@ -452,9 +831,7 @@ const Auth = () => {
         type: 'success',
       });
       
-      setEmail('');
-      setPassword('');
-      setAgreedToTerms(false);
+      bouncer.reset();
       
       setTimeout(() => {
         navigate('/app', { replace: true });
@@ -468,11 +845,6 @@ const Auth = () => {
           text: 'Invalid email or password',
           type: 'error',
         });
-      } else if (error.message && error.message.includes('Email not confirmed')) {
-        setMessage({
-          text: 'Please confirm your email address first.',
-          type: 'error',
-        });
       } else {
         setMessage({
           text: error.message || 'Login failed. Please try again.',
@@ -482,16 +854,65 @@ const Auth = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [storeUserInLocalStorage, navigate, bouncer]);
 
-  const handleForgotPassword = async () => {
+  // ============ FORM SUBMIT ============
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    
+    // 🚪 BOUNCER GETS THE VALUES - Only on submit
+    const values = bouncer.getValues();
+    
+    // ✅ Validation happens HERE - Not on every keystroke
+    const errors = validateForm(values);
+    
+    if (Object.keys(errors).length > 0) {
+      // Show first error
+      const firstError = Object.values(errors)[0];
+      setMessage({ text: firstError, type: 'error' });
+      return;
+    }
+
+    // No errors - proceed
+    setLoading(true);
+    setMessage({ text: '', type: '' });
+
+    if (!navigator.onLine) {
+      setMessage({ text: 'You are offline. Please connect to the internet.', type: 'error' });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      if (isSignUp) {
+        await handleSignUp(values);
+      } else {
+        await handleSignIn(values);
+      }
+    } catch (error) {
+      setMessage({ text: error.message || 'Action failed', type: 'error' });
+      setLoading(false);
+    }
+  }, [isSignUp, validateForm, handleSignUp, handleSignIn, bouncer]);
+
+  // ============ FORM SWITCH ============
+  const handleFormSwitch = useCallback(() => {
+    setIsSignUp(!isSignUp);
+    setMessage({ text: '', type: '' });
+    setShowReferralBonus(false);
+    bouncer.reset();
+  }, [isSignUp, bouncer]);
+
+  // ============ FORGOT PASSWORD ============
+  const handleForgotPassword = useCallback(async () => {
+    const email = bouncer.getValue('email');
+    
     if (!email) {
       setMessage({ text: 'Please enter your email to reset password', type: 'error' });
       return;
     }
     
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setMessage({ text: 'Please enter a valid email address', type: 'error' });
       return;
     }
@@ -507,63 +928,49 @@ const Auth = () => {
       if (error) throw error;
       
       setMessage({ 
-        text: '📧 Password reset email sent! Check your inbox (and spam folder).', 
+        text: '📧 Password reset email sent! Check your inbox.', 
         type: 'success' 
       });
       
-      setEmail('');
+      bouncer.setValue('email', '');
       
     } catch (error) {
       console.error('Forgot password error:', error);
       setMessage({ 
-        text: error.message || 'Failed to send reset email. Please try again.', 
+        text: error.message || 'Failed to send reset email.', 
         type: 'error' 
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [bouncer]);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (isSignUp) {
-      handleSignUp(e);
-    } else {
-      handleSignIn(e);
+  // ============ EFFECTS ============
+  useEffect(() => {
+    if (!window.location.pathname.includes('/reset-password')) {
+      sessionStorage.removeItem('passwordResetMode');
     }
-  };
+  }, []);
 
-  const togglePasswordVisibility = () => {
-    setShowPassword(!showPassword);
-  };
+  useEffect(() => {
+    if (sessionStorage.getItem('passwordResetMode') === 'true') {
+      console.log('Password reset mode - ignoring auth changes');
+      return;
+    }
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const ref = urlParams.get('ref');
+    if (ref) {
+      setReferralCode(ref.toUpperCase());
+      setShowReferralBonus(true);
+      console.log('📢 Referral code detected:', ref);
+    }
+  }, []);
+
+  // ============ RENDER ============
   return (
     <div className="signup-page">
-      
-      {/* Referral Bonus Banner */}
-      {showReferralBonus && isSignUp && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: 'linear-gradient(135deg, #667eea, #764ba2)',
-          color: 'white',
-          padding: '12px 24px',
-          borderRadius: '50px',
-          fontSize: '14px',
-          fontWeight: '600',
-          zIndex: 1000,
-          boxShadow: '0 4px 15px rgba(0,0,0,0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          animation: 'slideDown 0.5s ease'
-        }}>
-          <FontAwesomeIcon icon={faGift} />
-          🎁 You were referred! Get 25 bonus points on signup!
-        </div>
-      )}
+      <ReferralBanner show={showReferralBonus} isSignUp={isSignUp} />
 
       <div className="auth-page-wrapper">
         <div className="auth-container">
@@ -576,6 +983,7 @@ const Auth = () => {
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
+                paddingBottom: '70px',
                 marginBottom: '8px'
               }}>
                 {isSignUp ? 'Create Account' : 'Welcome Back'}
@@ -598,366 +1006,54 @@ const Auth = () => {
               </div>
             )}
 
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} autoComplete="off">
               <div style={{ display: 'none' }}>
                 <input type="text" name="username" autoComplete="username" />
                 <input type="password" name="current-password" autoComplete="current-password" />
               </div>
 
               {isSignUp && (
-                <div style={{ marginBottom: '24px' }}>
-                  <label htmlFor="phone" style={{
-                    display: 'block',
-                    color: '#444',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    marginBottom: '8px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px'
-                  }}>
-                    PHONE NUMBER 
-                    <span style={{
-                      display: 'inline-block',
-                      background: '#f0f2ff',
-                      color: '#667eea',
-                      fontSize: '11px',
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      marginLeft: '8px',
-                      fontWeight: '500'
-                    }}>
-                      OPTIONAL
-                    </span>
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="tel"
-                      id="phone"
-                      name="phone"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      disabled={loading}
-                      placeholder="+263 123 456 789"
-                      autoComplete="off"
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        padding: '16px 20px 16px 45px',
-                        borderRadius: '12px',
-                        fontSize: '16px',
-                        transition: 'all 0.3s ease',
-                      }}
-                    />
-                    <FontAwesomeIcon 
-                      icon={faPhone} 
-                      style={{
-                        position: 'absolute',
-                        left: '20px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        color: phone ? '#667eea' : '#999999',
-                        fontSize: '18px'
-                      }}
-                    />
-                  </div>
-                </div>
+                <PhoneInput 
+                  inputRef={phoneRegister.ref}
+                  disabled={loading}
+                />
               )}
 
-              <div style={{ marginBottom: '24px' }}>
-                <label htmlFor="email" style={{
-                  display: 'block',
-                  color: '#444',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  marginBottom: '8px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  EMAIL ADDRESS
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    disabled={loading}
-                    placeholder="your.email@example.com"
-                    autoComplete="email"
-                    className="form-input"
-                    style={{
-                      width: '100%',
-                      padding: '16px 20px 16px 45px',
-                      borderRadius: '12px',
-                      fontSize: '16px',
-                      transition: 'all 0.3s ease',
-                    }}
-                  />
-                  <FontAwesomeIcon 
-                    icon={faEnvelope} 
-                    style={{
-                      position: 'absolute',
-                      left: '20px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: email ? '#667eea' : '#999999',
-                      fontSize: '18px'
-                    }}
-                  />
-                </div>
-              </div>
+              <EmailInput 
+                inputRef={emailRegister.ref}
+                disabled={loading}
+              />
 
-              <div style={{ marginBottom: '24px' }}>
-                <label htmlFor="password" style={{
-                  display: 'block',
-                  color: '#444',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  marginBottom: '8px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  PASSWORD
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    id="password"
-                    name="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    disabled={loading}
-                    placeholder="At least 6 characters"
-                    autoComplete={isSignUp ? "new-password" : "current-password"}
-                    className="form-input"
-                    style={{
-                      width: '100%',
-                      padding: '16px 50px 16px 45px',
-                      borderRadius: '12px',
-                      fontSize: '16px',
-                      transition: 'all 0.3s ease',
-                    }}
-                  />
-                  <FontAwesomeIcon 
-                    icon={faLock} 
-                    style={{
-                      position: 'absolute',
-                      left: '20px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: password ? '#667eea' : '#999999',
-                      fontSize: '18px'
-                    }}
-                  />
-                  
-                  <button
-                    type="button"
-                    onClick={togglePasswordVisibility}
-                    disabled={loading}
-                    style={{
-                      position: 'absolute',
-                      right: '15px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'transparent',
-                      border: 'none',
-                      color: password ? '#667eea' : '#999',
-                      cursor: loading ? 'not-allowed' : 'pointer',
-                      padding: '5px 10px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      borderRadius: '6px',
-                      transition: 'all 0.3s ease',
-                      opacity: loading ? 0.5 : 1
-                    }}
-                  >
-                    <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} />
-                    {showPassword ? 'Hide' : 'Show'}
-                  </button>
-                </div>
-              </div>
+              <PasswordInput 
+                inputRef={passwordRegister.ref}
+                disabled={loading}
+                isSignUp={isSignUp}
+              />
 
               {isSignUp && (
-                <div style={{ 
-                  marginBottom: '20px',
-                  fontSize: '14px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '10px',
-                  padding: '10px',
-                  backgroundColor: '#f9fafb',
-                  borderRadius: '8px',
-                  border: '1px solid #edf2f7'
-                }}>
-                  <input 
-                    type="checkbox" 
-                    id="terms"
-                    checked={agreedToTerms}
-                    onChange={(e) => setAgreedToTerms(e.target.checked)}  // ✅ Fixed
-                    disabled={loading}
-                    style={{ 
-                      cursor: loading ? 'not-allowed' : 'pointer', 
-                      width: '18px', 
-                      height: '18px',
-                      accentColor: '#667eea'
-                    }}
-                  />
-                  <label htmlFor="terms" style={{ 
-                    color: '#4a5568', 
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px'
-                  }}>
-                    <FontAwesomeIcon 
-                      icon={faCheck} 
-                      style={{ 
-                        color: agreedToTerms ? '#48bb78' : '#cbd5e0',
-                        fontSize: '14px'
-                      }} 
-                    />
-                    I agree to the{" "}
-                    <Link 
-                      to="/terms" 
-                      style={{ color: '#667eea', fontWeight: '600' }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Terms of Service
-                    </Link>{" "}
-                    and{" "}
-                    <Link 
-                      to="/privacy"
-                      style={{ color: '#667eea', fontWeight: '600' }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Privacy Policy
-                    </Link>
-                  </label>
-                </div>
+                <TermsCheckbox 
+                  inputRef={termsRegister.ref}
+                  disabled={loading}
+                />
               )}
 
-              <button
-                type="submit"
-                disabled={loading || (isSignUp && !agreedToTerms)}
-                className="auth-button primary"
-                style={{
-                  width: '100%',
-                  padding: '18px',
-                  background: isSignUp && !agreedToTerms 
-                    ? '#cbd5e0' 
-                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: loading || (isSignUp && !agreedToTerms) ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s ease',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  marginTop: '10px',
-                  opacity: loading || (isSignUp && !agreedToTerms) ? 0.7 : 1
-                }}
-              >
-                {loading ? (
-                  <>
-                    <FontAwesomeIcon icon={faSpinner} spin />
-                    {' '}
-                    {isSignUp ? 'Creating Account...' : 'Signing In...'}
-                  </>
-                ) : (
-                  <>
-                    <FontAwesomeIcon icon={isSignUp ? faUserPlus : faSignInAlt} />
-                    {' '}
-                    {isSignUp ? 'SIGN UP' : 'SIGN IN'}
-                  </>
-                )}
-              </button>
+              <SubmitButton 
+                loading={loading}
+                isSignUp={isSignUp}
+              />
             </form>
           
-            <div style={{
-              textAlign: 'center',
-              marginTop: '30px',
-              paddingTop: '25px',
-              borderTop: '1px solid #eee',
-              color: '#666',
-              fontSize: '14px'
-            }}>
-              {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-              {' '}
-              <button
-                type="button"
-                onClick={handleFormSwitch}
-                disabled={loading}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#667eea',
-                  fontWeight: '600',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  fontSize: '15px',
-                  padding: '5px 10px',
-                  borderRadius: '6px',
-                  transition: 'all 0.3s ease',
-                  marginRight: '10px',
-                  textTransform: 'uppercase',
-                  opacity: loading ? 0.5 : 1
-                }}
-              >
-                {isSignUp ? 'SIGN IN' : 'SIGN UP'}
-              </button>
-              
-              {!isSignUp && (
-                <button
-                  type="button"
-                  onClick={handleForgotPassword}
-                  disabled={loading}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#718096',
-                    fontWeight: '500',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    padding: '5px 10px',
-                    borderRadius: '6px',
-                    transition: 'all 0.3s ease',
-                    opacity: loading ? 0.5 : 1
-                  }}
-                >
-                  Forgot password?
-                </button>
-              )}
-            </div>
+            <AuthFormActions 
+              isSignUp={isSignUp}
+              loading={loading}
+              onSwitchMode={handleFormSwitch}
+              onForgotPassword={handleForgotPassword}
+            />
           </div>
         </div>
       </div>
       
-      <footer className="signup-footer" style={{
-        position: 'fixed',
-        bottom: '0',
-        left: '0',
-        right: '0',
-        textAlign: 'center',
-        padding: '8px',
-        background: 'rgba(0, 0, 0, 0.9)',
-        color: '#ccc',
-        fontSize: '12px',
-        zIndex: '1000'
-      }}>
-        <p>&copy; 2025 Straun Marketing AI Engine. All rights reserved.</p>
-        <div style={{ marginTop: '2px' }}>
-          <Link to="/privacy" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px' }}>Privacy</Link>
-          <span style={{ color: '#666' }}>|</span>
-          <Link to="/terms" style={{ color: '#48bb78', textDecoration: 'none', margin: '0 8px' }}>Terms</Link>
-        </div>
-      </footer>
+      <AuthFooter />
     </div>
   );
 };

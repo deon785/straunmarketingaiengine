@@ -1,6 +1,21 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from './lib/supabase';
+import React, { useEffect, useState, useCallback } from 'react';
+import { supabase } from './lib/supabase'; 
 import './PushNotificationHandler.css';
+
+// ✅ Add fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 const PushNotificationHandler = () => {
     const [isSupported, setIsSupported] = useState(false);
@@ -10,6 +25,23 @@ const PushNotificationHandler = () => {
     const [userId, setUserId] = useState(null);
     const [isPromptVisible, setIsPromptVisible] = useState(true);
     const [hasUserDecided, setHasUserDecided] = useState(false);
+
+    // ✅ Memoize functions with useCallback
+    const checkUser = useCallback(async () => {
+        try {
+            // ✅ Use fetchWithRetry
+            const result = await fetchWithRetry(() => supabase.auth.getUser());
+            if (result.error) {
+                console.error('Error getting user:', result.error);
+                return;
+            }
+            if (result.data?.user) {
+                setUserId(result.data.user.id);
+            }
+        } catch (err) {
+            console.error('Failed to check user:', err);
+        }
+    }, []);
 
     useEffect(() => {
         if ('serviceWorker' in navigator && 'PushManager' in window) {
@@ -32,28 +64,31 @@ const PushNotificationHandler = () => {
         }, 3000);
         
         return () => clearInterval(interval);
-    }, [isSupported]);
-
-    const checkUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-            setUserId(user.id);
-        }
-    };
+    }, [isSupported, checkUser]);
 
     const urlBase64ToUint8Array = (base64String) => {
-        const padding = '='.repeat((4 - base64String.length % 4) % 4);
-        const base64 = (base64String + padding)
-            .replace(/\-/g, '+')
-            .replace(/_/g, '/');
-        
-        const rawData = window.atob(base64);
-        const outputArray = new Uint8Array(rawData.length);
-        
-        for (let i = 0; i < rawData.length; ++i) {
-            outputArray[i] = rawData.charCodeAt(i);
+        if (!base64String) {
+            console.error('No VAPID key provided');
+            return new Uint8Array(0);
         }
-        return outputArray;
+        
+        try {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding)
+                .replace(/\-/g, '+')
+                .replace(/_/g, '/');
+            
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        } catch (err) {
+            console.error('Failed to convert VAPID key:', err);
+            return new Uint8Array(0);
+        }
     };
 
     const registerPushServiceWorker = async () => {
@@ -71,9 +106,9 @@ const PushNotificationHandler = () => {
                 return existingPushSW;
             }
             
-            const response = await fetch('/push-sw.js');
+            const response = await fetch('/sw.js');
             if (!response.ok) {
-                throw new Error(`Failed to fetch push-sw.js: ${response.status}`);
+                throw new Error(`Failed to fetch service worker: ${response.status}`);
             }
             
             const code = await response.text();
@@ -99,6 +134,11 @@ const PushNotificationHandler = () => {
     const testNotification = async () => {
         try {
             const registration = await navigator.serviceWorker.ready;
+            if (!registration) {
+                console.error('No service worker ready');
+                return false;
+            }
+            
             await registration.showNotification('StraunAI Test', {
                 body: 'Push notifications are working! 🎉',
                 icon: '/pwa-192x192.png',
@@ -124,7 +164,7 @@ const PushNotificationHandler = () => {
             
         } catch (error) {
             console.error('Error in handleAllowClick:', error);
-            setStatus(`❌ Error: ${error.message}`);
+            setStatus(`❌ Error: ${error.message || 'Unknown error'}`);
             setIsLoading(false);
         }
     };
@@ -133,7 +173,11 @@ const PushNotificationHandler = () => {
         setIsPromptVisible(false);
         setHasUserDecided(true);
         setStatus('Notifications not enabled. You can enable them later.');
-        localStorage.setItem('pushNotificationDeclined', 'true');
+        try {
+            localStorage.setItem('pushNotificationDeclined', 'true');
+        } catch (err) {
+            console.error('Failed to save preference:', err);
+        }
     };
 
     const showPromptAgain = () => {
@@ -141,9 +185,15 @@ const PushNotificationHandler = () => {
         setHasUserDecided(false);
     };
 
+    // ✅ Use fetchWithRetry
     const unsubscribeFromPush = async () => {
         try {
             const registration = await navigator.serviceWorker.ready;
+            if (!registration) {
+                setStatus('❌ No service worker found');
+                return;
+            }
+            
             const subscription = await registration.pushManager.getSubscription();
             
             if (subscription) {
@@ -151,11 +201,17 @@ const PushNotificationHandler = () => {
                 
                 if (successful) {
                     if (userId) {
-                        await supabase
+                        // ✅ Use fetchWithRetry
+                        const result = await fetchWithRetry(() => supabase
                             .from('push_subscriptions')
                             .delete()
                             .eq('user_id', userId)
-                            .eq('endpoint', subscription.endpoint);
+                            .eq('endpoint', subscription.endpoint)
+                        );
+                        
+                        if (result.error) {
+                            console.error('Failed to delete subscription:', result.error);
+                        }
                     }
                     
                     setPermission('default');
@@ -168,10 +224,11 @@ const PushNotificationHandler = () => {
             }
         } catch (error) {
             console.error('Error unsubscribing:', error);
-            setStatus('❌ Error disabling notifications');
+            setStatus(`❌ Error: ${error.message || 'Unknown error'}`);
         }
     };
 
+    // ✅ Use fetchWithRetry
     const checkSubscriptionStatus = async () => {
         try {
             const registration = await navigator.serviceWorker.ready;
@@ -184,14 +241,19 @@ const PushNotificationHandler = () => {
             
             if (subscription) {
                 if (userId) {
-                    const { data } = await supabase
+                    // ✅ Use fetchWithRetry
+                    const result = await fetchWithRetry(() => supabase
                         .from('push_subscriptions')
                         .select('id')
                         .eq('user_id', userId)
                         .eq('endpoint', subscription.endpoint)
-                        .single();
+                        .maybeSingle()
+                    );
                     
-                    if (data) {
+                    if (result.error) {
+                        console.error('Error checking subscription:', result.error);
+                        setStatus('⚠️ Active but error checking server');
+                    } else if (result.data) {
                         setStatus('✅ Push notifications are active and saved');
                     } else {
                         setStatus('⚠️ Active but not saved to server');
@@ -209,38 +271,51 @@ const PushNotificationHandler = () => {
     };
 
     const debugServiceWorkers = async () => {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        console.log('=== Service Worker Debug Info ===');
-        console.log('Total registrations:', registrations.length);
-        
-        registrations.forEach((reg, i) => {
-            console.log(`\n${i + 1}. Registration:`);
-            console.log('   Scope:', reg.scope);
-            console.log('   Script URL:', reg.active?.scriptURL);
-            console.log('   State:', reg.active?.state);
+        try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            console.log('=== Service Worker Debug Info ===');
+            console.log('Total registrations:', registrations.length);
             
-            reg.pushManager.getSubscription().then(sub => {
-                console.log('   Push Subscription:', sub ? 'Yes' : 'No');
+            registrations.forEach((reg, i) => {
+                console.log(`\n${i + 1}. Registration:`);
+                console.log('   Scope:', reg.scope);
+                console.log('   Script URL:', reg.active?.scriptURL);
+                console.log('   State:', reg.active?.state);
+                
+                reg.pushManager.getSubscription().then(sub => {
+                    console.log('   Push Subscription:', sub ? 'Yes' : 'No');
+                }).catch(err => {
+                    console.log('   Push Subscription error:', err);
+                });
             });
-        });
-        
-        fetch('/push-sw.js')
-            .then(r => console.log('\npush-sw.js status:', r.status))
-            .catch(e => console.log('\npush-sw.js error:', e));
-        
-        fetch('/sw.js')
-            .then(r => console.log('sw.js status:', r.status))
-            .catch(e => console.log('sw.js error:', e));
+            
+            const swResponse = await fetch('/sw.js');
+            console.log('sw.js status:', swResponse.status);
+            
+        } catch (err) {
+            console.error('Debug error:', err);
+        }
     };
 
+    // ✅ Use fetchWithRetry
     const enablePushNotifications = async () => {
         try {
-            const { data: { user } } = await supabase.auth.getUser();
+            // ✅ Use fetchWithRetry
+            const userResult = await fetchWithRetry(() => supabase.auth.getUser());
+            
+            if (userResult.error) {
+                setStatus('❌ Please login first');
+                setIsLoading(false);
+                return;
+            }
+            
+            const user = userResult.data?.user;
             if (!user) {
                 setStatus('❌ Please login first');
                 setIsLoading(false);
                 return;
             }
+            
             setUserId(user.id);
             
             if (Notification.permission === 'default') {
@@ -271,7 +346,13 @@ const PushNotificationHandler = () => {
             await navigator.serviceWorker.ready;
             setStatus('Subscribing to push notifications...');
             
-            const VAPID_PUBLIC_KEY = 'BE0bHzM7cNXwAzyuA6g56NEG7O-4XABAy5gCuiQ64478oryU_iTb9P9IXsMlG3ZQnNFwI0MwjVz3BPUwL_bRo8E';
+            const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+            
+            if (!VAPID_PUBLIC_KEY) {
+                setStatus('❌ VAPID key not configured');
+                setIsLoading(false);
+                return;
+            }
             
             let subscription = await registration.pushManager.getSubscription();
             
@@ -288,7 +369,8 @@ const PushNotificationHandler = () => {
             
             setStatus('Saving subscription to database...');
             
-            const { error } = await supabase
+            // ✅ Use fetchWithRetry
+            const { error } = await fetchWithRetry(() => supabase
                 .from('push_subscriptions')
                 .upsert({
                     user_id: user.id,
@@ -298,29 +380,34 @@ const PushNotificationHandler = () => {
                     updated_at: new Date().toISOString()
                 }, {
                     onConflict: 'user_id,endpoint'
-                });
+                })
+            );
             
-            if (error) throw error;
-            
-            setPermission('granted'); 
-            
-            setTimeout(async () => {
-                const sent = await testNotification();
-                if (sent) {
-                    setStatus('✅ Push notifications enabled and tested!');
-                } else {
-                    setStatus('✅ Push enabled but test failed. Check console.');
-                }
-            }, 1000);
+            if (error) {
+                console.error('Database error:', error);
+                setStatus(`⚠️ Enabled but failed to save: ${error.message}`);
+            } else {
+                setPermission('granted'); 
+                
+                setTimeout(async () => {
+                    const sent = await testNotification();
+                    if (sent) {
+                        setStatus('✅ Push notifications enabled and tested!');
+                    } else {
+                        setStatus('✅ Push enabled but test failed. Check console.');
+                    }
+                }, 1000);
+            }
             
         } catch (error) {
             console.error('❌ Error enabling push:', error);
-            setStatus(`❌ Error: ${error.message}`);
+            setStatus(`❌ Error: ${error.message || 'Unknown error'}`);
         } finally {
             setIsLoading(false);
         }
     };
 
+    // ✅ Use fetchWithRetry COMPLETE FIXED sendTestNotification
     const sendTestNotification = async () => {
         if (!userId) {
             setStatus('❌ Please login first');
@@ -328,19 +415,26 @@ const PushNotificationHandler = () => {
         }
 
         try {
-            const { error } = await supabase
+            // ✅ USING ACTUAL COLUMNS FROM YOUR SCHEMA
+            // notifications: user_id, message, link_type, is_read, created_at, product_image, buyer_phone
+            const { error } = await fetchWithRetry(() => supabase
                 .from('notifications')
                 .insert({
                     user_id: userId,
                     message: '🔔 Test Push Notification!',
-                    type: 'test',
-                    status: 'unread',
+                    link_type: 'test',
+                    is_read: false,
                     created_at: new Date().toISOString(),
                     product_image: null,
                     buyer_phone: null
-                });
+                })
+            );
 
-            if (error) throw error;
+            if (error) {
+                console.error('Error creating notification:', error);
+                setStatus('❌ Failed to create notification record');
+                return;
+            }
             
             const sent = await testNotification();
             
@@ -352,7 +446,7 @@ const PushNotificationHandler = () => {
             
         } catch (error) {
             console.error('Error sending test notification:', error);
-            setStatus('❌ Error sending test notification');
+            setStatus(`❌ Error: ${error.message || 'Unknown error'}`);
         }
     };
 
@@ -368,7 +462,7 @@ const PushNotificationHandler = () => {
         );
     }
 
-    // THIS PART MAKES THE CODE DISAPPEAR WHEN ENABLED
+    // Return null when enabled and prompt is hidden
     if (permission === 'granted' && !isPromptVisible) {
         return null; 
     }
@@ -500,9 +594,8 @@ const PushNotificationHandler = () => {
                     <div className="note">
                         <p><strong>How it works:</strong></p>
                         <ol>
-                            <li>VitePWA auto-generates <code>/sw.js</code> for caching and offline support</li>
-                            <li>Push notifications use a separate <code>/push-sw.js</code> service worker</li>
-                            <li>Subscriptions are saved to Supabase database</li>
+                            <li>Service worker <code>/sw.js</code> handles both caching and push notifications</li>
+                            <li>Push subscriptions are saved to Supabase database</li>
                         </ol>
                     </div>
                 </div>
@@ -511,4 +604,4 @@ const PushNotificationHandler = () => {
     );
 };
 
-export default PushNotificationHandler;
+export default React.memo(PushNotificationHandler);

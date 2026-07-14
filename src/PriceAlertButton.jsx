@@ -1,5 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from './lib/supabase';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from './lib/supabase'; 
+
+// ✅ Add fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 const PriceAlertButton = ({ product, userId, onAlertSet }) => {
     const [targetPrice, setTargetPrice] = useState('');
@@ -8,89 +23,134 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
     const [loading, setLoading] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [suggestedPrice, setSuggestedPrice] = useState(null);
+    const [error, setError] = useState(null);
+
+    // Check if product exists
+    if (!product || !product.id) {
+        return null;
+    }
+
+    // ✅ Memoize functions
+    const checkExistingAlert = useCallback(async () => {
+        if (!userId) return;
+        
+        try {
+            // ✅ Use fetchWithRetry
+            const result = await fetchWithRetry(() => supabase
+                .from('price_alerts')
+                .select('*')
+                .eq('user_id', userId)
+                .eq('product_id', product.id)
+                .maybeSingle()
+            );
+            
+            if (!result.error && result.data) {
+                setHasAlert(true);
+                setExistingAlert(result.data);
+                setTargetPrice(result.data.target_price?.toString() || '');
+            }
+        } catch (err) {
+            console.error('Error checking existing alert:', err);
+            // Silent fail - don't crash
+        }
+    }, [userId, product.id]);
+
+    const calculateSuggestedPrice = useCallback(() => {
+        if (product?.price && typeof product.price === 'number') {
+            const discount = product.price * 0.15;
+            const suggested = (product.price - discount).toFixed(2);
+            setSuggestedPrice(suggested);
+        }
+    }, [product.price]);
 
     useEffect(() => {
         checkExistingAlert();
         calculateSuggestedPrice();
-    }, [product.id]);
-
-    const checkExistingAlert = async () => {
-        if (!userId) return;
-        
-        const { data, error } = await supabase
-            .from('price_alerts')
-            .select('*')
-            .eq('user_id', userId)
-            .eq('product_id', product.id)
-            .maybeSingle();
-        
-        if (data && !error) {
-            setHasAlert(true);
-            setExistingAlert(data);
-            setTargetPrice(data.target_price);
-        }
-    };
-
-    const calculateSuggestedPrice = () => {
-        // Suggest a price 10-20% below current price
-        if (product.price) {
-            const discount = product.price * 0.15; // 15% discount
-            const suggested = (product.price - discount).toFixed(2);
-            setSuggestedPrice(suggested);
-        }
-    };
+    }, [checkExistingAlert, calculateSuggestedPrice]);
 
     const setPriceAlert = async () => {
-        if (!targetPrice || targetPrice >= product.price) {
-            alert('Alert price must be lower than current price');
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            setError('You are offline. Please connect to the internet to set alerts.');
+            return;
+        }
+        
+        if (!targetPrice) {
+            setError('Please enter a target price');
+            return;
+        }
+        
+        const targetPriceNum = parseFloat(targetPrice);
+        if (isNaN(targetPriceNum)) {
+            setError('Please enter a valid number');
+            return;
+        }
+        
+        if (targetPriceNum >= product.price) {
+            setError('Alert price must be lower than current price');
             return;
         }
 
         setLoading(true);
+        setError(null);
         
         try {
-            const { data, error } = await supabase
+            // ✅ Use fetchWithRetry
+            const result = await fetchWithRetry(() => supabase
                 .from('price_alerts')
                 .upsert({
                     user_id: userId,
                     product_id: product.id,
-                    target_price: parseFloat(targetPrice),
+                    target_price: targetPriceNum,
                     current_price: product.price,
                     is_active: true,
                     is_triggered: false,
                     updated_at: new Date().toISOString()
                 })
                 .select()
-                .single();
+                .maybeSingle()
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
 
             setHasAlert(true);
-            setExistingAlert(data);
+            setExistingAlert(result.data);
             setShowModal(false);
+            setTargetPrice('');
             
             if (onAlertSet) onAlertSet(true);
             
-            alert(`✅ Price alert set! We'll notify you when "${product.name}" drops below $${targetPrice}`);
+            alert(`✅ Price alert set! We'll notify you when "${product.name}" drops below $${targetPriceNum}`);
         } catch (error) {
             console.error('Error setting price alert:', error);
-            alert('Failed to set price alert. Please try again.');
+            setError(error.message || 'Failed to set price alert. Please try again.');
         } finally {
             setLoading(false);
         }
     };
 
     const removeAlert = async () => {
+        // ✅ Check offline status
+        if (!navigator.onLine) {
+            setError('You are offline. Please connect to the internet to remove alerts.');
+            return;
+        }
+        
+        if (!userId || !product?.id) return;
+        
         setLoading(true);
+        setError(null);
         
         try {
-            const { error } = await supabase
+            // ✅ Use fetchWithRetry
+            const result = await fetchWithRetry(() => supabase
                 .from('price_alerts')
                 .update({ is_active: false })
                 .eq('user_id', userId)
-                .eq('product_id', product.id);
+                .eq('product_id', product.id)
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
 
             setHasAlert(false);
             setExistingAlert(null);
@@ -101,7 +161,7 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
             alert('🔕 Price alert removed');
         } catch (error) {
             console.error('Error removing alert:', error);
-            alert('Failed to remove alert. Please try again.');
+            setError(error.message || 'Failed to remove alert. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -119,10 +179,42 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
 
     return (
         <>
+            {/* Error Message */}
+            {error && (
+                <div style={{
+                    background: '#ff4444',
+                    color: 'white',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    marginTop: '10px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <span>⚠️ {error}</span>
+                    <button 
+                        onClick={() => setError(null)}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'white',
+                            cursor: 'pointer',
+                            fontSize: '16px'
+                        }}
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
+
             {/* Alert Button */}
             {!hasAlert ? (
                 <button
-                    onClick={() => setShowModal(true)}
+                    onClick={() => {
+                        setError(null);
+                        setShowModal(true);
+                    }}
                     style={{
                         width: '100%',
                         backgroundColor: '#FF9800',
@@ -156,7 +248,7 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                             <div style={{ fontSize: '12px', opacity: 0.9 }}>
-                                Alert at ${existingAlert?.target_price}
+                                Alert at ${existingAlert?.target_price?.toFixed(2) || '?'}
                             </div>
                             {getSavingsMessage() && (
                                 <div style={{ fontSize: '11px', marginTop: '3px' }}>
@@ -173,11 +265,12 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
                                 color: 'white',
                                 padding: '5px 10px',
                                 borderRadius: '5px',
-                                cursor: 'pointer',
-                                fontSize: '12px'
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                fontSize: '12px',
+                                opacity: loading ? 0.6 : 1
                             }}
                         >
-                            Remove
+                            {loading ? '...' : 'Remove'}
                         </button>
                     </div>
                 </div>
@@ -233,7 +326,7 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
                         <div style={{ marginBottom: '15px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                                 <span style={{ fontWeight: 'bold' }}>Current Price:</span>
-                                <span style={{ color: '#4CAF50', fontWeight: 'bold' }}>${product.price}</span>
+                                <span style={{ color: '#4CAF50', fontWeight: 'bold' }}>${product.price?.toFixed(2) || '0'}</span>
                             </div>
                             
                             <div style={{ marginBottom: '15px' }}>
@@ -297,7 +390,7 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
                         
                         <button
                             onClick={setPriceAlert}
-                            disabled={loading || !targetPrice || targetPrice >= product.price}
+                            disabled={loading || !targetPrice || parseFloat(targetPrice) >= product.price}
                             style={{
                                 width: '100%',
                                 background: 'linear-gradient(135deg, #667eea, #764ba2)',
@@ -307,8 +400,8 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
                                 borderRadius: '8px',
                                 fontWeight: 'bold',
                                 fontSize: '16px',
-                                cursor: (loading || !targetPrice || targetPrice >= product.price) ? 'not-allowed' : 'pointer',
-                                opacity: (loading || !targetPrice || targetPrice >= product.price) ? 0.6 : 1
+                                cursor: (loading || !targetPrice || parseFloat(targetPrice) >= product.price) ? 'not-allowed' : 'pointer',
+                                opacity: (loading || !targetPrice || parseFloat(targetPrice) >= product.price) ? 0.6 : 1
                             }}
                         >
                             {loading ? 'Setting Alert...' : '🔔 Set Price Alert'}
@@ -320,4 +413,4 @@ const PriceAlertButton = ({ product, userId, onAlertSet }) => {
     );
 };
 
-export default PriceAlertButton;
+export default React.memo(PriceAlertButton);

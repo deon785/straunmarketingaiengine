@@ -21,7 +21,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         totalSales: 0,
         totalPurchases: 0,
         totalSaved: 0,
-        // Buyer-specific stats
         wishlistCount: 0,
         orderCount: 0,
         totalSpent: 0,
@@ -36,7 +35,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     const [wishlistItems, setWishlistItems] = useState([]);
     const [priceAlerts, setPriceAlerts] = useState([]);
     
-    // State for modals/children
     const [selectedChat, setSelectedChat] = useState(null);
     const [showChatList, setShowChatList] = useState(false);
     const [showWishlistModal, setShowWishlistModal] = useState(false);
@@ -65,7 +63,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         setLoading(true);
         
         try {
-            // Get user's referral count
             const { data: referrals } = await supabase
                 .from('referrals')
                 .select('id')
@@ -74,7 +71,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
             
             setUserReferralCount(referrals?.length || 0);
 
-            // Get stats based on mode
             if (selectedMode === 'seller') {
                 const { data: products } = await supabase
                     .from('products')
@@ -118,13 +114,11 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 });
             } else {
                 // BUYER MODE STATS
-                // 1. Get wishlist count
                 const { count: wishlistCount } = await supabase
                     .from('saved_items')
                     .select('*', { count: 'exact', head: true })
                     .eq('user_id', userId);
                 
-                // 2. Get wishlist items for total value
                 const { data: savedItems } = await supabase
                     .from('saved_items')
                     .select('product_price')
@@ -132,7 +126,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 
                 const totalSaved = savedItems?.reduce((sum, item) => sum + (item.product_price || 0), 0) || 0;
                 
-                // 3. Get order history (if orders table exists)
                 let orderCount = 0;
                 let totalSpent = 0;
                 let ordersData = [];
@@ -153,7 +146,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                     console.log('Orders table may not exist yet');
                 }
                 
-                // 4. Get active price alerts
                 let activeAlerts = 0;
                 let alertsData = [];
                 try {
@@ -172,7 +164,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                     console.log('Price alerts table may not exist yet');
                 }
                 
-                // 5. Get saved searches
                 let savedSearchesCount = 0;
                 let searchesData = [];
                 try {
@@ -211,7 +202,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 setWishlistItems(savedItems || []);
             }
 
-            // Get recent activity - MODIFIED for buyer
             const { data: activities } = await supabase
                 .from('user_activities')
                 .select('*')
@@ -241,7 +231,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                         }
                     });
                 } else {
-                    // Buyer sample activities
                     const { data: savedItems } = await supabase
                         .from('saved_items')
                         .select('product_name')
@@ -307,6 +296,11 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         }
     };
 
+    // ✅ SIMPLIFIED: Just go back to overview
+    const goBack = () => {
+        setActiveTab('overview');
+    };
+
     // Delete saved search
     const deleteSavedSearch = async (searchId) => {
         const { error } = await supabase
@@ -324,7 +318,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     const runSavedSearch = (searchTerm) => {
         if (onBackToSocial) {
             onBackToSocial();
-            // Pass search term back to social page
             setTimeout(() => {
                 window.location.href = `/app?q=${encodeURIComponent(searchTerm)}`;
             }, 100);
@@ -406,7 +399,6 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 <div style={styles.navSpacer}></div>
             </div>
 
-            {/* Remove the extra container div - start directly with backButtonTop */}
             {activeTab !== 'overview' && (
                 <button onClick={handleBack} style={styles.backButtonTop}>
                     ← Back to Overview
@@ -425,7 +417,7 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 </div>
             </div>
 
-            {/* Tab Navigation - Updated for Buyer */}
+            {/* Tab Navigation */}
             <div style={styles.tabNav}>
                 <button onClick={() => setActiveTab('overview')} style={{...styles.tabButton, background: activeTab === 'overview' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'overview' ? 'white' : 'var(--text-secondary)'}}>📊 Overview</button>
                 <button onClick={() => setActiveTab('deals')} style={{...styles.tabButton, background: activeTab === 'deals' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'deals' ? 'white' : 'var(--text-secondary)'}}>🔥 Daily Deals</button>
@@ -526,18 +518,27 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 {activeTab === 'wishlist' && (
                     <div style={styles.wishlistContainer}>
                         <div style={styles.wishlistHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
                             <h3>❤️ My Wishlist</h3>
                             <p style={{ color: 'var(--text-secondary)' }}>
                                 {stats.wishlistCount} saved {stats.wishlistCount === 1 ? 'item' : 'items'} · Total value: ${stats.totalSaved.toFixed(2)}
                             </p>
                         </div>
-                        <WishlistManager onBack={() => setActiveTab('overview')} />
+                        <WishlistManager onBack={goBack} />
                     </div>
                 )}
 
                 {activeTab === 'orders' && selectedMode === 'buyer' && (
                     <div style={styles.ordersSection}>
-                        <h3>📦 Order History</h3>
+                        <div style={styles.ordersHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>📦 Order History</h3>
+                        </div>           
+
                         {orderHistory.length === 0 ? (
                             <div style={styles.emptyState}>
                                 <div style={{ fontSize: '48px', marginBottom: '10px' }}>📦</div>
@@ -578,7 +579,13 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
 
                 {activeTab === 'searches' && selectedMode === 'buyer' && (
                     <div style={styles.searchesSection}>
-                        <h3>🔍 Saved Searches</h3>
+                        <div style={styles.searchesHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>🔍 Saved Searches</h3>
+                        </div>
+
                         {savedSearches.length === 0 ? (
                             <div style={styles.emptyState}>
                                 <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔍</div>
@@ -627,28 +634,53 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                 )}
 
                 {activeTab === 'deals' && (
-                    <DailyDeals 
-                        userId={userId}
-                        userReferralCount={userReferralCount}
-                        onClaimDeal={(deal) => {
-                            loadDashboardData();
-                        }}
-                    />
+                    <div style={styles.dealsSection}>
+                        <div style={styles.dealsHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>🔥 Daily Deals</h3>
+                        </div>
+                        <DailyDeals 
+                            userId={userId}
+                            userReferralCount={userReferralCount}
+                            onClaimDeal={(deal) => {
+                                loadDashboardData();
+                            }}
+                        />
+                    </div>
                 )}
 
                 {activeTab === 'referrals' && (
-                    <ReferralProgram 
-                        userId={userId}
-                        userName={userName}
-                        onReferralComplete={() => {
-                            loadDashboardData();
-                        }}
-                    />
+                    <div style={styles.referralsSection}>
+                        <div style={styles.referralsHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>👥 Referrals</h3>
+                        </div>
+                        <ReferralProgram 
+                            userId={userId}
+                            userName={userName}
+                            onReferralComplete={() => {
+                                loadDashboardData();
+                            }}
+                        />
+                    </div>
                 )}
 
                 {activeTab === 'alerts' && (
-                    <PriceAlertDashboard userId={userId} />
+                    <div style={styles.alertsSection}>
+                        <div style={styles.alertsHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>🔔 Price Alerts</h3>
+                        </div>
+                        <PriceAlertDashboard userId={userId} />
+                    </div>
                 )}
+
             </div>
         </div>
     );
@@ -840,7 +872,7 @@ const styles = {
         padding: '20px'
     },
     tipsSection: {
-        background: 'var(--card-bg)',  // ✅ Changed from '#000000'
+        background: 'var(--card-bg)',
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid var(--border-color)'
@@ -852,9 +884,9 @@ const styles = {
     },
     tipItem: {
         fontSize: '13px',
-        color: 'var(--text-primary)',  // ✅ Changed from '#e0e0e0'
+        color: 'var(--text-primary)',
         padding: '8px 12px',
-        background: 'var(--light-bg)',  // ✅ Changed from '#111111'
+        background: 'var(--light-bg)',
         borderRadius: '8px',
         margin: '2px 0'
     },
@@ -878,9 +910,11 @@ const styles = {
         border: '1px solid var(--border-color)'
     },
     wishlistHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
         marginBottom: '20px',
-        paddingBottom: '15px',
-        borderBottom: '1px solid var(--border-color)'
+        flexWrap: 'wrap'
     },
     wishlistFullscreen: {
         position: 'fixed',
@@ -888,7 +922,7 @@ const styles = {
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'var(--card-bg)',  // ✅ Changed from '#121212'
+        backgroundColor: 'var(--card-bg)',
         zIndex: 20000,
         overflow: 'auto',
         padding: '20px'
@@ -898,6 +932,13 @@ const styles = {
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid var(--border-color)'
+    },
+    ordersHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
     },
     ordersList: {
         display: 'flex',
@@ -951,6 +992,13 @@ const styles = {
         borderRadius: '12px',
         padding: '20px',
         border: '1px solid var(--border-color)'
+    },
+    searchesHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
     },
     searchesList: {
         display: 'flex',
@@ -1011,6 +1059,45 @@ const styles = {
         cursor: 'pointer',
         fontSize: '13px'
     },
+    dealsSection: {
+        background: 'var(--card-bg)',
+        borderRadius: '12px',
+        padding: '20px',
+        border: '1px solid var(--border-color)'
+    },
+    dealsHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
+    },
+    referralsSection: {
+        background: 'var(--card-bg)',
+        borderRadius: '12px',
+        padding: '20px',
+        border: '1px solid var(--border-color)'
+    },
+    referralsHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
+    },
+    alertsSection: {
+        background: 'var(--card-bg)',
+        borderRadius: '12px',
+        padding: '20px',
+        border: '1px solid var(--border-color)'
+    },
+    alertsHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
+    },
     emptyState: {
         textAlign: 'center',
         padding: '60px 20px',
@@ -1027,17 +1114,17 @@ const styles = {
         fontSize: '14px'
     },
     topNavBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '20px',
-    paddingBottom: '10px',
-    borderBottom: '1px solid var(--border-color)',
-    position: 'sticky',
-    top: '70px',
-    background: 'var(--card-bg)',
-    zIndex: 100,
-    backdropFilter: 'blur(10px)'
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: '20px',
+        paddingBottom: '10px',
+        borderBottom: '1px solid var(--border-color)',
+        position: 'sticky',
+        top: '70px',
+        background: 'var(--card-bg)',
+        zIndex: 100,
+        backdropFilter: 'blur(10px)'
     },
     backNavButton: {
         background: 'transparent',
@@ -1055,7 +1142,7 @@ const styles = {
     },
     navSpacer: {
         flex: 1
-    },
+    }
 };
 
 export default UserDashboard;

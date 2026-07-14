@@ -1,82 +1,138 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from './lib/supabase';
+import { supabase } from './lib/supabase'; 
 
 const ChatList = ({ userId, onSelectChat, onClose }) => {
     const [conversations, setConversations] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
     useEffect(() => {
+        if (!userId) {
+            setError('User not authenticated');
+            setLoading(false);
+            return;
+        }
+        
         loadConversations();
         
-        // Subscribe to new messages
-        const subscription = supabase
-            .channel('chat-list')
-            .on('postgres_changes', {
-                event: 'INSERT',
-                schema: 'public',
-                table: 'messages',
-                filter: `receiver_id=eq.${userId}`
-            }, () => {
-                loadConversations();
-            })
-            .on('postgres_changes', {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'conversations',
-                filter: `participant1_id=eq.${userId},participant2_id=eq.${userId}`
-            }, () => {
-                loadConversations();
-            })
-            .subscribe();
-            
-        return () => supabase.removeChannel(subscription);
+        // Subscribe to new messages with supabase
+        let subscription = null;
+        
+        try {
+            subscription = supabase
+                .channel('chat-list')
+                .on('postgres_changes', {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'messages',
+                    filter: `receiver_id=eq.${userId}`
+                }, () => {
+                    loadConversations();
+                })
+                .on('postgres_changes', {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'conversations',
+                    filter: `participant1_id=eq.${userId},participant2_id=eq.${userId}`
+                }, () => {
+                    loadConversations();
+                })
+                .subscribe((status, err) => {
+                    if (status === 'CHANNEL_ERROR') {
+                        console.error('Chat list subscription error:', err);
+                    }
+                });
+        } catch (err) {
+            console.error('Failed to create subscription:', err);
+        }
+        
+        return () => {
+            if (subscription) {
+                try {
+                    supabase.removeChannel(subscription);
+                } catch (err) {
+                    console.error('Error removing channel:', err);
+                }
+            }
+        };
     }, [userId]);
 
     const loadConversations = async () => {
-        const { data, error } = await supabase
-            .from('conversations')
-            .select(`
-                *,
-                product:product_id (name, price, image_url),
-                participant1:participant1_id (username, location),
-                participant2:participant2_id (username, location)
-            `)
-            .or(`participant1_id.eq.${userId},participant2_id.eq.${userId}`)
-            .eq('is_active', true)
-            .order('updated_at', { ascending: false });
+        if (!userId) return;
+        
+        setLoading(true);
+        setError(null);
+        
+        try {
+            const result = await supabase
+                .from('conversations')
+                .select(`
+                    *,
+                    product:product_id (name, price, image_url),
+                    participant1:participant1_id (user_id, username, location),
+                    participant2:participant2_id (user_id, username, location)
+                `)
+                .or(`participant1_id.eq.${userId},participant2_id.eq.${userId}`)
+                .eq('is_active', true)
+                .order('updated_at', { ascending: false });
 
-        if (!error && data) {
+            if (result.error) {
+                console.error('Error loading conversations:', result.error);
+                setError('Failed to load conversations');
+                setConversations([]);
+                return;
+            }
+
+            const data = result.data || [];
+            
             const formatted = data.map(conv => {
-                const otherUser = conv.participant1_id === userId 
-                    ? conv.participant2 
-                    : conv.participant1;
-                const unreadCount = conv.participant1_id === userId 
-                    ? conv.unread_count_p1 
-                    : conv.unread_count_p2;
-                
-                return {
-                    ...conv,
-                    otherUser,
-                    unreadCount,
-                    otherUserId: otherUser?.user_id
-                };
-            });
+                try {
+                    const isUserParticipant1 = conv.participant1_id === userId;
+                    const otherUser = isUserParticipant1 
+                        ? conv.participant2 
+                        : conv.participant1;
+                    const unreadCount = isUserParticipant1 
+                        ? (conv.unread_count_p1 || 0)
+                        : (conv.unread_count_p2 || 0);
+                    
+                    return {
+                        ...conv,
+                        otherUser: otherUser || { username: 'Unknown User', user_id: null },
+                        unreadCount,
+                        otherUserId: otherUser?.user_id
+                    };
+                } catch (err) {
+                    console.error('Error formatting conversation:', err);
+                    return null;
+                }
+            }).filter(conv => conv !== null);
+            
             setConversations(formatted);
+        } catch (err) {
+            console.error('Unexpected error loading conversations:', err);
+            setError('Unable to load conversations. Please try again.');
+            setConversations([]);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const formatTime = (date) => {
         if (!date) return '';
-        const diff = Date.now() - new Date(date).getTime();
-        const hours = diff / (1000 * 60 * 60);
-        
-        if (hours < 24) {
-            return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        } else if (hours < 48) {
-            return 'Yesterday';
-        } else {
-            return new Date(date).toLocaleDateString();
+        try {
+            const diff = Date.now() - new Date(date).getTime();
+            const hours = diff / (1000 * 60 * 60);
+            
+            if (hours < 24) {
+                return new Date(date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } else if (hours < 48) {
+                return 'Yesterday';
+            } else {
+                return new Date(date).toLocaleDateString();
+            }
+        } catch (err) {
+            console.error('Error formatting time:', err);
+            return '';
         }
     };
 
@@ -85,6 +141,12 @@ const ChatList = ({ userId, onSelectChat, onClose }) => {
             <div style={styles.loadingContainer}>
                 <div style={styles.spinner}></div>
                 <p>Loading conversations...</p>
+                <style>{`
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                `}</style>
             </div>
         );
     }
@@ -96,18 +158,29 @@ const ChatList = ({ userId, onSelectChat, onClose }) => {
                 <h3 style={styles.title}>💬 Messages</h3>
             </div>
             
-            {conversations.length === 0 ? (
+            {/* Error Message */}
+            {error && (
+                <div style={styles.errorContainer}>
+                    <span style={styles.errorIcon}>⚠️</span>
+                    <span style={styles.errorText}>{error}</span>
+                    <button onClick={() => loadConversations()} style={styles.retryButton}>
+                        Retry
+                    </button>
+                </div>
+            )}
+            
+            {!error && conversations.length === 0 ? (
                 <div style={styles.emptyState}>
                     <div style={styles.emptyIcon}>💬</div>
                     <p>No conversations yet</p>
                     <p style={styles.emptySubtext}>Start a chat by contacting a seller or buyer</p>
                 </div>
-            ) : (
+            ) : !error && (
                 <div style={styles.list}>
                     {conversations.map(conv => (
                         <div
                             key={conv.id}
-                            onClick={() => onSelectChat(conv)}
+                            onClick={() => onSelectChat && onSelectChat(conv)}
                             style={{
                                 ...styles.chatItem,
                                 background: conv.unreadCount > 0 ? '#f0f7ff' : 'white'
@@ -132,14 +205,14 @@ const ChatList = ({ userId, onSelectChat, onClose }) => {
                                         </span>
                                     )}
                                     <span style={styles.lastMessage}>
-                                        {conv.last_message?.substring(0, 40)}
+                                        {conv.last_message ? conv.last_message.substring(0, 40) : 'No messages yet'}
                                         {conv.last_message?.length > 40 && '...'}
                                     </span>
                                 </div>
                             </div>
                             {conv.unreadCount > 0 && (
                                 <div style={styles.unreadBadge}>
-                                    {conv.unreadCount}
+                                    {conv.unreadCount > 99 ? '99+' : conv.unreadCount}
                                 </div>
                             )}
                         </div>
@@ -292,6 +365,34 @@ const styles = {
     emptySubtext: {
         fontSize: '12px',
         marginTop: '8px'
+    },
+    errorContainer: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '12px',
+        padding: '20px',
+        background: '#fee',
+        margin: '20px',
+        borderRadius: '8px',
+        flexWrap: 'wrap'
+    },
+    errorIcon: {
+        fontSize: '20px'
+    },
+    errorText: {
+        color: '#c00',
+        fontSize: '14px',
+        flex: 1
+    },
+    retryButton: {
+        background: '#667eea',
+        color: 'white',
+        border: 'none',
+        padding: '8px 16px',
+        borderRadius: '6px',
+        cursor: 'pointer',
+        fontSize: '13px'
     }
 };
 

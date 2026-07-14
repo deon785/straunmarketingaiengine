@@ -1,6 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 
+// ============ HELPER FUNCTIONS ============
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
+
 // === SANITIZATION HELPER FUNCTIONS ===
 const sanitizeInput = (input, maxLength = 100) => {
     if (!input) return '';
@@ -37,61 +52,117 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
     const [alertPriceMax, setAlertPriceMax] = useState('');
     const [alertLocation, setAlertLocation] = useState('');
     const [loadingAlerts, setLoadingAlerts] = useState(false);
+    const [error, setError] = useState(null);
+    const [creatingAlert, setCreatingAlert] = useState(false);
+    const [deletingAlertId, setDeletingAlertId] = useState(null);
+    const [togglingAlertId, setTogglingAlertId] = useState(null);
 
-    // Fetch user's search alerts
+    // ============ FETCH SEARCH ALERTS ============
     const fetchSearchAlerts = async () => {
-        if (!user) return;
+        if (!user?.id) {
+            console.log('No user ID available for fetching alerts');
+            return;
+        }
 
         setLoadingAlerts(true);
+        setError(null);
+        
         try {
-            const { data, error } = await supabase
-                .from('search_alerts')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('is_active', true)
-                .order('created_at', { ascending: false });
+            const result = await fetchWithRetry(() =>
+                supabase
+                    .from('search_alerts')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .eq('is_active', true)
+                    .order('created_at', { ascending: false })
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
             
-            setSearchAlerts(data || []);
+            setSearchAlerts(result.data || []);
         } catch (error) {
             console.error('Error fetching search alerts:', error);
+            setError('Failed to load search alerts. Please try again.');
             if (showToastNotification) {
-                showToastNotification('Failed to load search alerts');
+                showToastNotification('⚠️ Failed to load search alerts');
             }
+            setSearchAlerts([]);
         } finally {
             setLoadingAlerts(false);
         }
     };
 
-    // Create a search alert
+    // ============ CREATE SEARCH ALERT ============
     const createSearchAlert = async () => {
-        if (!user) {
-            alert('Please log in to create search alerts');
+        // ✅ Validate user
+        if (!user?.id) {
+            const msg = 'Please log in to create search alerts';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
             return;
         }
 
-        if (!alertSearchTerm.trim()) {
-            alert('Please enter a search term for the alert');
+        // ✅ Validate search term
+        if (!alertSearchTerm || !alertSearchTerm.trim()) {
+            const msg = 'Please enter a search term for the alert';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
             return;
         }
 
-        // Add price validation
-        if (alertPriceMin && alertPriceMax && Number(alertPriceMin) > Number(alertPriceMax)) {
-            alert('Minimum price cannot be greater than maximum price');
+        // ✅ Validate price range
+        const minPrice = parseFloat(alertPriceMin);
+        const maxPrice = parseFloat(alertPriceMax);
+        
+        if (alertPriceMin && alertPriceMax && minPrice > maxPrice) {
+            const msg = 'Minimum price cannot be greater than maximum price';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
             return;
         }
         
-        // Add price sanity check
-        if (alertPriceMin && Number(alertPriceMin) < 0) {
-            alert('Price cannot be negative');
+        if (alertPriceMin && minPrice < 0) {
+            const msg = 'Price cannot be negative';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
             return;
         }
         
-        if (alertPriceMax && Number(alertPriceMax) < 0) {
-            alert('Price cannot be negative');
+        if (alertPriceMax && maxPrice < 0) {
+            const msg = 'Price cannot be negative';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
             return;
         }
+
+        // ✅ Check offline
+        if (!navigator.onLine) {
+            const msg = 'You are offline. Please connect to the internet to create alerts.';
+            if (showToastNotification) {
+                showToastNotification('⚠️ ' + msg);
+            } else {
+                alert(msg);
+            }
+            return;
+        }
+
+        setCreatingAlert(true);
+        setError(null);
 
         try {
             const sanitizedTerm = sanitizeProductName(alertSearchTerm);
@@ -100,21 +171,26 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
             const alertData = {
                 user_id: user.id,
                 search_term: sanitizedTerm,
-                min_price: alertPriceMin ? Number(alertPriceMin) : null,
-                max_price: alertPriceMax ? Number(alertPriceMax) : null,
+                min_price: alertPriceMin && alertPriceMin !== '' ? Number(alertPriceMin) : null,
+                max_price: alertPriceMax && alertPriceMax !== '' ? Number(alertPriceMax) : null,
                 location: sanitizedLocation,
                 is_active: true,
                 last_notified_at: null,
                 created_at: new Date().toISOString()
             };
 
-            const { error } = await supabase
-                .from('search_alerts')
-                .insert([alertData]);
+            const result = await fetchWithRetry(() =>
+                supabase.from('search_alerts').insert([alertData])
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
 
-            alert('✅ Search alert created! You\'ll be notified when new matching products are listed.');
+            const msg = '✅ Search alert created! You\'ll be notified when new matching products are listed.';
+            if (showToastNotification) {
+                showToastNotification(msg);
+            } else {
+                alert(msg);
+            }
             
             // Reset form
             setAlertSearchTerm('');
@@ -124,50 +200,85 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
             setShowAlertModal(false);
             
             // Refresh alerts
-            fetchSearchAlerts();
+            await fetchSearchAlerts();
             
         } catch (error) {
             console.error('Error creating search alert:', error);
-            alert('Failed to create search alert. Please try again.');
+            const msg = error.message || 'Failed to create search alert. Please try again.';
+            setError(msg);
+            if (showToastNotification) {
+                showToastNotification('❌ ' + msg);
+            } else {
+                alert(msg);
+            }
+        } finally {
+            setCreatingAlert(false);
         }
     };
 
-    // Delete a search alert
+    // ============ DELETE SEARCH ALERT ============
     const deleteSearchAlert = async (alertId) => {
-        if (!confirm('Are you sure you want to delete this alert?')) return;
+        if (!alertId) {
+            setError('Invalid alert ID');
+            return;
+        }
+        
+        // ✅ Use confirm safely
+        if (!window.confirm('Are you sure you want to delete this alert?')) return;
 
+        setDeletingAlertId(alertId);
+        setError(null);
+        
         try {
-            const { error } = await supabase
-                .from('search_alerts')
-                .delete()
-                .eq('id', alertId);
+            const result = await fetchWithRetry(() =>
+                supabase.from('search_alerts').delete().eq('id', alertId)
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
 
             // Update local state
             setSearchAlerts(prev => prev.filter(alert => alert.id !== alertId));
             
+            const msg = '✅ Alert deleted successfully.';
             if (showToastNotification) {
-                showToastNotification('✅ Alert deleted successfully.');
+                showToastNotification(msg);
             } else {
-                alert('✅ Alert deleted successfully.');
+                alert(msg);
             }
             
         } catch (error) {
             console.error('Error deleting alert:', error);
-            alert('Failed to delete alert. Please try again.');
+            const msg = 'Failed to delete alert. Please try again.';
+            setError(msg);
+            if (showToastNotification) {
+                showToastNotification('❌ ' + msg);
+            } else {
+                alert(msg);
+            }
+        } finally {
+            setDeletingAlertId(null);
         }
     };
 
-    // Toggle alert status (active/inactive)
+    // ============ TOGGLE ALERT STATUS ============
     const toggleAlertStatus = async (alertId, currentStatus) => {
+        if (!alertId) {
+            setError('Invalid alert ID');
+            return;
+        }
+        
+        setTogglingAlertId(alertId);
+        setError(null);
+        
         try {
-            const { error } = await supabase
-                .from('search_alerts')
-                .update({ is_active: !currentStatus })
-                .eq('id', alertId);
+            const result = await fetchWithRetry(() =>
+                supabase
+                    .from('search_alerts')
+                    .update({ is_active: !currentStatus })
+                    .eq('id', alertId)
+            );
 
-            if (error) throw error;
+            if (result.error) throw result.error;
 
             // Update local state
             setSearchAlerts(prev => 
@@ -178,24 +289,41 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                 )
             );
             
+            const msg = `✅ Alert ${!currentStatus ? 'activated' : 'paused'} successfully.`;
             if (showToastNotification) {
-                showToastNotification(`✅ Alert ${!currentStatus ? 'activated' : 'paused'} successfully.`);
+                showToastNotification(msg);
             } else {
-                alert(`✅ Alert ${!currentStatus ? 'activated' : 'paused'} successfully.`);
+                alert(msg);
             }
             
         } catch (error) {
             console.error('Error toggling alert status:', error);
-            alert('Failed to update alert. Please try again.');
+            const msg = 'Failed to update alert. Please try again.';
+            setError(msg);
+            if (showToastNotification) {
+                showToastNotification('❌ ' + msg);
+            } else {
+                alert(msg);
+            }
+        } finally {
+            setTogglingAlertId(null);
         }
     };
 
+    // ============ MODAL CLOSE ============
+    const handleModalClose = () => {
+        setShowAlertModal(false);
+        setError(null);
+    };
+
+    // ============ INITIAL LOAD ============
     useEffect(() => {
-        if (user && selectedMode === 'buyer') {
+        if (user && user.id && selectedMode === 'buyer') {
             fetchSearchAlerts();
         }
     }, [user, selectedMode]);
 
+    // ============ RENDER ============
     return (
         <div className="tools-panel" style={{
             background: '#1e1e1e',
@@ -228,6 +356,34 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                 </button>
                 <h2 style={{ margin: 0, color: '#ffffff', fontSize: '24px' }}>🔧 Tools & Features</h2>
             </div>
+
+            {/* Error Message */}
+            {error && (
+                <div style={{
+                    background: '#ff4444',
+                    color: 'white',
+                    padding: '10px 15px',
+                    borderRadius: '8px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <span>⚠️ {error}</span>
+                    <button 
+                        onClick={() => setError(null)}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'white',
+                            cursor: 'pointer',
+                            fontSize: '18px'
+                        }}
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
 
             <div className="tools-grid" style={{
                 display: 'grid',
@@ -297,6 +453,7 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                         </button>
                         <button 
                             onClick={fetchSearchAlerts}
+                            disabled={loadingAlerts}
                             className="tool-secondary-btn"
                             style={{
                                 flex: 1,
@@ -305,14 +462,15 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                 border: '1px solid #4a4a4a',
                                 padding: '12px',
                                 borderRadius: '8px',
-                                cursor: 'pointer',
+                                cursor: loadingAlerts ? 'not-allowed' : 'pointer',
                                 fontSize: '14px',
-                                transition: 'all 0.3s ease'
+                                transition: 'all 0.3s ease',
+                                opacity: loadingAlerts ? 0.6 : 1
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#444444'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = '#3a3a3a'}
+                            onMouseEnter={(e) => !loadingAlerts && (e.currentTarget.style.background = '#444444')}
+                            onMouseLeave={(e) => !loadingAlerts && (e.currentTarget.style.background = '#3a3a3a')}
                         >
-                            Refresh
+                            {loadingAlerts ? 'Loading...' : 'Refresh'}
                         </button>
                     </div>
 
@@ -339,7 +497,8 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                         borderRadius: '8px',
                                         marginBottom: '8px',
                                         border: '1px solid #3a3a3a',
-                                        transition: 'all 0.3s ease'
+                                        transition: 'all 0.3s ease',
+                                        opacity: (deletingAlertId === alert.id || togglingAlertId === alert.id) ? 0.6 : 1
                                     }}
                                     onMouseEnter={(e) => e.currentTarget.style.background = '#333333'}
                                     onMouseLeave={(e) => e.currentTarget.style.background = '#2a2a2a'}
@@ -381,39 +540,43 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                         <div className="alert-actions" style={{ display: 'flex', gap: '5px' }}>
                                             <button
                                                 onClick={() => toggleAlertStatus(alert.id, alert.is_active)}
+                                                disabled={togglingAlertId === alert.id}
                                                 title={alert.is_active ? 'Pause alert' : 'Activate alert'}
                                                 style={{
                                                     background: 'rgba(76, 175, 80, 0.2)',
                                                     border: '1px solid rgba(76, 175, 80, 0.3)',
-                                                    cursor: 'pointer',
+                                                    cursor: togglingAlertId === alert.id ? 'not-allowed' : 'pointer',
                                                     padding: '6px',
                                                     borderRadius: '4px',
                                                     fontSize: '14px',
                                                     color: alert.is_active ? '#4CAF50' : '#ff9800',
-                                                    transition: 'all 0.3s ease'
+                                                    transition: 'all 0.3s ease',
+                                                    opacity: togglingAlertId === alert.id ? 0.6 : 1
                                                 }}
-                                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)'}
-                                                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)'}
+                                                onMouseEnter={(e) => !togglingAlertId === alert.id && (e.currentTarget.style.background = 'rgba(76, 175, 80, 0.3)')}
+                                                onMouseLeave={(e) => !togglingAlertId === alert.id && (e.currentTarget.style.background = 'rgba(76, 175, 80, 0.2)')}
                                             >
-                                                {alert.is_active ? '⏸️' : '▶️'}
+                                                {togglingAlertId === alert.id ? '⏳' : (alert.is_active ? '⏸️' : '▶️')}
                                             </button>
                                             <button
                                                 onClick={() => deleteSearchAlert(alert.id)}
+                                                disabled={deletingAlertId === alert.id}
                                                 title="Delete alert"
                                                 style={{
                                                     background: 'rgba(255, 68, 68, 0.2)',
                                                     border: '1px solid rgba(255, 68, 68, 0.3)',
-                                                    cursor: 'pointer',
+                                                    cursor: deletingAlertId === alert.id ? 'not-allowed' : 'pointer',
                                                     padding: '6px',
                                                     borderRadius: '4px',
                                                     fontSize: '14px',
                                                     color: '#ff4444',
-                                                    transition: 'all 0.3s ease'
+                                                    transition: 'all 0.3s ease',
+                                                    opacity: deletingAlertId === alert.id ? 0.6 : 1
                                                 }}
-                                                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 68, 68, 0.3)'}
-                                                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)'}
+                                                onMouseEnter={(e) => !deletingAlertId === alert.id && (e.currentTarget.style.background = 'rgba(255, 68, 68, 0.3)')}
+                                                onMouseLeave={(e) => !deletingAlertId === alert.id && (e.currentTarget.style.background = 'rgba(255, 68, 68, 0.2)')}
                                             >
-                                                🗑️
+                                                {deletingAlertId === alert.id ? '⌛' : '🗑️'}
                                             </button>
                                         </div>
                                     </div>
@@ -421,9 +584,24 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                             </div>
                         </div>
                     )}
+                    
+                    {!loadingAlerts && searchAlerts.length === 0 && (
+                        <div style={{
+                            marginTop: '15px',
+                            padding: '20px',
+                            textAlign: 'center',
+                            background: '#1e1e1e',
+                            borderRadius: '8px',
+                            border: '1px dashed #3a3a3a'
+                        }}>
+                            <p style={{ margin: 0, color: '#888', fontSize: '13px' }}>
+                                No alerts yet. Create one to get notified about new products!
+                            </p>
+                        </div>
+                    )}
                 </div>
 
-                {/* Add more tool cards as needed */}
+                {/* Coming Soon Tool Card */}
                 <div className="tool-card" style={{
                     background: '#2a2a2a',
                     borderRadius: '12px',
@@ -492,7 +670,7 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                     alignItems: 'center',
                     justifyContent: 'center',
                     padding: '20px'
-                }}>
+                }} onClick={handleModalClose}>
                     <div className="modal-content" style={{
                         background: '#2a2a2a',
                         borderRadius: '12px',
@@ -503,7 +681,7 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                         overflow: 'auto',
                         border: '1px solid #3a3a3a',
                         boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
-                    }}>
+                    }} onClick={(e) => e.stopPropagation()}>
                         <div style={{
                             display: 'flex',
                             justifyContent: 'space-between',
@@ -516,7 +694,7 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                 fontSize: '20px'
                             }}>🔔 Create Search Alert</h3>
                             <button 
-                                onClick={() => setShowAlertModal(false)}
+                                onClick={handleModalClose}
                                 style={{
                                     background: 'none',
                                     border: 'none',
@@ -530,6 +708,20 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                 ×
                             </button>
                         </div>
+                        
+                        {/* Modal Error */}
+                        {error && (
+                            <div style={{
+                                background: '#ff4444',
+                                color: 'white',
+                                padding: '10px',
+                                borderRadius: '8px',
+                                marginBottom: '15px',
+                                fontSize: '13px'
+                            }}>
+                                ⚠️ {error}
+                            </div>
+                        )}
                         
                         <div style={{ marginBottom: '20px' }}>
                             <label style={{ 
@@ -634,10 +826,10 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                         <div style={{ display: 'flex', gap: '10px' }}>
                             <button
                                 onClick={createSearchAlert}
-                                disabled={!alertSearchTerm.trim()}
+                                disabled={!alertSearchTerm.trim() || creatingAlert}
                                 style={{
                                     flex: 1,
-                                    background: !alertSearchTerm.trim() 
+                                    background: (!alertSearchTerm.trim() || creatingAlert) 
                                         ? '#3a3a3a' 
                                         : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                                     color: 'white',
@@ -646,44 +838,50 @@ const ToolsPanel = ({ user, selectedMode, onBack, showToastNotification }) => {
                                     borderRadius: '8px',
                                     fontWeight: 'bold',
                                     fontSize: '16px',
-                                    cursor: !alertSearchTerm.trim() ? 'not-allowed' : 'pointer',
-                                    opacity: !alertSearchTerm.trim() ? 0.6 : 1,
+                                    cursor: (!alertSearchTerm.trim() || creatingAlert) ? 'not-allowed' : 'pointer',
+                                    opacity: (!alertSearchTerm.trim() || creatingAlert) ? 0.6 : 1,
                                     transition: 'all 0.3s ease'
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (alertSearchTerm.trim()) {
+                                    if (alertSearchTerm.trim() && !creatingAlert) {
                                         e.currentTarget.style.transform = 'translateY(-2px)';
                                         e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
                                     }
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (alertSearchTerm.trim()) {
+                                    if (alertSearchTerm.trim() && !creatingAlert) {
                                         e.currentTarget.style.transform = 'translateY(0)';
                                         e.currentTarget.style.boxShadow = 'none';
                                     }
                                 }}
                             >
-                                Create Alert
+                                {creatingAlert ? 'Creating...' : 'Create Alert'}
                             </button>
                             <button
-                                onClick={() => setShowAlertModal(false)}
+                                onClick={handleModalClose}
+                                disabled={creatingAlert}
                                 style={{
                                     padding: '14px 20px',
                                     background: '#3a3a3a',
                                     color: '#cccccc',
                                     border: '1px solid #4a4a4a',
                                     borderRadius: '8px',
-                                    cursor: 'pointer',
+                                    cursor: creatingAlert ? 'not-allowed' : 'pointer',
                                     fontSize: '16px',
-                                    transition: 'all 0.3s ease'
+                                    transition: 'all 0.3s ease',
+                                    opacity: creatingAlert ? 0.6 : 1
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.background = '#444444';
-                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                    if (!creatingAlert) {
+                                        e.currentTarget.style.background = '#444444';
+                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                    }
                                 }}
                                 onMouseLeave={(e) => {
-                                    e.currentTarget.style.background = '#3a3a3a';
-                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    if (!creatingAlert) {
+                                        e.currentTarget.style.background = '#3a3a3a';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                    }
                                 }}
                             >
                                 Cancel

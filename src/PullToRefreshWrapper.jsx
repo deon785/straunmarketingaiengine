@@ -1,35 +1,30 @@
-// PullToRefreshWrapper.jsx
-import React, { useState, useEffect } from 'react';
+// PullToRefreshWrapper.jsx - CUSTOM IMPLEMENTATION (No Library)
+// ✅ PULL INDICATOR REMOVED - Clean navbar
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import PullToRefresh from 'react-simple-pull-to-refresh';
 
 const PullToRefreshWrapper = ({ children }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [startY, setStartY] = useState(0);
+  const [pullDistance, setPullDistance] = useState(0);
+  const containerRef = useRef(null);
   const location = useLocation();
-  
-  // Define refresh actions for different pages
-  const getRefreshAction = () => {
+  const isPullingRef = useRef(false);
+  const refreshTimeoutRef = useRef(null);
+
+  // ✅ Define refresh actions
+  const getRefreshAction = useCallback(() => {
     const path = location.pathname;
     
-    // Auth page
-    if (path === '/') {
-      return () => {
-        window.location.reload();
-        return Promise.resolve();
-      };
-    }
-    
-    // Main app page (SocialAIMarketingEngine)
     if (path === '/app') {
       return () => {
-        // Dispatch a custom event that SocialAIMarketingEngine can listen to
         const refreshEvent = new CustomEvent('pull-to-refresh');
         window.dispatchEvent(refreshEvent);
         return Promise.resolve();
       };
     }
     
-    // Notifications page
     if (path === '/notifications') {
       return () => {
         const refreshEvent = new CustomEvent('refresh-notifications');
@@ -38,80 +33,84 @@ const PullToRefreshWrapper = ({ children }) => {
       };
     }
     
-    // Other pages - just reload
     return () => {
       window.location.reload();
       return Promise.resolve();
     };
-  };
-  
-  // Custom styling
-  const customStyles = {
-    height: '100vh',
-    overflow: 'auto',
-  };
-  
+  }, [location.pathname]);
+
+  // ✅ Handle touch start
+  const handleTouchStart = useCallback((e) => {
+    if (containerRef.current?.scrollTop === 0) {
+      setStartY(e.touches[0].clientY);
+      isPullingRef.current = true;
+    }
+  }, []);
+
+  // ✅ Handle touch move
+  const handleTouchMove = useCallback((e) => {
+    if (!isPullingRef.current) return;
+    
+    const deltaY = e.touches[0].clientY - startY;
+    if (deltaY > 0) {
+      setPullDistance(Math.min(deltaY, 80));
+    }
+  }, [startY]);
+
+  // ✅ Handle touch end
+  const handleTouchEnd = useCallback(() => {
+    if (pullDistance > 50 && !isRefreshing) {
+      // ✅ Refresh triggered!
+      setIsRefreshing(true);
+      const refreshAction = getRefreshAction();
+      refreshAction().finally(() => {
+        // Reset after refresh
+        refreshTimeoutRef.current = setTimeout(() => {
+          setIsRefreshing(false);
+          setPullDistance(0);
+          isPullingRef.current = false;
+        }, 800);
+      });
+    } else {
+      setPullDistance(0);
+      isPullingRef.current = false;
+    }
+  }, [pullDistance, isRefreshing, getRefreshAction]);
+
+  // ✅ Cleanup
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ✅ Skip pages
+  const skipPages = ['/', '/reset-password', '/signup'];
+  if (skipPages.includes(location.pathname)) {
+    return <>{children}</>;
+  }
+
   return (
-    <PullToRefresh
-      onRefresh={getRefreshAction()}
-      pullingContent={
-        <div style={{
-          padding: '20px',
-          textAlign: 'center',
-          color: '#666',
-          fontSize: '14px',
-          background: '#f8f9fa'
-        }}>
-          <div style={{
-            width: '30px',
-            height: '30px',
-            margin: '0 auto 10px',
-            border: '3px solid #e0e0e0',
-            borderTop: '3px solid #667eea',
-            borderRadius: '50%',
-            transform: 'rotate(0deg)',
-            transition: 'transform 0.3s'
-          }}></div>
-          Pull down to refresh...
-        </div>
-      }
-      refreshingContent={
-        <div style={{
-          padding: '20px',
-          textAlign: 'center',
-          color: '#667eea',
-          fontSize: '14px',
-          background: '#f8f9fa'
-        }}>
-          <div style={{
-            width: '30px',
-            height: '30px',
-            margin: '0 auto 10px',
-            border: '3px solid #e0e0e0',
-            borderTop: '3px solid #667eea',
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite'
-          }}></div>
-          Refreshing...
-        </div>
-      }
-      resistance={2}
-      backgroundColor="#f8f9fa"
-      style={customStyles}
+    <div
+      ref={containerRef}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        height: '100%',
+        minHeight: '100vh',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        position: 'relative',
+        WebkitOverflowScrolling: 'touch',
+      }}
     >
+      {/* ✅ Children only - NO pull indicator */}
       {children}
-    </PullToRefresh>
+    </div>
   );
 };
 
-// Add CSS for spinner animation
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-`;
-document.head.appendChild(style);
-
-export default PullToRefreshWrapper;
+export default React.memo(PullToRefreshWrapper);

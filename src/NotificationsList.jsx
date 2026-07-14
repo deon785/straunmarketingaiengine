@@ -1,78 +1,179 @@
-import React, { useEffect, useState } from 'react';
-import { supabase } from './lib/supabase';
+import React, { useEffect, useState, useCallback } from 'react';
+import { supabase } from './lib/supabase'; 
+
+// ✅ Add fetchWithRetry helper
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 const NotificationsList = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState(null); // For expanded view on mobile
+  const [expandedId, setExpandedId] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Function to send push notification
-  const sendPushNotification = async (notification) => {
+  // ✅ Function to send push notification with fetchWithRetry
+  const sendPushNotification = useCallback(async (notification) => {
+    if (!notification?.user_id) return;
+    
     try {
-      const { data: subscriptions, error } = await supabase
+      // ✅ Use fetchWithRetry
+      const result = await fetchWithRetry(() => supabase
         .from('push_subscriptions')
         .select('subscription')
-        .eq('user_id', notification.user_id);
+        .eq('user_id', notification.user_id)
+      );
       
-      if (error || !subscriptions || subscriptions.length === 0) {
+      if (result.error) {
+        console.error('Error fetching push subscriptions:', result.error);
+        return;
+      }
+      
+      const subscriptions = result.data || [];
+      if (subscriptions.length === 0) {
         console.log('No push subscriptions found for user');
         return;
       }
       
+      // ✅ Dynamic title based on notification type
+      const title = notification.link_type === 'buyer' 
+        ? 'New Buyer Request!' 
+        : notification.link_type === 'seller'
+        ? 'New Seller Message!'
+        : 'New Notification!';
+      
       for (const sub of subscriptions) {
-        await fetch('/api/send-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription: sub.subscription,
-            title: 'New Buyer Request!',
-            body: notification.message,
-            url: window.location.origin,
-            icon: '/pwa-192x192.png'
-          })
-        });
+        try {
+          await fetch('/api/send-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: sub.subscription,
+              title: title,
+              body: notification.message || 'New notification',
+              url: window.location.origin,
+              icon: '/pwa-192x192.png'
+            })
+          });
+        } catch (fetchErr) {
+          console.error('Error sending individual push:', fetchErr);
+        }
       }
     } catch (error) {
       console.error('Error sending push notification:', error);
     }
-  };
+  }, []);
+
+  // ✅ Use fetchWithRetry with offline check
+  const fetchNotifications = useCallback(async () => {
+    // ✅ Check offline status
+    if (!navigator.onLine) {
+      setError('You are offline. Please connect to the internet to view notifications.');
+      setLoading(false);
+      return;
+    }
+    
+    setError(null);
+    
+    try {
+      // ✅ Use fetchWithRetry
+      const userResult = await fetchWithRetry(() => supabase.auth.getUser());
+      const user = userResult.data?.user;
+      
+      if (!user) {
+        setNotifications([]);
+        setLoading(false);
+        return;
+      }
+
+      // ✅ Use fetchWithRetry
+      const result = await fetchWithRetry(() => supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      );
+
+      if (result.error) {
+        console.error('Error fetching notifications:', result.error);
+        setError('Failed to load notifications');
+        setNotifications([]);
+      } else {
+        setNotifications(result.data || []);
+      }
+    } catch (err) {
+      console.error('Unexpected error fetching notifications:', err);
+      setError('Unable to load notifications');
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchNotifications();
 
-    const channel = supabase
-      .channel('notifications_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-        },
-        async (payload) => {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user && payload.new.user_id === user.id) {
-            setNotifications(prev => [payload.new, ...prev]);
-            setLoading(false);
-            
-            if (payload.new.status === 'unread') {
-              sendPushNotification(payload.new);
+    let channel = null;
+    
+    try {
+      channel = supabase
+        .channel('notifications_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+          },
+          async (payload) => {
+            try {
+              const userResult = await supabase.auth.getUser();
+              const user = userResult.data?.user;
+              
+              if (user && payload.new && payload.new.user_id === user.id) {
+                setNotifications(prev => [payload.new, ...prev]);
+                setLoading(false);
+                
+                if (payload.new.status === 'unread') {
+                  sendPushNotification(payload.new);
+                }
+              }
+            } catch (err) {
+              console.error('Error handling new notification:', err);
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'notifications',
-        },
-        (payload) => {
-          setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
-        }
-      )
-      .subscribe();
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'notifications',
+          },
+          (payload) => {
+            if (payload.old) {
+              setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          if (status === 'CHANNEL_ERROR') {
+            console.error('Notification channel error:', err);
+          }
+        });
+    } catch (err) {
+      console.error('Failed to create notification channel:', err);
+    }
 
     const handlePullToRefresh = () => {
       console.log('🔄 Pull-to-refresh detected in NotificationsList');
@@ -82,59 +183,100 @@ const NotificationsList = () => {
     window.addEventListener('pull-to-refresh', handlePullToRefresh);
     
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (err) {
+          console.error('Error removing channel:', err);
+        }
+      }
       window.removeEventListener('pull-to-refresh', handlePullToRefresh);
     };
+  }, [fetchNotifications, sendPushNotification]);
+
+  // ✅ Use fetchWithRetry
+  const markAsRead = useCallback(async (id) => {
+    if (!id) return;
+    
+    try {
+      // ✅ Use fetchWithRetry
+      const result = await fetchWithRetry(() => supabase
+        .from('notifications')
+        .update({ status: 'read' })
+        .eq('id', id)
+      );
+
+      if (result.error) {
+        console.error('Error marking as read:', result.error);
+      } else {
+        setNotifications(prev => prev.map(n => 
+          n.id === id ? { ...n, status: 'read' } : n
+        ));
+      }
+    } catch (err) {
+      console.error('Error in markAsRead:', err);
+    }
   }, []);
 
-  const fetchNotifications = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  // ✅ Use fetchWithRetry
+  const markAllAsRead = useCallback(async () => {
+    try {
+      // ✅ Use fetchWithRetry
+      const userResult = await fetchWithRetry(() => supabase.auth.getUser());
+      const user = userResult.data?.user;
+      
+      if (!user) return;
 
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+      // ✅ Use fetchWithRetry
+      const result = await fetchWithRetry(() => supabase
+        .from('notifications')
+        .update({ status: 'read' })
+        .eq('user_id', user.id)
+        .eq('status', 'unread')
+      );
 
-    if (!error) setNotifications(data);
-    setLoading(false);
-  };
-
-  const markAsRead = async (id) => {
-    await supabase.from('notifications').update({ status: 'read' }).eq('id', id);
-    setNotifications(notifications.map(n => n.id === id ? { ...n, status: 'read' } : n));
-  };
-
-  const markAllAsRead = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    await supabase
-      .from('notifications')
-      .update({ status: 'read' })
-      .eq('user_id', user.id)
-      .eq('status', 'unread');
-
-    setNotifications(notifications.map(n => ({ ...n, status: 'read' })));
-  };
+      if (result.error) {
+        console.error('Error marking all as read:', result.error);
+      } else {
+        setNotifications(prev => prev.map(n => ({ ...n, status: 'read' })));
+      }
+    } catch (err) {
+      console.error('Error in markAllAsRead:', err);
+    }
+  }, []);
 
   const unreadCount = notifications.filter(n => n.status === 'unread').length;
 
-  if (loading) return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '400px',
-      color: '#666'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '24px', marginBottom: '10px' }}>⏳</div>
-        <p>Loading notifications...</p>
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '400px',
+        color: '#666'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '3px solid #f3f3f3',
+            borderTop: '3px solid #667eea',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 15px auto'
+          }} />
+          <p>Loading notifications...</p>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
     <div style={{
@@ -142,9 +284,9 @@ const NotificationsList = () => {
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       minHeight: '100vh'
     }}>
-      {/* MAIN CONTAINER - MUCH LARGER AND RESPONSIVE */}
+      {/* MAIN CONTAINER */}
       <div style={{
-        maxWidth: '1200px',  // CHANGED: from 500px to 1200px (more than double!)
+        maxWidth: '1200px',
         margin: '0 auto',
         background: '#1a1a2e',
         borderRadius: '20px',
@@ -152,7 +294,57 @@ const NotificationsList = () => {
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
       }}>
         
-        {/* HEADER SECTION - ENLARGED */}
+        {/* ✅ Enhanced Error Message with Retry Button */}
+        {error && (
+          <div style={{
+            background: '#ff4444',
+            color: 'white',
+            padding: '12px 20px',
+            margin: '20px',
+            borderRadius: '8px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '10px'
+          }}>
+            <span>⚠️ {error}</span>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={() => {
+                  setError(null);
+                  fetchNotifications();
+                }}
+                style={{
+                  background: 'rgba(255,255,255,0.2)',
+                  border: '1px solid white',
+                  color: 'white',
+                  padding: '4px 12px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px'
+                }}
+              >
+                🔄 Retry
+              </button>
+              <button 
+                onClick={() => setError(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '18px',
+                  fontWeight: 'bold'
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* HEADER SECTION */}
         <div style={{
           background: 'linear-gradient(135deg, #16213e 0%, #0f3460 100%)',
           padding: '25px 30px',
@@ -243,7 +435,7 @@ const NotificationsList = () => {
           </div>
         </div>
 
-        {/* NOTIFICATIONS LIST - ENLARGED CARDS */}
+        {/* NOTIFICATIONS LIST */}
         <div style={{ padding: '30px' }}>
           {notifications.length === 0 ? (
             <div style={{
@@ -252,9 +444,7 @@ const NotificationsList = () => {
               background: '#16213e',
               borderRadius: '16px'
             }}>
-              <div style={{ fontSize: '64px', marginBottom: '20px' }}>
-                📭
-              </div>
+              <div style={{ fontSize: '64px', marginBottom: '20px' }}>📭</div>
               <h3 style={{ color: '#fff', marginBottom: '10px', fontSize: '24px' }}>
                 No buyer requests yet
               </h3>
@@ -320,12 +510,12 @@ const NotificationsList = () => {
                             {n.status === 'unread' ? '🟢 NEW REQUEST' : '📖 READ'}
                           </span>
                           <span style={{ color: '#888', fontSize: '13px' }}>
-                            {new Date(n.created_at).toLocaleDateString('en-US', {
+                            {n.created_at ? new Date(n.created_at).toLocaleDateString('en-US', {
                               weekday: 'short',
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric'
-                            })} at {new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            }) : 'Unknown date'} at {n.created_at ? new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'Unknown time'}
                           </span>
                         </div>
                         <p style={{
@@ -335,7 +525,7 @@ const NotificationsList = () => {
                           lineHeight: '1.5',
                           fontWeight: n.status === 'unread' ? '600' : '400'
                         }}>
-                          {n.message}
+                          {n.message || 'No message content'}
                         </p>
                       </div>
                       <div style={{ color: '#888', fontSize: '20px' }}>
@@ -343,7 +533,7 @@ const NotificationsList = () => {
                       </div>
                     </div>
 
-                    {/* Quick Info Row (always visible) */}
+                    {/* Quick Info Row */}
                     <div style={{
                       display: 'flex',
                       flexWrap: 'wrap',
@@ -363,7 +553,8 @@ const NotificationsList = () => {
                               borderRadius: '8px',
                               objectFit: 'cover',
                               border: '2px solid #4a4a6a'
-                            }} 
+                            }}
+                            onError={(e) => { e.target.style.display = 'none'; }}
                           />
                           <span style={{ color: '#ccc', fontSize: '13px' }}>Product Image</span>
                         </div>
@@ -373,7 +564,7 @@ const NotificationsList = () => {
                         <div>
                           <div style={{ color: '#888', fontSize: '11px' }}>Buyer Phone</div>
                           <div style={{ color: '#25D366', fontWeight: 'bold', fontSize: '16px' }}>
-                            {n.buyer_phone}
+                            {n.buyer_phone || 'No phone number'}
                           </div>
                         </div>
                       </div>
@@ -396,7 +587,11 @@ const NotificationsList = () => {
                         <button 
                           onClick={(e) => { 
                             e.stopPropagation(); 
-                            window.open(`tel:${n.buyer_phone}`);
+                            if (n.buyer_phone) {
+                              window.open(`tel:${n.buyer_phone}`);
+                            } else {
+                              alert('No phone number available');
+                            }
                           }}
                           style={{
                             padding: '14px',
@@ -422,7 +617,12 @@ const NotificationsList = () => {
                         <button 
                           onClick={(e) => { 
                             e.stopPropagation(); 
-                            window.open(`https://wa.me/${n.buyer_phone.replace(/\D/g, '')}`);
+                            if (n.buyer_phone) {
+                              const cleanNumber = n.buyer_phone.replace(/\D/g, '');
+                              window.open(`https://wa.me/${cleanNumber}`);
+                            } else {
+                              alert('No phone number available');
+                            }
                           }}
                           style={{
                             padding: '14px',
@@ -448,8 +648,12 @@ const NotificationsList = () => {
                         <button 
                           onClick={(e) => { 
                             e.stopPropagation(); 
-                            navigator.clipboard.writeText(n.buyer_phone);
-                            alert('Phone number copied!');
+                            if (n.buyer_phone) {
+                              navigator.clipboard.writeText(n.buyer_phone);
+                              alert('Phone number copied!');
+                            } else {
+                              alert('No phone number to copy');
+                            }
                           }}
                           style={{
                             padding: '14px',
@@ -517,4 +721,4 @@ const NotificationsList = () => {
   );
 };
 
-export default NotificationsList;
+export default React.memo(NotificationsList);

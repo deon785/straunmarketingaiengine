@@ -9,9 +9,17 @@ const GlobalBackHandler = () => {
   const { goBack, getPreviousPage } = useNavigation();
 
   useEffect(() => {
+    // ✅ Don't intercept back button on signup/auth pages
+    const skipPaths = ['/', '/reset-password'];
+
     const handleBackButton = (e) => {
       e.preventDefault();
       
+      // Don't handle back on signup page
+      if (location.pathname === '/' || location.pathname === '/reset-password') {
+        return; // Let browser handle it normally
+      }
+
       console.log('Back button pressed at:', location.pathname + location.search);
       
       // Get the previous page from our navigation stack

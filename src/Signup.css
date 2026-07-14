@@ -1,39 +1,34 @@
 /* ==================== */
-/* SIGNUP PAGE SPECIFIC CSS */
+/* SIGNUP PAGE CSS - FIXED */
 /* ==================== */
 
-/* Override global for signup page only */
 .signup-page {
-  /* Use the local gradient, not global dark background */
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  /* ✅ ADD THIS */
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
-/* Remove body padding-top override for signup page */
-.signup-page body {
-  padding-top: 0 !important;
-}
-
-/* Signup container - FIXED FOR GLOBAL CSS */
 .signup-page .auth-page-wrapper {
   min-height: 100vh;
-  padding-top: 0 !important; 
-  margin-top: 0 !important;
-  padding-bottom: 60px;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding-bottom: 60px;
+  box-sizing: border-box;
 }
 
 .signup-page .auth-container {
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: calc(100vh - 60px);  /* Account for header and footer */
-  padding: 20px;
   width: 100%;
+  padding: 20px;
 }
 
-/* Card styling - works with global */
 .signup-page .auth-card {
   background: white !important;
   padding: 40px;
@@ -41,121 +36,80 @@
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
   width: 100%;
   max-width: 400px;
-  text-align: center;
-  margin: 0 auto;
-  /* Ensure text color is dark inside card */
   color: #1a1a1a !important;
-}
-
-/* Typography in card */
-.signup-page .title {
-  color: #1a1a1a !important;
-  font-size: 28px;
-  font-weight: 700;
-  margin-bottom: 24px;
-}
-
-/* Form inputs */
-.signup-page .form-group label {
-  color: #4a5568 !important;
-  display: block;
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 8px;
 }
 
 .signup-page .form-input {
-   background: #000000 !important;
+  background: #000000 !important;
   border: 1px solid #000000 !important;
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
-}
-
-.signup-page .form-input::placeholder {
-  color: #9ca3af !important; 
+  transition: none !important;
 }
 
 .signup-page .form-input:focus {
   outline: none !important;
-  border-color: #007AFF !important;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1) !important;
-}
-
-/* Buttons */
-.signup-page .auth-button {
-  color: white !important;
-}
-
-.signup-page {
-  margin: 0 !important;
-  overflow-x: hidden !important;
-}
-
-.signup-page body {
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow-x: hidden !important;
-}
-
-/* Footer */
-.signup-page .signup-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.8);
-  padding: 8px 0;
-  text-align: center;
-  z-index: 1000;
-}
-
-.signup-page .form-input:-webkit-autofill,
-.signup-page .form-input:-webkit-autofill:hover,
-.signup-page .form-input:-webkit-autofill:focus,
-.signup-page .form-input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 1000px #000000 inset !important;
-  -webkit-text-fill-color: #ffffff !important;
-  box-shadow: 0 0 0 1000px #000000 inset !important;
-  border: 1px solid #000000 !important;
-  transition: background-color 5000s ease-in-out 0s !important;
+  border-color: #000000 !important;
+  box-shadow: none !important;
+  transition: none !important;
 }
 
 .signup-page .form-input::placeholder {
   color: #9ca3af !important;
-  opacity: 1 !important;
 }
 
-.signup-page .form-input:focus {
-  outline: none !important;
-  border-color: #007AFF !important;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1) !important;
+.signup-page .auth-button {
+  color: white !important;
+  transition: opacity 0.15s ease !important;
 }
 
-/* Mobile adjustments */
+/* ========== FOOTER - STICK TO BOTTOM NATURALLY ========== */
+.signup-page .signup-footer,
+.signup-page footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0, 0, 0, 0.9);
+  padding: 10px 0;
+  text-align: center;
+  z-index: 1000;
+}
+
+.signup-page footer p {
+  margin: 0;
+  color: #ccc;
+  font-size: 12px;
+}
+
+.signup-page footer a {
+  color: #48bb78;
+  text-decoration: none;
+  margin: 0 8px;
+}
+
+/* ========== AUTOFILL FIXES ========== */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #000000 inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s !important;
+}
+
+/* ========== MOBILE ========== */
 @media (max-width: 768px) {
-  .signup-page .auth-container {
-    min-height: calc(100vh - 3.5rem - 60px); /* Adjust for mobile header */
-  }
-  
   .signup-page .auth-card {
     padding: 30px;
   }
 }
 
 @media (max-width: 480px) {
-  .signup-page .auth-container {
-    padding: 10px;
-    min-height: calc(100vh - 3rem - 60px);
+  .signup-page .auth-page-wrapper {
+    padding-bottom: 60px;
   }
-  
   .signup-page .auth-card {
     padding: 25px 20px;
-  }
-}
-
-/* Light mode support */
-@media (prefers-color-scheme: light) {
-  .signup-page {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   }
 }

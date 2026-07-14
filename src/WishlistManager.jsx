@@ -1,42 +1,129 @@
 // WishlistManager.jsx
 import { useEffect, useState } from 'react';
-import { supabase } from './lib/supabase';
+import { supabase } from './lib/supabase'; 
+
+// Helper function at the top
+const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fetchFn();
+    } catch (err) {
+      lastError = err;
+      console.warn(`Fetch attempt ${i + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  throw lastError;
+};
 
 export default function WishlistManager({ onBack }) {
   const [wishlistItems, setWishlistItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('products'); // 'products' or 'prospects'
+  const [deletingId, setDeletingId] = useState(null);
+  const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('products');
 
-  // Fetch user's saved items
+  // Fetch user's saved items - ✅ CORRECTED
   const fetchWishlistItems = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    setError(null);
     
-    if (user) {
-      const { data, error } = await supabase
+    try {
+      // ✅ Use fetchWithRetry here, not at the top level
+      const userResult = await fetchWithRetry(() => supabase.auth.getUser());
+      
+      if (userResult.error) {
+        console.error('Error getting user:', userResult.error);
+        setError('Please sign in to view your wishlist');
+        setLoading(false);
+        return;
+      }
+      
+      const user = userResult.data?.user;
+      
+      if (!user) {
+        setError('User not found');
+        setWishlistItems([]);
+        setLoading(false);
+        return;
+      }
+      
+      const result = await supabase
         .from('saved_items')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (!error) {
-        setWishlistItems(data || []);
+      if (!result.error) {
+        setWishlistItems(result.data || []);
       } else {
-        console.error('Error fetching wishlist:', error);
+        console.error('Error fetching wishlist:', result.error);
+        setError('Failed to load wishlist items');
+        setWishlistItems([]);
       }
+    } catch (err) {
+      console.error('Unexpected error fetching wishlist:', err);
+      setError('Unable to load wishlist. Please try again.');
+      setWishlistItems([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Delete an item from wishlist
   const deleteWishlistItem = async (id) => {
-    const { error } = await supabase
-      .from('saved_items')
-      .delete()
-      .eq('id', id);
+    if (!id) {
+      setError('Invalid item ID');
+      return;
+    }
+    
+    setDeletingId(id);
+    setError(null);
+    
+    try {
+      const result = await supabase
+        .from('saved_items')
+        .delete()
+        .eq('id', id);
 
-    if (!error) {
-      setWishlistItems(wishlistItems.filter((item) => item.id !== id));
+      if (!result.error) {
+        setWishlistItems(prevItems => prevItems.filter((item) => item.id !== id));
+      } else {
+        console.error('Error deleting item:', result.error);
+        setError('Failed to delete item');
+      }
+    } catch (err) {
+      console.error('Unexpected error deleting item:', err);
+      setError('Unable to delete item');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // Handle WhatsApp contact safely
+  const handleWhatsAppContact = (phoneNumber) => {
+    if (!phoneNumber || typeof phoneNumber !== 'string') {
+      setError('Phone number not available');
+      return;
+    }
+    
+    try {
+      const cleanNumber = phoneNumber.replace(/\D/g, '');
+      
+      if (cleanNumber.length < 9 || cleanNumber.length > 15) {
+        setError('Invalid phone number format');
+        return;
+      }
+      
+      const finalNumber = cleanNumber.startsWith('263') 
+        ? cleanNumber 
+        : `263${cleanNumber.replace(/^0/, '')}`;
+      
+      window.open(`https://wa.me/${finalNumber}`, '_blank');
+    } catch (err) {
+      console.error('Error opening WhatsApp:', err);
+      setError('Unable to open WhatsApp');
     }
   };
 
@@ -44,39 +131,57 @@ export default function WishlistManager({ onBack }) {
   const filteredItems = wishlistItems.filter(item => 
     activeTab === 'products' ? item.item_type === 'product' : item.item_type === 'prospect'
   );
+
   useEffect(() => {
     fetchWishlistItems();
 
-    // Real-time subscription (already added)
-    const channel = supabase
-      .channel('saved_items_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'saved_items',
-        },
-        (payload) => {
-          supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user && payload.new && payload.new.user_id === user.id) {
-              fetchWishlistItems();
-            }
-          });
-        }
-      )
-      .subscribe();
+    let channel = null;
+    
+    try {
+      if (!supabase) {
+        console.warn('Supabase client not available');
+        return;
+      }
+      
+      channel = supabase
+        .channel('saved_items_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'saved_items',
+          },
+          (payload) => {
+            supabase.auth.getUser()
+              .then((userResult) => {
+                if (!userResult.error && userResult.data?.user && payload.new?.user_id === userResult.data.user.id) {
+                  fetchWishlistItems();
+                }
+              })
+              .catch(err => console.error('Error checking user on change:', err));
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.error('Error setting up real-time subscription:', err);
+    }
 
-    // ADD THIS SEPARATE EVENT LISTENER FOR PULL-TO-REFRESH
     const handlePullToRefresh = () => {
       console.log('🔄 Pull-to-refresh detected in WishlistManager');
-      fetchWishlistItems(); // Simply refresh the wishlist
+      fetchWishlistItems();
     };
     
     window.addEventListener('pull-to-refresh', handlePullToRefresh);
     
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch (err) {
+          console.error('Error removing channel:', err);
+        }
+      }
       window.removeEventListener('pull-to-refresh', handlePullToRefresh);
     };
   }, []);
@@ -84,7 +189,22 @@ export default function WishlistManager({ onBack }) {
   if (loading) {
     return (
       <div style={{ padding: '20px', textAlign: 'center', color: 'white' }}>
+        <div style={{ 
+          width: '40px', 
+          height: '40px', 
+          border: '3px solid #f3f3f3', 
+          borderTop: '3px solid #667eea', 
+          borderRadius: '50%', 
+          animation: 'spin 1s linear infinite',
+          margin: '0 auto 15px auto'
+        }} />
         <p>Loading your wishlist...</p>
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
       </div>
     );
   }
@@ -106,7 +226,19 @@ export default function WishlistManager({ onBack }) {
         gap: '10px'
       }}>
         <button 
-          onClick={onBack} 
+          onClick={() => {
+            try {
+              if (onBack) {
+                onBack();
+              } else {
+                console.warn('onBack function not provided');
+                window.history.back();
+              }
+            } catch (err) {
+              console.error('Error navigating back:', err);
+              window.history.back();
+            }
+          }}
           style={{
             background: '#4361ee',
             color: 'white',
@@ -125,6 +257,34 @@ export default function WishlistManager({ onBack }) {
         </button>
         <h3 style={{ color: 'white', margin: 0 }}>My Wishlist ({wishlistItems.length} items)</h3>
       </div>
+
+      {/* Error Message */}
+      {error && (
+        <div style={{
+          background: '#ff4444',
+          color: 'white',
+          padding: '10px 15px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span>⚠️ {error}</span>
+          <button 
+            onClick={() => setError(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'white',
+              cursor: 'pointer',
+              fontSize: '18px'
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{
@@ -192,7 +352,8 @@ export default function WishlistManager({ onBack }) {
               borderRadius: '10px',
               padding: '15px',
               border: '1px solid #333',
-              position: 'relative'
+              position: 'relative',
+              opacity: deletingId === item.id ? 0.5 : 1
             }}>
               {/* Item Header */}
               <div style={{ 
@@ -213,19 +374,19 @@ export default function WishlistManager({ onBack }) {
                   {item.item_type === 'product' ? (
                     <>
                       <div style={{ color: '#ccc', marginBottom: '5px' }}>
-                        <strong>Price:</strong> ${item.product_price}
+                        <strong>Price:</strong> ${item.product_price || '0'}
                       </div>
                       <div style={{ color: '#ccc', fontSize: '14px' }}>
-                        <strong>Location:</strong> {item.seller_location}
+                        <strong>Location:</strong> {item.seller_location || 'Not specified'}
                       </div>
                     </>
                   ) : (
                     <>
                       <div style={{ color: '#ccc', marginBottom: '5px' }}>
-                        <strong>Email:</strong> {item.prospect_email}
+                        <strong>Email:</strong> {item.prospect_email || 'Not specified'}
                       </div>
                       <div style={{ color: '#ccc', fontSize: '14px' }}>
-                        <strong>Location:</strong> {item.prospect_location}
+                        <strong>Location:</strong> {item.prospect_location || 'Not specified'}
                       </div>
                     </>
                   )}
@@ -235,7 +396,7 @@ export default function WishlistManager({ onBack }) {
                 <div style={{ display: 'flex', gap: '8px' }}>
                   {item.item_type === 'product' && item.seller_phone && (
                     <button
-                      onClick={() => window.open(`https://wa.me/${item.seller_phone.replace(/\D/g, '')}`, '_blank')}
+                      onClick={() => handleWhatsAppContact(item.seller_phone)}
                       style={{
                         background: '#25D366',
                         color: 'white',
@@ -255,34 +416,39 @@ export default function WishlistManager({ onBack }) {
                   
                   <button 
                     onClick={() => deleteWishlistItem(item.id)}
+                    disabled={deletingId === item.id}
                     style={{
                       background: '#ff4d4d',
                       color: 'white',
                       border: 'none',
                       padding: '8px 12px',
                       borderRadius: '6px',
-                      cursor: 'pointer',
-                      fontSize: '12px'
+                      cursor: deletingId === item.id ? 'not-allowed' : 'pointer',
+                      fontSize: '12px',
+                      opacity: deletingId === item.id ? 0.6 : 1
                     }}
                     title="Remove from wishlist"
                   >
-                    🗑️
+                    {deletingId === item.id ? '⌛' : '🗑️'}
                   </button>
                 </div>
               </div>
 
-              {/* Product Image (if exists) */}
+              {/* Product Image */}
               {item.item_type === 'product' && item.product_image && (
                 <div style={{ marginBottom: '10px' }}>
                   <img 
                     src={item.product_image} 
-                    alt={item.product_name}
+                    alt={item.product_name || 'Product'}
                     style={{
                       width: '80px',
                       height: '80px',
                       borderRadius: '8px',
                       objectFit: 'cover',
                       border: '2px solid #333'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
                     }}
                   />
                 </div>
@@ -300,7 +466,7 @@ export default function WishlistManager({ onBack }) {
                 color: '#888'
               }}>
                 <span>
-                  Saved on {new Date(item.created_at).toLocaleDateString()}
+                  Saved on {item.created_at ? new Date(item.created_at).toLocaleDateString() : 'Unknown date'}
                 </span>
                 <span style={{
                   background: item.item_type === 'product' ? '#4361ee' : '#9c27b0',
