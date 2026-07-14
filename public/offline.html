@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Offline - Straun Marketing AI</title>
     <style>
         * {
@@ -18,7 +18,7 @@
             align-items: center;
             min-height: 100vh;
             margin: 0;
-            background: #1e1e1e;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             text-align: center;
             padding: 20px;
@@ -27,41 +27,53 @@
         .container {
             max-width: 400px;
             padding: 40px 20px;
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.15);
             border-radius: 20px;
             backdrop-filter: blur(10px);
         }
         
-        h1 {
-            font-size: 3em;
+        .offline-icon {
+            font-size: 64px;
             margin-bottom: 20px;
         }
         
+        h1 {
+            font-size: 28px;
+            margin-bottom: 12px;
+        }
+        
         p {
-            margin-bottom: 30px;
+            margin-bottom: 24px;
             opacity: 0.9;
-            line-height: 1.6;
+            line-height: 1.5;
         }
         
         button {
             background: white;
             color: #667eea;
             border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
+            padding: 12px 28px;
+            border-radius: 50px;
             font-size: 16px;
-            font-weight: bold;
+            font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s;
+            transition: transform 0.2s, opacity 0.2s;
         }
         
         button:hover {
             transform: translateY(-2px);
         }
         
-        .offline-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-message {
+            margin-top: 16px;
+            font-size: 12px;
+            opacity: 0.8;
         }
         
         @media (max-width: 480px) {
@@ -70,7 +82,7 @@
             }
             
             h1 {
-                font-size: 2em;
+                font-size: 24px;
             }
         }
     </style>
@@ -80,12 +92,72 @@
         <div class="offline-icon">📡</div>
         <h1>You're Offline</h1>
         <p>Please check your internet connection and try again.</p>
-        <button onclick="window.location.reload()">
+        <button id="retryButton" onclick="handleRetry()">
             🔄 Retry Connection
         </button>
-        <p style="margin-top: 20px; font-size: 12px;">
-            Once connected, you'll be able to search for products and connect with sellers.
-        </p>
+        <div id="statusMessage" class="status-message"></div>
     </div>
+
+    <script>
+        let retryTimeout;
+        
+        function showMessage(msg, isError = false) {
+            const msgDiv = document.getElementById('statusMessage');
+            if (msgDiv) {
+                msgDiv.textContent = msg;
+                msgDiv.style.color = isError ? '#ffcccc' : '#ccffcc';
+                setTimeout(() => {
+                    if (msgDiv.textContent === msg) {
+                        msgDiv.textContent = '';
+                    }
+                }, 3000);
+            }
+        }
+        
+        function handleRetry() {
+            const button = document.getElementById('retryButton');
+            
+            // Check if online
+            if (navigator.onLine) {
+                showMessage('✅ Connection detected! Reloading...');
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
+            } else {
+                // Still offline
+                const originalText = button.innerHTML;
+                button.innerHTML = '⚠️ Still offline, waiting...';
+                button.disabled = true;
+                showMessage('📡 Still no internet connection. Will retry automatically when connected.', true);
+                
+                // Reset button after 3 seconds
+                setTimeout(() => {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }, 3000);
+            }
+        }
+        
+        // Auto-reload when connection returns
+        window.addEventListener('online', () => {
+            showMessage('🎉 Internet connection restored! Reloading...');
+            setTimeout(() => {
+                window.location.reload();
+            }, 500);
+        });
+        
+        // Show if connection is already back
+        if (navigator.onLine) {
+            showMessage('Connection available! Reloading...');
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        }
+        
+        // Clean up timeout on page unload
+        window.addEventListener('beforeunload', () => {
+            if (retryTimeout) clearTimeout(retryTimeout);
+        });
+    </script>
 </body>
 </html>
