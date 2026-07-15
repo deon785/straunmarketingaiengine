@@ -2288,45 +2288,88 @@ function SocialAIMarketingEngine() {
     useEffect(() => {
         if (!user || !user.id) return;
         
-        // ✅ Wait for profile to be loaded before restoring
+        // ✅ Wait for profile to be loaded
         if (profileLoading) {
             console.log('⏳ Profile loading, waiting to restore...');
             return;
         }
         
+        // ✅ Only restore if no mode is selected
         if (!selectedMode) {
             const storageKey = `straun_userLocation_${user.id}`;
             const saved = localStorage.getItem(storageKey);
             
             if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    const ONE_HOUR = 60 * 60 * 1000;
-                    
-                    if (Date.now() - data.timestamp < ONE_HOUR) {
-                        console.log('🔄 Restoring location for user:', user.id);
-                        
-                        // ✅ Set mode
-                        setMode(data.mode);
-                        
-                        // ✅ Navigate to saved page
-                        if (data.path && data.path !== '/') {
-                            // Use a small delay to ensure mode is set first
-                            setTimeout(() => {
-                                navigate(data.path);
-                            }, 100);
-                        }
-                    } else {
-                        localStorage.removeItem(storageKey);
-                        console.log('⏰ Location expired for user:', user.id);
-                    }
-                } catch (e) {
-                    console.error('Error restoring location:', e);
-                    localStorage.removeItem(storageKey);
+            try {
+                const data = JSON.parse(saved);
+                const ONE_HOUR = 60 * 60 * 1000;
+                
+                if (Date.now() - data.timestamp < ONE_HOUR) {
+                console.log('🔄 Restoring location for user:', user.id);
+                console.log('📊 Saved mode:', data.mode);
+                console.log('👤 Profile: seller=', profileData?.is_seller, 'buyer=', profileData?.is_buyer);
+                
+                // ✅ CRITICAL: Check if user is actually a seller or buyer
+                const isSeller = profileData?.is_seller === true;
+                const isBuyer = profileData?.is_buyer === true;
+                
+                // ✅ Determine the correct mode based on profile
+                let correctMode = data.mode;
+                
+                // If user is only a seller, force seller mode
+                if (isSeller && !isBuyer) {
+                    correctMode = 'seller';
+                    console.log('👤 User is only a seller, forcing seller mode');
                 }
+                // If user is only a buyer, force buyer mode
+                else if (isBuyer && !isSeller) {
+                    correctMode = 'buyer';
+                    console.log('👤 User is only a buyer, forcing buyer mode');
+                }
+                // If user is both, use saved mode
+                else if (isSeller && isBuyer) {
+                    console.log('👤 User is both seller and buyer, using saved mode');
+                }
+                // If user is neither, use saved mode (fallback)
+                else {
+                    console.log('👤 User has no specific mode, using saved mode');
+                }
+                
+                // ✅ Set the correct mode
+                setMode(correctMode);
+                
+                // ✅ Only navigate if we have a path and it's not the auth page
+                if (data.path && data.path !== '/' && data.path !== '/login') {
+                    setTimeout(() => {
+                    navigate(data.path);
+                    }, 100);
+                }
+                } else {
+                localStorage.removeItem(storageKey);
+                console.log('⏰ Location expired for user:', user.id);
+                }
+            } catch (e) {
+                console.error('Error restoring location:', e);
+                localStorage.removeItem(storageKey);
+            }
+            } else {
+            // ✅ No saved location - use profile mode
+            const isSeller = profileData?.is_seller === true;
+            const isBuyer = profileData?.is_buyer === true;
+            
+            if (isSeller && !isBuyer) {
+                console.log('👤 User is a seller, setting seller mode');
+                setMode('seller');
+            } else if (isBuyer && !isSeller) {
+                console.log('👤 User is a buyer, setting buyer mode');
+                setMode('buyer');
+            } else {
+                console.log('👤 No saved location and no profile mode, showing mode selection');
+                // Don't set mode - show mode selection screen
+            }
             }
         }
-    }, [user, selectedMode, setMode, navigate, profileLoading]);
+    }, [user, selectedMode, setMode, navigate, profileLoading, profileData]);
 
     // ✅ Update search when URL changes (back/forward navigation)
     useEffect(() => {
@@ -3266,28 +3309,16 @@ function SocialAIMarketingEngine() {
     });
 
     // --- HANDLE MODE SELECTION ---
-    const handleModeSelect = async (mode) => {
-        // ✅ Save location when selecting mode
-        const locationData = {
-            mode: mode,
-            path: '/app',
-            page: 'social',
-            timestamp: Date.now()
-        };
-        localStorage.setItem('straun_userLocation', JSON.stringify(locationData));
-        
-        await withLoading(async () => {
-            // ✅ Use setMode from AuthContext instead of local setSelectedMode
-            setMode(mode);  // This sets it in AuthContext AND localStorage
-            setIsProfileComplete(false);
-            setError(null);
+    // SocialAIMarketingEngine.jsx - FIXED handleModeSelect
 
-            if (mode === 'seller') {
-                setShowSellerDecision(true);
-            } else {
-                setIsProfileComplete(false);
-            }
-            
+    const handleModeSelect = async (mode) => {
+        console.log('🔄 handleModeSelect called with:', mode);
+        
+        setGlobalLoading(true);
+        setGlobalLoadingMessage(`Preparing ${mode} mode...`);
+        
+        try {
+            // ✅ Clear ALL state first
             setProductsFound([]);
             setProspects([]);
             setProductSearch('');
@@ -3296,9 +3327,46 @@ function SocialAIMarketingEngine() {
             setCurrentPage(0);
             setHasMore(true);
             setSearchCache({});
-            setSimilarProducts([]); 
+            setSimilarProducts([]);
             setShowSimilarProducts(false);
-        }, `Preparing ${mode} mode...`);
+            setError(null);
+            
+            // ✅ Set mode in AuthContext
+            setMode(mode);
+            
+            // ✅ Set profile completion based on mode
+            if (mode === 'buyer') {
+            setIsProfileComplete(false);
+            setShowSellerDecision(false);
+            } else if (mode === 'seller') {
+            setIsProfileComplete(false);
+            setShowSellerDecision(true);
+            }
+            
+            // ✅ Save location
+            const locationData = {
+            mode: mode,
+            path: '/app',
+            page: 'social',
+            timestamp: Date.now()
+            };
+            if (user?.id) {
+            localStorage.setItem(`straun_userLocation_${user.id}`, JSON.stringify(locationData));
+            }
+            
+            // ✅ Force re-render
+            triggerForceUpdate();
+            
+            console.log(`✅ Mode set to: ${mode}`);
+            showToastNotification(`Switched to ${mode} mode`);
+            
+        } catch (error) {
+            console.error('❌ Error switching mode:', error);
+            setError('Failed to switch mode. Please try again.');
+        } finally {
+            setGlobalLoading(false);
+            setGlobalLoadingMessage('');
+        }
     };
 
     const handleSellerClick = () => {
@@ -3311,7 +3379,43 @@ function SocialAIMarketingEngine() {
 
     // Clear state when changing modes
     const clearAndSetMode = (mode) => {
-        handleModeSelect(mode);
+        console.log('🔄 clearAndSetMode called with:', mode);
+        console.log('🔄 Current selectedMode before change:', selectedMode);
+        
+        // ✅ Force mode change in AuthContext
+        setMode(mode);
+        
+        // ✅ Clear ALL state
+        setProductsFound([]);
+        setProspects([]);
+        setProductSearch('');
+        setAllProducts([]);
+        setIsNavCollapsed(false);
+        setCurrentPage(0);
+        setHasMore(true);
+        setSearchCache({});
+        setSimilarProducts([]);
+        setShowSimilarProducts(false);
+        setError(null);
+        
+        // ✅ CRITICAL: Set profile completion based on mode
+        // If mode is buyer, mark profile as complete so setup shows
+        // If mode is seller, show seller decision
+        if (mode === 'buyer') {
+            setIsProfileComplete(false);  // ← This shows the buyer setup form
+            setShowSellerDecision(false);
+        } else if (mode === 'seller') {
+            setIsProfileComplete(false);
+            setShowSellerDecision(true);
+        }
+        
+        // ✅ Force re-render
+        triggerForceUpdate();
+        
+        console.log(`✅ Mode set to: ${mode}`);
+        console.log(`✅ showSellerDecision: ${mode === 'seller'}`);
+        console.log(`✅ isProfileComplete: ${false}`);
+        showToastNotification(`Switched to ${mode} mode`);
     };
 
     const clearAndSwitchMode = () => {

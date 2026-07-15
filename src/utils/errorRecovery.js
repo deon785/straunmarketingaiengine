@@ -353,3 +353,18 @@ export function useErrorRecovery() {
 }
 
 export default errorRecovery;
+
+// ✅ Add this missing function
+export function executeWithRecovery(asyncFn, context = {}) {
+  return async (...args) => {
+    try {
+      return await asyncFn(...args);
+    } catch (error) {
+      const result = await errorRecovery.handleError(error, context);
+      if (result.recovered) {
+        return result;
+      }
+      throw error;
+    }
+  };
+}

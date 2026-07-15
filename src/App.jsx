@@ -764,38 +764,34 @@ function App() {
       showDialog
     >
       <GlobalErrorHandler>
-        {/* ✅ WRAP EVERYTHING WITH AuthProvider */}
-        
-          <Router>
-            <NavigationProvider>
-              <RefreshPersistenceWrapper>
-                <PullToRefreshWrapper>
-                  <GlobalBackHandler />
-                  <AnalyticsTracker />
-                  <NotificationWatcher />
+        <Router>
+          <NavigationProvider>
+            <RefreshPersistenceWrapper>
+              <PullToRefreshWrapper>
+                <GlobalBackHandler />
+                <AnalyticsTracker />
+                <NotificationWatcher />
+                
+                <div className="app">
+                  <OfflineBanner />
                   
-                  <div className="app">
-                    <OfflineBanner />
-                    
-                    <main>
-                      <Suspense fallback={<PageLoadingSpinner />}>
+                  <main>
+                    <Suspense fallback={<PageLoadingSpinner />}>
+                      {/* ✅ WRAP ALL ROUTES WITH ErrorBoundary */}
+                      <ComponentErrorBoundary>
                         <Routes>
                           <Route path="/" element={<Auth />} />
                           <Route path="/seller-decision" element={<MemoizedSellerDecision />} />
                           
                           <Route path="/app" element={
                             <ProtectedRoute>
-                              <ComponentErrorBoundary>
-                                <SocialAIMarketingEngine />
-                              </ComponentErrorBoundary>
+                              <SocialAIMarketingEngine />
                             </ProtectedRoute>
                           } />
                           
                           <Route path="/notifications" element={
                             <ProtectedRoute>
-                              <ComponentErrorBoundary>
-                                <NotificationsList />
-                              </ComponentErrorBoundary>
+                              <NotificationsList />
                             </ProtectedRoute>
                           } />
 
@@ -808,24 +804,24 @@ function App() {
                           
                           <Route path="*" element={<SafeNavigate to="/" replace />} />
                         </Routes>
-                      </Suspense>
-                    </main>
-                    
-                    <Suspense fallback={null}>
-                      <CookieBanner />
+                      </ComponentErrorBoundary>
                     </Suspense>
-                    
-                    <FeedbackButton />
-                    
-                    <Suspense fallback={null}>
-                      <PushNotificationHandler />
-                    </Suspense>
-                  </div>
-                </PullToRefreshWrapper>
-              </RefreshPersistenceWrapper>
-            </NavigationProvider>
-          </Router>
-        
+                  </main>
+                  
+                  <Suspense fallback={null}>
+                    <CookieBanner />
+                  </Suspense>
+                  
+                  <FeedbackButton />
+                  
+                  <Suspense fallback={null}>
+                    <PushNotificationHandler />
+                  </Suspense>
+                </div>
+              </PullToRefreshWrapper>
+            </RefreshPersistenceWrapper>
+          </NavigationProvider>
+        </Router>
       </GlobalErrorHandler>
     </Sentry.ErrorBoundary>
   );

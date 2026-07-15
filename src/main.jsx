@@ -8,7 +8,7 @@ import { LoadingProvider } from './LoadingContext';
 import { AuthProvider } from './AuthContext';
 import { GlobalErrorHandler } from './GlobalErrorHandler';
 import { Toaster } from 'react-hot-toast';
-import { errorRecovery } from './utils/errorRecovery';
+import { errorRecovery, executeWithRecovery } from './utils/errorRecovery';
 
 // ========== ANALYTICS ==========
 try {

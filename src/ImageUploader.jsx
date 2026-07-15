@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import imageCompression from 'browser-image-compression';
 
-// ✅ Add fetchWithRetry helper
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
   let lastError;
   for (let i = 0; i < maxRetries; i++) {
@@ -25,7 +24,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
   const progressIntervalRef = useRef(null);
   const MAX_RETRIES = 2;
 
-  // ✅ Clean up interval
   const clearProgressInterval = useCallback(() => {
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
@@ -33,7 +31,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
     }
   }, []);
 
-  // ✅ Reset state on mount
   const resetState = useCallback(() => {
     clearProgressInterval();
     setUploading(false);
@@ -42,7 +39,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
   }, [clearProgressInterval]);
 
   const handleUpload = async (event) => {
-    // ✅ Check offline status
     if (!navigator.onLine) {
       const msg = 'You are offline. Please connect to the internet to upload images.';
       setError(msg);
@@ -51,7 +47,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       return;
     }
 
-    // ✅ Clear previous state
     setUploading(true);
     setUploadProgress(0);
     setError(null);
@@ -64,35 +59,64 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
         return;
       }
 
-      // Validate file size (max 10MB before compression)
-      if (imageFile.size > 10 * 1024 * 1024) {
-        throw new Error('Image too large. Please select an image under 10MB.');
+      // ✅ Validate file size (max 20MB before compression)
+      if (imageFile.size > 20 * 1024 * 1024) {
+        throw new Error('Image too large. Please select an image under 20MB.');
       }
 
       // Validate file type
-      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
-      if (!validTypes.includes(imageFile.type)) {
+      const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg', 'image/heic', 'image/heif'];
+      if (!validTypes.includes(imageFile.type) && !imageFile.type.startsWith('image/')) {
         throw new Error('Please upload a valid image (JPEG, PNG, or WebP)');
       }
 
-      console.log('Original size:', (imageFile.size / 1024 / 1024).toFixed(2), 'MB');
-      
-      // Compression options
+      console.log('📸 Original size:', (imageFile.size / 1024 / 1024).toFixed(2), 'MB');
+
+      // ✅ UPDATED: Better compression options for large images
       const options = {
-        maxSizeMB: 0.2,
-        maxWidthOrHeight: 600,
+        maxSizeMB: 0.8,           // Target 800KB (was 0.2)
+        maxWidthOrHeight: 1024,   // 1024px (was 600)
         useWebWorker: true,
-        initialQuality: 0.75,
+        initialQuality: 0.8,      // 80% quality (was 0.75)
         fileType: 'image/jpeg',
+        // ✅ Progressive compression if first attempt fails
+        alwaysKeepResolution: false,
+        onProgress: (progress) => {
+          console.log(`Compression: ${progress}%`);
+        }
       };
 
-      const compressedFile = await imageCompression(imageFile, options);
+      // ✅ Try compression with fallback
+      let compressedFile;
+      try {
+        compressedFile = await imageCompression(imageFile, options);
+      } catch (compressError) {
+        console.warn('⚠️ Primary compression failed, trying fallback...');
+        // ✅ Fallback: Less aggressive compression
+        const fallbackOptions = {
+          maxSizeMB: 1.5,
+          maxWidthOrHeight: 800,
+          useWebWorker: true,
+          initialQuality: 0.7,
+          fileType: 'image/jpeg',
+        };
+        compressedFile = await imageCompression(imageFile, fallbackOptions);
+      }
       
-      console.log('Compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
+      console.log('✅ Compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
 
-      // ✅ Check compressed size
-      if (compressedFile.size > 200 * 1024) {
-        console.warn('Compressed file still large:', (compressedFile.size / 1024).toFixed(2), 'KB');
+      // ✅ If still too large, compress more aggressively
+      if (compressedFile.size > 300 * 1024) {
+        console.log('⚠️ Still large, re-compressing...');
+        const recompressOptions = {
+          maxSizeMB: 0.5,
+          maxWidthOrHeight: 600,
+          useWebWorker: true,
+          initialQuality: 0.6,
+          fileType: 'image/jpeg',
+        };
+        compressedFile = await imageCompression(compressedFile, recompressOptions);
+        console.log('✅ Re-compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
       }
 
       // Generate unique filename
@@ -100,12 +124,12 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
       const filePath = fileName;
 
-      // ✅ Start progress interval
+      // Start progress interval
       progressIntervalRef.current = setInterval(() => {
         setUploadProgress(prev => Math.min(prev + 10, 90));
       }, 200);
 
-      // ✅ Use fetchWithRetry for upload
+      // Upload with retry
       const { error: uploadError } = await fetchWithRetry(() => 
         supabase.storage
           .from('product-images')
@@ -119,13 +143,10 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       clearProgressInterval();
 
       if (uploadError) {
-        // ✅ Retry logic
         if (retryCount < MAX_RETRIES) {
           setRetryCount(prev => prev + 1);
           setError(`Upload failed. Retrying (${retryCount + 1}/${MAX_RETRIES})...`);
-          // Retry after 2 seconds
           setTimeout(() => {
-            // Reset file input to allow retry
             const input = document.getElementById('image-upload-input');
             if (input) input.value = '';
             handleUpload(event);
@@ -143,16 +164,14 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       setUploadProgress(100);
       setRetryCount(0);
       
-      // Notify parent component
       if (onUploadSuccess) {
         onUploadSuccess(data.publicUrl);
       }
       
-      // Clear progress after delay
       setTimeout(() => setUploadProgress(0), 1500);
 
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error('❌ Upload error:', error);
       const errorMessage = error.message || 'Error uploading image';
       setError(errorMessage);
       if (onUploadError) {
@@ -167,7 +186,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
     }
   };
 
-  // ✅ Reset state on unmount
   React.useEffect(() => {
     return () => {
       clearProgressInterval();
@@ -182,19 +200,15 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       position: 'relative',
       marginBottom: '15px'
     }}>
-      {/* Hidden file input */}
       <input
         id="image-upload-input"
         type="file"
         accept="image/jpeg,image/png,image/webp,image/jpg"
         onChange={handleUpload}
         disabled={uploading}
-        style={{ 
-          display: 'none'
-        }}
+        style={{ display: 'none' }}
       />
       
-      {/* Upload Container */}
       <div
         style={{
           width: '100%',
@@ -234,7 +248,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
           }
         }}
       >
-        {/* Error Message */}
         {error && (
           <div style={{
             position: 'absolute',
@@ -252,7 +265,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
           </div>
         )}
         
-        {/* Upload Icon */}
         <div style={{ 
           fontSize: '28px', 
           marginBottom: '6px',
@@ -262,10 +274,7 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
         </div>
         
         {uploading ? (
-          <div style={{ 
-            width: '100%',
-            textAlign: 'center'
-          }}>
+          <div style={{ width: '100%', textAlign: 'center' }}>
             <p style={{ 
               color: '#10B981', 
               fontSize: '12px',
@@ -292,10 +301,7 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
             )}
           </div>
         ) : (
-          <div style={{ 
-            textAlign: 'center',
-            maxWidth: '90%'
-          }}>
+          <div style={{ textAlign: 'center', maxWidth: '90%' }}>
             <p style={{ 
               color: '#D1D5DB', 
               fontSize: '12px',
@@ -310,12 +316,11 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
               fontSize: '10px',
               lineHeight: '1.2'
             }}>
-              JPEG, PNG, WebP
+              JPEG, PNG, WebP • Up to 20MB
             </p>
           </div>
         )}
         
-        {/* Bottom label */}
         <div style={{
           position: 'absolute',
           bottom: '6px',
@@ -330,7 +335,7 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
             padding: '2px 6px',
             borderRadius: '4px'
           }}>
-            Max 200KB • Auto-compressed
+            Compressed to ~800KB • 1024px
           </span>
         </div>
       </div>
