@@ -1,4 +1,4 @@
-// src/utils/errorRecovery.js - FIXED VERSION
+// src/utils/errorRecovery.js - COMPLETE WORKING VERSION
 
 import React, { useCallback, useState } from 'react'; 
 import * as Sentry from "@sentry/react";
@@ -9,7 +9,7 @@ export const ErrorSeverity = {
   MEDIUM: 'medium',
   HIGH: 'high',
   CRITICAL: 'critical',
-  IGNORE: 'ignore'  // ✅ ADD THIS
+  IGNORE: 'ignore'
 };
 
 // Recovery strategies
@@ -23,7 +23,6 @@ class ErrorRecovery {
     const errorType = this.classifyError(error);
     const severity = this.getSeverity(errorType);
     
-    // ✅ IGNORE resource and service worker errors completely
     if (severity === ErrorSeverity.IGNORE) {
       console.log(`[Recovery] Ignoring ${errorType} error (no action needed)`);
       return { recovered: true, shouldRetry: false };
@@ -58,7 +57,6 @@ class ErrorRecovery {
         });
     }
     
-    // Return a meaningful response instead of ignoring
     return { 
         recovered: false, 
         shouldRetry: false,
@@ -71,21 +69,18 @@ class ErrorRecovery {
     const message = error?.message?.toLowerCase() || '';
     const stack = error?.stack?.toLowerCase() || '';
     
-    // ✅ Check for the specific rating column error
     if (message.includes('column') && 
         message.includes('does not exist') && 
         message.includes('rating')) {
         return 'COLUMN_ERROR';
     }
     
-    // Handle resource errors
     if (message.includes('resource') || 
         message.includes('unexpected identifier') ||
         (message.includes('failed to fetch') && message.includes('sw.js'))) {
         return 'RESOURCE_ERROR';
     }
     
-    // Network errors
     if (message.includes('failed to fetch') || 
         message.includes('network') ||
         message.includes('offline') ||
@@ -93,7 +88,6 @@ class ErrorRecovery {
         return 'NETWORK_ERROR';
     }
     
-    // Module loading errors
     if (message.includes('dynamically imported module') ||
         message.includes('failed to load') ||
         message.includes('import') ||
@@ -101,14 +95,12 @@ class ErrorRecovery {
         return 'MODULE_LOAD_ERROR';
     }
     
-    // Supabase errors
     if (message.includes('supabase') ||
         message.includes('postgres') ||
         message.includes('database')) {
         return 'DATABASE_ERROR';
     }
     
-    // Authentication errors
     if (message.includes('auth') ||
         message.includes('session') ||
         message.includes('token') ||
@@ -116,21 +108,18 @@ class ErrorRecovery {
         return 'AUTH_ERROR';
     }
     
-    // Service worker errors
     if (message.includes('service worker') ||
         message.includes('sw.js') ||
         message.includes('push')) {
         return 'SERVICE_WORKER_ERROR';
     }
     
-    // Memory errors
     if (message.includes('memory') ||
         message.includes('heap') ||
         message.includes('out of memory')) {
         return 'MEMORY_ERROR';
     }
     
-    // Rendering errors
     if (message.includes('render') ||
         message.includes('react') ||
         message.includes('component')) {
@@ -143,17 +132,14 @@ class ErrorRecovery {
   getSeverity(errorType) {
     const attemptCount = this.recoveryAttempts.get(errorType) || 0;
     
-    // ✅ ADD THIS - Return IGNORE for resource errors
     if (errorType === 'RESOURCE_ERROR') {
       return ErrorSeverity.IGNORE;
     }
     
-    // If we've tried many times, escalate severity
     if (attemptCount > 5) return ErrorSeverity.CRITICAL;
     if (attemptCount > 3) return ErrorSeverity.HIGH;
     if (attemptCount > 1) return ErrorSeverity.MEDIUM;
     
-    // Base severity by error type
     const severityMap = {
       'NETWORK_ERROR': ErrorSeverity.LOW,
       'MODULE_LOAD_ERROR': ErrorSeverity.MEDIUM,
@@ -312,8 +298,8 @@ class ErrorRecovery {
   }
 }
 
-// Singleton instance
-export const errorRecovery = new ErrorRecovery();
+// Create singleton instance
+const errorRecovery = new ErrorRecovery();
 
 // ========== HELPER FUNCTIONS FOR COMPONENTS ==========
 
@@ -352,9 +338,6 @@ export function useErrorRecovery() {
   return { recover, isRecovering, lastError };
 }
 
-export default errorRecovery;
-
-// ✅ Add this missing function
 export function executeWithRecovery(asyncFn, context = {}) {
   return async (...args) => {
     try {
@@ -368,3 +351,8 @@ export function executeWithRecovery(asyncFn, context = {}) {
     }
   };
 }
+
+// ✅ CRITICAL FIX: Export errorRecovery as BOTH named AND default
+export { errorRecovery };  // ← THIS WAS MISSING!
+export default errorRecovery;
+export { ErrorRecovery };

@@ -481,23 +481,7 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                     `}</style>
 
                     <form onSubmit={handleSubmit(onSubmit)} autoComplete="off" className="buyer-form">
-                        <h3 className="text-3xl font-bold mb-4 text-green-400">Complete Buyer Profile Setup</h3>
                         
-                        <div className="mb-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
-                            <p className="text-gray-300 mb-2">
-                                <strong>User:</strong> {user.email}
-                            </p>
-                            <p className="text-gray-300">
-                                Just a few details to get your account ready for shopping!
-                            </p>
-                            {existingData && (existingData.location || existingData.phone_number) && (
-                                <div className="mt-2 p-2 bg-gray-700 rounded">
-                                    <p className="text-green-300 text-sm">
-                                        <strong>Note:</strong> You have existing profile data.
-                                    </p>
-                                </div>
-                            )}
-                        </div>
 
                         {error && (
                             <div className="error-message">

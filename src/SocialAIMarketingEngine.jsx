@@ -7,6 +7,7 @@ import { useAuthState, useAuthActions } from './AuthContext.jsx';
 // --- Components ---
 import SellerSetupForm from './SellerSetupForm'; 
 import BuyerSetupForm from './BuyerSetupForm';
+import BuyerDecision from './BuyerDecision';
 import SafeHTML from './SafeHTML.jsx';
 import UserSettings from './UserSettings.jsx';
 import DOMPurify from 'dompurify';
@@ -382,6 +383,8 @@ function SocialAIMarketingEngine() {
 
     // --- SIMPLIFIED MODE & PROFILE STATE ---
     const [showSellerDecision, setShowSellerDecision] = useState(false);
+    const [showBuyerDecision, setShowBuyerDecision] = useState(false);
+    const [showBuyerForm, setShowBuyerForm] = useState(false);
     const [isProfileComplete, setIsProfileComplete] = useState(() => {
         // Check if already completed
         return localStorage.getItem('straun_profileComplete') === 'true';
@@ -400,7 +403,6 @@ function SocialAIMarketingEngine() {
     
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
-    const [profileLoading, setProfileLoading] = useState(true); 
     const [showSettings, setShowSettings] = useState(false);
     
     // Add these to your state declarations
@@ -473,6 +475,10 @@ function SocialAIMarketingEngine() {
     const [currentProduct, setCurrentProduct] = useState(null);
     const [currentPrice, setCurrentPrice] = useState(0);
 
+    const [showLocationModal, setShowLocationModal] = useState(false);
+    const [tempLocation, setTempLocation] = useState('');
+    const [tempPhone, setTempPhone] = useState('');
+
     const [filters, setFilters] = useState({
     minPrice: '',
     maxPrice: '',
@@ -518,12 +524,23 @@ function SocialAIMarketingEngine() {
         (typeof val === 'number' && val !== 0)
     ).length;
 
+    const [showInterestPopup, setShowInterestPopup] = useState(false);
+
+    const [buyerSearchCount, setBuyerSearchCount] = useState(() => {
+        // Get from session storage
+        return parseInt(sessionStorage.getItem('buyerSearchCount') || '0');
+    });
+
+    const [interestReminderShown, setInterestReminderShown] = useState(() => {
+        // Check if reminder was already shown
+        return localStorage.getItem(`interest_reminder_${user?.id}`) === 'true';
+    });
+
     // ✅ Save current location (page + mode)
     const saveUserLocation = useCallback(() => {
         if (!user || !user.id) return; // ✅ Must have user
         
         const locationData = {
-            mode: selectedMode,
             path: location.pathname,
             page: location.pathname === '/app' ? 'social' : 'setup',
             timestamp: Date.now()
@@ -1917,12 +1934,8 @@ function SocialAIMarketingEngine() {
     const fetchProfile = useCallback(async () => {
         if (!user?.id) {
             console.warn('[fetchProfile] No user ID available');
-            setProfileLoading(false);  // ✅ Keep this
             return null;
         }
-
-        // ✅ Ensure loading is true when starting
-        setProfileLoading(true);
 
         try {
             const { data, error } = await supabase
@@ -1933,7 +1946,6 @@ function SocialAIMarketingEngine() {
 
              if (error) {
                 console.warn('[fetchProfile] Error:', error.message);
-                setProfileLoading(false);
                 return null;
             }
 
@@ -1951,14 +1963,10 @@ function SocialAIMarketingEngine() {
             updated_at: data?.updated_at || new Date().toISOString()
             });
 
-            // ✅ Set loading to false when done
-            setProfileLoading(false);
             return data;
             
         } catch (err) {
             console.error('[fetchProfile] Unexpected error:', err);
-            setProfileLoading(false);  // ✅ Always set to false on error
-            // ✅ Don't crash - just return null
             return null;
         }
         }, [user]); 
@@ -2284,92 +2292,59 @@ function SocialAIMarketingEngine() {
         }
     }, [location.pathname, user, selectedMode, saveUserLocation]);
 
-    // ✅ Restore location on app load Restores per user
+    // ✅ Restore location on app load (no auto-restore)
     useEffect(() => {
         if (!user || !user.id) return;
         
-        // ✅ Wait for profile to be loaded
-        if (profileLoading) {
-            console.log('⏳ Profile loading, waiting to restore...');
-            return;
-        }
-        
-        // ✅ Only restore if no mode is selected
+        // ✅ Only restore if no mode is selected AND no mode was chosen
         if (!selectedMode) {
+            // ✅ First check if user has a chosen mode preference
+            const chosenMode = localStorage.getItem(`straun_chosen_mode_${user.id}`);
+            
+            if (chosenMode) {
+                console.log('✅ User has chosen mode:', chosenMode);
+                // Don't auto-set - show mode selection but remember their choice
+                // This allows them to change mode if they want
+                return;
+            }
+            
             const storageKey = `straun_userLocation_${user.id}`;
             const saved = localStorage.getItem(storageKey);
             
             if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                const ONE_HOUR = 60 * 60 * 1000;
-                
-                if (Date.now() - data.timestamp < ONE_HOUR) {
-                console.log('🔄 Restoring location for user:', user.id);
-                console.log('📊 Saved mode:', data.mode);
-                console.log('👤 Profile: seller=', profileData?.is_seller, 'buyer=', profileData?.is_buyer);
-                
-                // ✅ CRITICAL: Check if user is actually a seller or buyer
-                const isSeller = profileData?.is_seller === true;
-                const isBuyer = profileData?.is_buyer === true;
-                
-                // ✅ Determine the correct mode based on profile
-                let correctMode = data.mode;
-                
-                // If user is only a seller, force seller mode
-                if (isSeller && !isBuyer) {
-                    correctMode = 'seller';
-                    console.log('👤 User is only a seller, forcing seller mode');
+                try {
+                    const data = JSON.parse(saved);
+                    const ONE_HOUR = 60 * 60 * 1000;
+                    
+                    if (Date.now() - data.timestamp < ONE_HOUR) {
+                        console.log('🔄 Found saved location for user:', user.id);
+                        
+                        // ✅ DON'T auto-restore mode - show mode selection
+                        // Just navigate to the page if valid
+                        if (data.path && data.path !== '/' && data.path !== '/login') {
+                            setTimeout(() => {
+                                navigate(data.path);
+                            }, 100);
+                        }
+                        return;
+                    } else {
+                        localStorage.removeItem(storageKey);
+                        console.log('⏰ Location expired for user:', user.id);
+                    }
+                } catch (e) {
+                    console.error('Error restoring location:', e);
+                    localStorage.removeItem(storageKey);
                 }
-                // If user is only a buyer, force buyer mode
-                else if (isBuyer && !isSeller) {
-                    correctMode = 'buyer';
-                    console.log('👤 User is only a buyer, forcing buyer mode');
-                }
-                // If user is both, use saved mode
-                else if (isSeller && isBuyer) {
-                    console.log('👤 User is both seller and buyer, using saved mode');
-                }
-                // If user is neither, use saved mode (fallback)
-                else {
-                    console.log('👤 User has no specific mode, using saved mode');
-                }
-                
-                // ✅ Set the correct mode
-                setMode(correctMode);
-                
-                // ✅ Only navigate if we have a path and it's not the auth page
-                if (data.path && data.path !== '/' && data.path !== '/login') {
-                    setTimeout(() => {
-                    navigate(data.path);
-                    }, 100);
-                }
-                } else {
-                localStorage.removeItem(storageKey);
-                console.log('⏰ Location expired for user:', user.id);
-                }
-            } catch (e) {
-                console.error('Error restoring location:', e);
-                localStorage.removeItem(storageKey);
             }
-            } else {
-            // ✅ No saved location - use profile mode
-            const isSeller = profileData?.is_seller === true;
-            const isBuyer = profileData?.is_buyer === true;
             
-            if (isSeller && !isBuyer) {
-                console.log('👤 User is a seller, setting seller mode');
-                setMode('seller');
-            } else if (isBuyer && !isSeller) {
-                console.log('👤 User is a buyer, setting buyer mode');
-                setMode('buyer');
-            } else {
-                console.log('👤 No saved location and no profile mode, showing mode selection');
-                // Don't set mode - show mode selection screen
-            }
-            }
+            // ✅ No valid saved location - show mode selection
+            console.log('👤 No valid saved location - showing mode selection');
+            setMode(null);
+            setIsProfileComplete(false);
+            setShowSellerDecision(false);
+            setShowBuyerDecision(false);
         }
-    }, [user, selectedMode, setMode, navigate, profileLoading, profileData]);
+    }, [user, selectedMode, setMode, navigate, profileData]);
 
     // ✅ Update search when URL changes (back/forward navigation)
     useEffect(() => {
@@ -2554,6 +2529,139 @@ function SocialAIMarketingEngine() {
 
     // Detect if running on Vercel (serverless environment)
     const isVercel = import.meta.env.PROD && typeof window !== 'undefined';
+
+    const handleSkipForNow = async () => {
+        if (!navigator.onLine) {
+            setError('You are offline. Please connect to the internet to continue.');
+            return;
+        }
+        
+        setLoading(true);
+        setError(null);
+        
+        try {
+            const { data: userData, error: userError } = await fetchWithRetry(() =>
+                supabase.auth.getUser()
+            );
+            
+            if (userError) {
+                setError('Please log in to continue');
+                setLoading(false);
+                return;
+            }
+            
+            const user = userData?.user;
+            
+            if (!user) {
+                setError('User not found. Please log in again.');
+                setLoading(false);
+                return;
+            }
+            
+            const hasLocation = profileData?.location && profileData.location.trim() !== '';
+            const hasPhone = profileData?.phone_number && profileData.phone_number.trim() !== '';
+            
+            if (!hasLocation || !hasPhone) {
+                setTempLocation(profileData?.location || '');
+                setTempPhone(profileData?.phone_number || '');
+                setShowLocationModal(true);
+                setLoading(false);
+                return;
+            }
+            
+            const { error: updateError } = await fetchWithRetry(() =>
+                supabase
+                    .from('profiles')
+                    .update({
+                        is_buyer: true,
+                        buyer_setup_completed: true,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('user_id', user.id)
+            );
+            
+            if (updateError) {
+                setError('Failed to update profile. Please try again.');
+                setLoading(false);
+                return;
+            }
+            
+            setLoading(false);
+            navigate('/app');
+            
+        } catch (err) {
+            console.error('[BuyerDecision] Skip error:', err);
+            setError('Failed to skip. Please try again.');
+            setLoading(false);
+        }
+    };
+
+    const saveLocationAndPhone = async () => {
+        if (!navigator.onLine) {
+            setError('You are offline. Please connect to the internet to save your information.');
+            return;
+        }
+        
+        if (!tempLocation.trim()) {
+            setError('Please enter your location');
+            return;
+        }
+        if (!tempPhone.trim()) {
+            setError('Please enter your phone number');
+            return;
+        }
+        
+        setLoading(true);
+        setError(null);
+        
+        try {
+            const { data: userData, error: userError } = await fetchWithRetry(() =>
+                supabase.auth.getUser()
+            );
+            
+            if (userError) {
+                setError('Please log in to continue');
+                setLoading(false);
+                return;
+            }
+            
+            const user = userData?.user;
+            
+            if (!user) {
+                setError('User not found. Please log in again.');
+                setLoading(false);
+                return;
+            }
+            
+            const { error: updateError } = await fetchWithRetry(() =>
+                supabase
+                    .from('profiles')
+                    .update({
+                        location: tempLocation.trim(),
+                        phone_number: tempPhone.trim(),
+                        is_buyer: true,
+                        buyer_setup_completed: true,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('user_id', user.id)
+            );
+            
+            if (updateError) {
+                console.error('[BuyerDecision] Save error:', updateError);
+                setError('Failed to save information. Please try again.');
+                setLoading(false);
+                return;
+            }
+            
+            setShowLocationModal(false);
+            navigate('/app');
+            
+        } catch (err) {
+            console.error('[BuyerDecision] Save error:', err);
+            setError('Failed to save information. Please check your connection.');
+            setLoading(false);
+        }
+    };
 
     // COMPLETE FIXED NOTIFICATION useEffect
     useEffect(() => {
@@ -2765,16 +2873,44 @@ function SocialAIMarketingEngine() {
         };
     }, [showSettings]);
 
+    // 🔔 Interest Reminder for Buyers - Shows POPUP after 3 searches
+    useEffect(() => {
+        // Only for buyers who have completed setup
+        if (selectedMode !== 'buyer' || !isProfileComplete || !user || !profileData) return;
+        
+        // Check if user has interests
+        const hasInterests = profileData.interests && profileData.interests.length > 0;
+        
+        // If they already have interests, no reminder needed
+        if (hasInterests) return;
+        
+        // Check if popup was already shown or action was taken
+        const actionKey = `interest_popup_action_${user.id}`;
+        const actionTaken = localStorage.getItem(actionKey);
+        
+        if (actionTaken) {
+            console.log('⏰ Interest popup already shown to this user');
+            return;
+        }
+        
+        // Check search count
+        const searchCount = parseInt(sessionStorage.getItem('buyerSearchCount') || '0');
+        
+        // Show popup after 3 searches
+        if (searchCount >= 3) {
+            console.log('🔔 Showing interest popup after 3 searches');
+            setShowInterestPopup(true);
+            // Don't save yet - wait for user action
+        }
+    }, [selectedMode, isProfileComplete, profileData, user, showToastNotification]);
+
     // --- CHECK EXISTING PROFILE DATA ---
     useEffect(() => {
         const checkExistingProfile = async () => {
             if (!user) {
                 setProfileData(null);
-                setProfileLoading(false);
                 return;
             }
-            
-            setProfileLoading(true);
             
             try {
                 const { data, error: fetchError } = await supabase
@@ -2791,9 +2927,7 @@ function SocialAIMarketingEngine() {
             } catch (err) {
                 console.error('Profile check error:', err);
                 setProfileData(null);
-            } finally {
-                setProfileLoading(false);
-            }
+            } 
         };
 
         if (user) {
@@ -3309,8 +3443,6 @@ function SocialAIMarketingEngine() {
     });
 
     // --- HANDLE MODE SELECTION ---
-    // SocialAIMarketingEngine.jsx - FIXED handleModeSelect
-
     const handleModeSelect = async (mode) => {
         console.log('🔄 handleModeSelect called with:', mode);
         
@@ -3336,26 +3468,25 @@ function SocialAIMarketingEngine() {
             
             // ✅ Set profile completion based on mode
             if (mode === 'buyer') {
-            setIsProfileComplete(false);
-            setShowSellerDecision(false);
+                setIsProfileComplete(false);
+                setShowBuyerDecision(true);   // ← SHOW BUYER DECISION
+                setShowSellerDecision(false);
             } else if (mode === 'seller') {
-            setIsProfileComplete(false);
-            setShowSellerDecision(true);
+                setIsProfileComplete(false);
+                setShowSellerDecision(true);
+                setShowBuyerDecision(false);
             }
             
             // ✅ Save location
             const locationData = {
-            mode: mode,
-            path: '/app',
-            page: 'social',
-            timestamp: Date.now()
+                mode: mode,
+                path: '/app',
+                page: 'social',
+                timestamp: Date.now()
             };
             if (user?.id) {
-            localStorage.setItem(`straun_userLocation_${user.id}`, JSON.stringify(locationData));
+                localStorage.setItem(`straun_userLocation_${user.id}`, JSON.stringify(locationData));
             }
-            
-            // ✅ Force re-render
-            triggerForceUpdate();
             
             console.log(`✅ Mode set to: ${mode}`);
             showToastNotification(`Switched to ${mode} mode`);
@@ -3399,21 +3530,23 @@ function SocialAIMarketingEngine() {
         setError(null);
         
         // ✅ CRITICAL: Set profile completion based on mode
-        // If mode is buyer, mark profile as complete so setup shows
-        // If mode is seller, show seller decision
         if (mode === 'buyer') {
-            setIsProfileComplete(false);  // ← This shows the buyer setup form
+            setIsProfileComplete(false);
+            setShowBuyerDecision(true);
             setShowSellerDecision(false);
+            // ✅ Save their choice for reference (not auto-restore)
+            localStorage.setItem(`straun_chosen_mode_${user.id}`, 'buyer');
         } else if (mode === 'seller') {
             setIsProfileComplete(false);
             setShowSellerDecision(true);
+            setShowBuyerDecision(false);
+            // ✅ Save their choice for reference (not auto-restore)
+            localStorage.setItem(`straun_chosen_mode_${user.id}`, 'seller');
         }
-        
-        // ✅ Force re-render
-        triggerForceUpdate();
         
         console.log(`✅ Mode set to: ${mode}`);
         console.log(`✅ showSellerDecision: ${mode === 'seller'}`);
+        console.log(`✅ showBuyerDecision: ${mode === 'buyer'}`);
         console.log(`✅ isProfileComplete: ${false}`);
         showToastNotification(`Switched to ${mode} mode`);
     };
@@ -3687,6 +3820,11 @@ function SocialAIMarketingEngine() {
                 setProfileData(savedProfileData);
                 setIsProfileComplete(true);
                 setShowSellerDecision(false);
+                setShowBuyerDecision(false);
+                setShowBuyerForm(false); // ✅ Close buyer form
+
+                // ✅ NAVIGATE TO APP
+                navigate('/app');
 
                 // Track user behavior
                 if (behaviorAnalyzerInstance) {
@@ -3718,6 +3856,15 @@ function SocialAIMarketingEngine() {
         if (searchTimeoutRef.current) {
             clearTimeout(searchTimeoutRef.current);
             searchTimeoutRef.current = null;
+        }
+
+         // ✅ Track search count for buyers (for interest reminder)
+        if (selectedMode === 'buyer') {
+            const currentCount = parseInt(sessionStorage.getItem('buyerSearchCount') || '0');
+            const newCount = currentCount + 1;
+            sessionStorage.setItem('buyerSearchCount', String(newCount));
+            setBuyerSearchCount(newCount);
+            console.log(`🔍 Buyer search count: ${newCount}`);
         }
 
         // ✅ Debounce search
@@ -4320,14 +4467,16 @@ function SocialAIMarketingEngine() {
         try {
             setSignOutLoading(true);
 
-            if (user && user.id) {
-                const storageKey = `straun_userLocation_${user.id}`;
-                localStorage.removeItem(storageKey);
-                
-                // Also clear other user-specific items
+             if (user && user.id) {
+                // ✅ Clear ALL user-specific localStorage
+                localStorage.removeItem(`straun_userLocation_${user.id}`);
                 localStorage.removeItem(`straun_profileData_${user.id}`);
                 localStorage.removeItem(`straun_searchCache_${user.id}`);
+                localStorage.removeItem(`straun_chosen_mode_${user.id}`);
+                localStorage.removeItem('straun_profileComplete');
+                localStorage.removeItem('straun_profileData');
             }
+            
 
             clearAuthState();  
             
@@ -4359,19 +4508,12 @@ function SocialAIMarketingEngine() {
         }
     };
 
-    // --- CONDITIONAL RENDERING ---
-    // ✅ UPDATE THIS LOADING CHECK
-    if (authLoading || initialDataLoading || (profileLoading && !profileData)) {
+    // Auth loading - show spinner only for authentication
+    if (authLoading) {
         return (
             <div className="loading-container">
                 <div className="loading-spinner"></div>
-                <p>
-                    {authLoading 
-                        ? 'Loading authentication...' 
-                        : (profileLoading && !profileData) 
-                            ? 'Loading your profile...' 
-                            : 'Loading...'}
-                </p>
+                <p>Loading authentication...</p>
             </div>
         );
     }
@@ -4641,6 +4783,7 @@ function SocialAIMarketingEngine() {
                             onClick={() => {
                                 setShowSellerDecision(false);
                                 setMode(null); // Go back to mode selection
+                                navigate('/');
                             }}
                             style={{
                                 marginTop: '20px',
@@ -4660,8 +4803,81 @@ function SocialAIMarketingEngine() {
         );
     }
 
+    if (selectedMode === 'buyer' && showBuyerDecision) {
+        return (
+            <BuyerDecision 
+                existingData={profileData}
+                onSkip={() => {
+                    setShowBuyerDecision(false);
+                    setIsProfileComplete(true);
+                    navigate('/app');
+                }}
+                onAddInterests={() => {
+                    setShowBuyerDecision(false);
+                    setShowBuyerForm(true);
+                }}
+                onSwitchMode={clearAndSwitchMode}  // ✅ PASS THIS
+                loading={loading}
+            />
+        );
+    }
+
+    if (selectedMode === 'buyer' && showBuyerForm) {
+        return (
+            <div className="app-container">
+                <div className="profile-setup-screen">
+                    <div className="setup-header">
+                        <h1 className="app-title">Complete Your Buyer Setup</h1>
+                        <p className="setup-subtitle">
+                            <strong>Required:</strong> You must complete this form to proceed to the buyer marketplace.
+                        </p>
+                        
+                        {/* ✅ ADD THE CHANGE MODE BUTTON HERE */}
+                        <div className="mode-indicator">
+                            <span className="mode-badge">Buyer Setup</span>
+                            <button 
+                                onClick={() => {
+                                    setShowBuyerForm(false);
+                                    setShowBuyerDecision(true);
+                                }}
+                                className="change-mode-button"
+                            >
+                                ← Back
+                            </button>
+                            {/* ✅ ADD SWITCH TO SELLER BUTTON */}
+                            <button 
+                                onClick={clearAndSwitchMode}
+                                className="change-mode-button"
+                                style={{ marginLeft: '10px' }}
+                            >
+                                Switch to Seller
+                            </button>
+                        </div>
+                        
+                        {profileData && (profileData.location || profileData.phone_number) && (
+                            <div className="existing-profile-info">
+                                <p className="existing-info-note">
+                                    <strong>Note:</strong> Some fields are pre-filled from your existing profile data.
+                                    You must still complete and submit all required fields.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="setup-form-container">
+                        <BuyerSetupForm 
+                            onProfileComplete={handleProfileComplete}
+                            existingData={profileData}
+                            isBuyerFlow={true}
+                            loading={profileUpdateLoading}
+                        />
+                    </div>
+                </div>
+            </div>
+        );
+    }
     // --- SHOW SETUP FORM IF MODE SELECTED BUT PROFILE NOT COMPLETE ---
-    if (selectedMode && !isProfileComplete && !profileLoading && !initialDataLoading) {
+    if (selectedMode && !isProfileComplete && !initialDataLoading) {
         return (
             <div className="app-container">
                 <div className="profile-setup-screen">
@@ -4843,6 +5059,176 @@ function SocialAIMarketingEngine() {
                 </p>
                 </div>
             </div>
+            </div>
+        );
+    };
+
+    // 🔔 Interest Popup Component
+    const InterestPopup = () => {
+        if (!showInterestPopup) return null;
+
+        const handleAddInterests = () => {
+            // Close popup and show buyer setup
+            setShowInterestPopup(false);
+            setIsProfileComplete(false);
+            setShowBuyerDecision(true);
+            // Save that user chose to add interests
+            localStorage.setItem(`interest_popup_action_${user?.id}`, 'add');
+        };
+
+        const handleSkip = () => {
+            setShowInterestPopup(false);
+            // Save that user chose to skip
+            localStorage.setItem(`interest_popup_action_${user?.id}`, 'skip');
+            // Show a gentle notification
+            showToastNotification('You can always add interests later from your settings.');
+        };
+
+        return (
+            <div style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                background: 'rgba(0,0,0,0.7)',
+                backdropFilter: 'blur(5px)',
+                zIndex: 99999,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '20px',
+                animation: 'fadeIn 0.3s ease'
+            }}>
+                <div style={{
+                    background: 'white',
+                    borderRadius: '20px',
+                    maxWidth: '450px',
+                    width: '100%',
+                    padding: '32px',
+                    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                    animation: 'slideUp 0.3s ease',
+                    textAlign: 'center'
+                }}>
+                    {/* Icon */}
+                    <div style={{
+                        fontSize: '64px',
+                        marginBottom: '16px'
+                    }}>
+                        🎯
+                    </div>
+                    
+                    {/* Title */}
+                    <h2 style={{
+                        margin: '0 0 8px 0',
+                        color: '#333',
+                        fontSize: '24px',
+                        fontWeight: 'bold'
+                    }}>
+                        Add Your Interests!
+                    </h2>
+                    
+                    {/* Subtitle */}
+                    <p style={{
+                        margin: '0 0 12px 0',
+                        color: '#666',
+                        fontSize: '16px',
+                        lineHeight: '1.5'
+                    }}>
+                        We noticed you've been searching for products.
+                    </p>
+                    
+                    {/* Description */}
+                    <div style={{
+                        background: '#f8f9fa',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        marginBottom: '24px',
+                        textAlign: 'left'
+                    }}>
+                        <p style={{
+                            margin: '0 0 8px 0',
+                            color: '#555',
+                            fontSize: '14px',
+                            lineHeight: '1.6'
+                        }}>
+                            <strong>Why add interests?</strong>
+                        </p>
+                        <ul style={{
+                            margin: '0',
+                            paddingLeft: '20px',
+                            color: '#666',
+                            fontSize: '13px',
+                            lineHeight: '1.8'
+                        }}>
+                            <li>🔍 Sellers can find you with relevant products</li>
+                            <li>📦 Get personalized recommendations</li>
+                            <li>⚡ Save time finding what you love</li>
+                        </ul>
+                    </div>
+                    
+                    {/* Buttons */}
+                    <div style={{
+                        display: 'flex',
+                        gap: '12px',
+                        flexDirection: 'column'
+                    }}>
+                        <button
+                            onClick={handleAddInterests}
+                            style={{
+                                width: '100%',
+                                padding: '14px',
+                                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '12px',
+                                fontSize: '16px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                transition: 'transform 0.2s ease',
+                                boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)'
+                            }}
+                            onMouseEnter={(e) => (e.target.style.transform = 'translateY(-2px)')}
+                            onMouseLeave={(e) => (e.target.style.transform = 'translateY(0)')}
+                        >
+                            🎯 Add Interests Now
+                        </button>
+                        
+                        <button
+                            onClick={handleSkip}
+                            style={{
+                                width: '100%',
+                                padding: '12px',
+                                background: 'transparent',
+                                color: '#666',
+                                border: '2px solid #e0e0e0',
+                                borderRadius: '12px',
+                                fontSize: '14px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.target.style.background = '#f5f5f5';
+                                e.target.style.borderColor = '#ccc';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.target.style.background = 'transparent';
+                                e.target.style.borderColor = '#e0e0e0';
+                            }}
+                        >
+                            Maybe later
+                        </button>
+                    </div>
+                    
+                    {/* Footer note */}
+                    <p style={{
+                        margin: '16px 0 0 0',
+                        fontSize: '12px',
+                        color: '#999'
+                    }}>
+                        You can always add interests later from your settings
+                    </p>
+                </div>
             </div>
         );
     };
@@ -5403,65 +5789,99 @@ function SocialAIMarketingEngine() {
                 >
                     ☰
                 </button>
-                
-                {/* Clean App Name - Straun AI WITH CLICKABLE CROWN FOR ADMIN */}
+
+                {/* ✅ LOGO + TITLE - Center aligned */}
                 <div style={{
                     display: 'flex',
-                    alignItems: 'baseline',
-                    gap: '6px'
+                    alignItems: 'center',
+                    gap: '8px',
+                    flex: 1,
+                    justifyContent: 'center'
                 }}>
-                    <span style={{
-                        fontSize: '20px',
-                        fontWeight: '700',
-                        color: 'white',
-                        letterSpacing: '-0.3px'
+                    {/* Logo Image - Circle masked */}
+                    <div style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        overflow: 'hidden',
+                        border: '2px solid rgba(255,255,255,0.25)',
+                        background: 'rgba(255,255,255,0.1)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
                     }}>
-                        Straun
-                    </span>
-                    <span style={{
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        color: 'rgba(255,255,255,0.85)',
-                        background: 'rgba(255,255,255,0.2)',
-                        padding: '2px 8px',
-                        borderRadius: '20px',
-                        letterSpacing: '0.3px'
-                    }}>
-                        AI
-                    </span>
-                    
-                    {/* 👑 CLICKABLE CROWN ICON FOR ADMIN - ADD THIS */}
-                    {isAdmin && (
-                        <button
-                            onClick={() => {
-                                console.log('👑 Admin crown clicked - navigating to admin dashboard');
-                                navigate('/admin');
-                            }}
-                            title="Admin Dashboard"
+                        <img 
+                            src="/Straun-logo.png" 
+                            alt="Straun Logo" 
                             style={{
-                                background: 'none',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontSize: '18px',
-                                marginLeft: '8px',
-                                padding: '4px 8px',
-                                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
-                                transition: 'all 0.2s ease',
-                                animation: 'crownGlow 2s ease-in-out infinite',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block'
                             }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.transform = 'scale(1.1)';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.transform = 'scale(1)';
-                            }}
-                        >
-                            👑
-                        </button>
-                    )}
+                        />
+                    </div>
+                    
+                    {/* Clean App Name - Straun AI WITH CLICKABLE CROWN FOR ADMIN */}
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        gap: '6px'
+                    }}>
+                        <span style={{
+                            fontSize: '20px',
+                            fontWeight: '700',
+                            color: 'white',
+                            letterSpacing: '-0.3px'
+                        }}>
+                            Straun
+                        </span>
+                        <span style={{
+                            fontSize: '13px',
+                            fontWeight: '500',
+                            color: 'rgba(255,255,255,0.85)',
+                            background: 'rgba(255,255,255,0.2)',
+                            padding: '2px 8px',
+                            borderRadius: '20px',
+                            letterSpacing: '0.3px'
+                        }}>
+                            AI
+                        </span>
+                        
+                        {/* 👑 CLICKABLE CROWN ICON FOR ADMIN */}
+                        {isAdmin && (
+                            <button
+                                onClick={() => {
+                                    console.log('👑 Admin crown clicked - navigating to admin dashboard');
+                                    navigate('/admin');
+                                }}
+                                title="Admin Dashboard"
+                                style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    fontSize: '18px',
+                                    marginLeft: '4px',
+                                    padding: '4px 4px',
+                                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+                                    transition: 'all 0.2s ease',
+                                    animation: 'crownGlow 2s ease-in-out infinite',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.transform = 'scale(1.1)';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                            >
+                                👑
+                            </button>
+                        )}
+                    </div>
                 </div>
                 
                 {/* Empty spacer for balance */}
@@ -7470,7 +7890,7 @@ function SocialAIMarketingEngine() {
                 </div>
             </div>
         )}
-
+    <InterestPopup />
     </div>
      
     );

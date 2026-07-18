@@ -38,6 +38,10 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     const [selectedChat, setSelectedChat] = useState(null);
     const [showChatList, setShowChatList] = useState(false);
     const [showWishlistModal, setShowWishlistModal] = useState(false);
+    
+    const [searchesSubTab, setSearchesSubTab] = useState('saved');
+    const [newInterest, setNewInterest] = useState('');
+    const [addingInterest, setAddingInterest] = useState(false);
 
     // Handle browser back button
     useEffect(() => {
@@ -314,6 +318,77 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         }
     };
 
+    // ✅ Add interest
+    const addInterest = async () => {
+        if (!newInterest.trim()) {
+            setError('Please enter an interest');
+            return;
+        }
+
+        // Check if interest already exists
+        if (profileData?.interests?.some(i => i.toLowerCase() === newInterest.trim().toLowerCase())) {
+            showToastNotification('This interest is already added');
+            return;
+        }
+
+        setAddingInterest(true);
+
+        try {
+            const currentInterests = profileData?.interests || [];
+            const updatedInterests = [...currentInterests, newInterest.trim()];
+            
+            const { error } = await supabase
+                .from('profiles')
+                .update({ interests: updatedInterests })
+                .eq('user_id', userId);
+
+            if (error) throw error;
+
+            // Update local state
+            setProfileData(prev => ({
+                ...prev,
+                interests: updatedInterests
+            }));
+            
+            setNewInterest('');
+            showToastNotification(`✅ "${newInterest.trim()}" added to your interests!`);
+
+        } catch (error) {
+            console.error('Error adding interest:', error);
+            showToastNotification('Failed to add interest');
+        } finally {
+            setAddingInterest(false);
+        }
+    };
+
+    // ✅ Remove interest
+    const removeInterest = async (index) => {
+        try {
+            const currentInterests = profileData?.interests || [];
+            const updatedInterests = currentInterests.filter((_, i) => i !== index);
+            
+            const { error } = await supabase
+                .from('profiles')
+                .update({ interests: updatedInterests })
+                .eq('user_id', userId);
+
+            if (error) throw error;
+
+            // Update local state
+            setProfileData(prev => ({
+                ...prev,
+                interests: updatedInterests
+            }));
+            
+            showToastNotification('Interest removed');
+
+        } catch (error) {
+            console.error('Error removing interest:', error);
+            showToastNotification('Failed to remove interest');
+        }
+    };
+
+
     // Re-run a saved search
     const runSavedSearch = (searchTerm) => {
         if (onBackToSocial) {
@@ -579,55 +654,223 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
 
                 {activeTab === 'searches' && selectedMode === 'buyer' && (
                     <div style={styles.searchesSection}>
-                        <div style={styles.searchesHeader}>
-                            <button onClick={goBack} style={styles.backButton}>
-                                ← Back to Dashboard
+                        {/* ✅ Add Tab Navigation inside the searches section */}
+                        <div style={{
+                            display: 'flex',
+                            gap: '10px',
+                            marginBottom: '20px',
+                            borderBottom: '2px solid var(--border-color)',
+                            paddingBottom: '10px'
+                        }}>
+                            <button
+                                onClick={() => setSearchesSubTab('saved')}
+                                style={{
+                                    padding: '8px 20px',
+                                    background: searchesSubTab === 'saved' ? 'var(--primary-color)' : 'transparent',
+                                    color: searchesSubTab === 'saved' ? 'white' : 'var(--text-secondary)',
+                                    border: 'none',
+                                    borderRadius: '20px',
+                                    cursor: 'pointer',
+                                    fontWeight: searchesSubTab === 'saved' ? 'bold' : 'normal'
+                                }}
+                            >
+                                🔍 Saved Searches ({savedSearches.length})
                             </button>
-                            <h3>🔍 Saved Searches</h3>
+                            <button
+                                onClick={() => setSearchesSubTab('interests')}
+                                style={{
+                                    padding: '8px 20px',
+                                    background: searchesSubTab === 'interests' ? 'var(--primary-color)' : 'transparent',
+                                    color: searchesSubTab === 'interests' ? 'white' : 'var(--text-secondary)',
+                                    border: 'none',
+                                    borderRadius: '20px',
+                                    cursor: 'pointer',
+                                    fontWeight: searchesSubTab === 'interests' ? 'bold' : 'normal'
+                                }}
+                            >
+                                🎯 Interests ({profileData?.interests?.length || 0})
+                            </button>
                         </div>
 
-                        {savedSearches.length === 0 ? (
-                            <div style={styles.emptyState}>
-                                <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔍</div>
-                                <h4>No saved searches yet</h4>
-                                <p>Save your favorite searches to quickly find products you love.</p>
-                                <button onClick={() => { if(onBackToSocial) onBackToSocial(); }} style={styles.emptyStateButton}>
-                                    Go Search
-                                </button>
-                            </div>
-                        ) : (
-                            <div style={styles.searchesList}>
-                                {savedSearches.map((search) => (
-                                    <div key={search.id} style={styles.searchCard}>
-                                        <div style={styles.searchInfo}>
-                                            <div style={styles.searchTerm}>
-                                                <span style={{ fontSize: '20px' }}>🔍</span>
-                                                <strong>"{search.search_term}"</strong>
-                                            </div>
-                                            {search.min_price || search.max_price ? (
-                                                <div style={styles.searchFilters}>
-                                                    {search.min_price && <span>Min: ${search.min_price}</span>}
-                                                    {search.max_price && <span>Max: ${search.max_price}</span>}
-                                                    {search.location && <span>📍 {search.location}</span>}
-                                                </div>
-                                            ) : null}
-                                            <div style={styles.searchMeta}>
-                                                Saved on {new Date(search.created_at).toLocaleDateString()}
-                                                {search.last_notified_at && (
-                                                    <span> · Last notified: {new Date(search.last_notified_at).toLocaleDateString()}</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div style={styles.searchActions}>
-                                            <button onClick={() => runSavedSearch(search.search_term)} style={styles.runSearchBtn}>
-                                                🔍 Run Search
-                                            </button>
-                                            <button onClick={() => deleteSavedSearch(search.id)} style={styles.deleteSearchBtn}>
-                                                🗑️ Delete
-                                            </button>
-                                        </div>
+                        {/* Saved Searches Sub-Tab */}
+                        {searchesSubTab === 'saved' && (
+                            <>
+                                {savedSearches.length === 0 ? (
+                                    <div style={styles.emptyState}>
+                                        <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔍</div>
+                                        <h4>No saved searches yet</h4>
+                                        <p>Save your favorite searches to quickly find products you love.</p>
+                                        <button onClick={() => { if(onBackToSocial) onBackToSocial(); }} style={styles.emptyStateButton}>
+                                            Go Search
+                                        </button>
                                     </div>
-                                ))}
+                                ) : (
+                                    <div style={styles.searchesList}>
+                                        {savedSearches.map((search) => (
+                                            <div key={search.id} style={styles.searchCard}>
+                                                <div style={styles.searchInfo}>
+                                                    <div style={styles.searchTerm}>
+                                                        <span style={{ fontSize: '20px' }}>🔍</span>
+                                                        <strong>"{search.search_term}"</strong>
+                                                    </div>
+                                                    {search.min_price || search.max_price ? (
+                                                        <div style={styles.searchFilters}>
+                                                            {search.min_price && <span>Min: ${search.min_price}</span>}
+                                                            {search.max_price && <span>Max: ${search.max_price}</span>}
+                                                            {search.location && <span>📍 {search.location}</span>}
+                                                        </div>
+                                                    ) : null}
+                                                    <div style={styles.searchMeta}>
+                                                        Saved on {new Date(search.created_at).toLocaleDateString()}
+                                                        {search.last_notified_at && (
+                                                            <span> · Last notified: {new Date(search.last_notified_at).toLocaleDateString()}</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                <div style={styles.searchActions}>
+                                                    <button onClick={() => runSavedSearch(search.search_term)} style={styles.runSearchBtn}>
+                                                        🔍 Run Search
+                                                    </button>
+                                                    <button onClick={() => deleteSavedSearch(search.id)} style={styles.deleteSearchBtn}>
+                                                        🗑️ Delete
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {/* ✅ Interests Sub-Tab */}
+                        {searchesSubTab === 'interests' && (
+                            <div>
+                                {/* Info Message */}
+                                <div style={{
+                                    background: '#1e3a5f',
+                                    padding: '12px 16px',
+                                    borderRadius: '8px',
+                                    marginBottom: '16px',
+                                    borderLeft: '3px solid #667eea'
+                                }}>
+                                    <p style={{ margin: '0', fontSize: '13px', color: '#b0c4de' }}>
+                                        💡 Add your interests so sellers can find you with relevant products!
+                                    </p>
+                                </div>
+
+                                {/* Add Interest Input */}
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '10px',
+                                    marginBottom: '16px'
+                                }}>
+                                    <input
+                                        type="text"
+                                        value={newInterest}
+                                        onChange={(e) => setNewInterest(e.target.value)}
+                                        placeholder="e.g., electronics, books, clothing, phones..."
+                                        style={{
+                                            flex: 1,
+                                            padding: '10px 14px',
+                                            background: 'var(--card-bg)',
+                                            border: '2px solid var(--border-color)',
+                                            borderRadius: '8px',
+                                            fontSize: '14px',
+                                            color: 'var(--text-primary)',
+                                            outline: 'none'
+                                        }}
+                                        onFocus={(e) => { e.target.style.borderColor = '#667eea'; }}
+                                        onBlur={(e) => { e.target.style.borderColor = 'var(--border-color)'; }}
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter') {
+                                                addInterest();
+                                            }
+                                        }}
+                                        disabled={addingInterest}
+                                    />
+                                    <button
+                                        onClick={addInterest}
+                                        disabled={addingInterest}
+                                        style={{
+                                            padding: '10px 24px',
+                                            background: addingInterest ? '#555' : 'linear-gradient(135deg, #667eea, #764ba2)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            cursor: addingInterest ? 'not-allowed' : 'pointer',
+                                            fontWeight: 'bold',
+                                            opacity: addingInterest ? 0.7 : 1,
+                                            transition: 'all 0.2s'
+                                        }}
+                                    >
+                                        {addingInterest ? 'Adding...' : '➕ Add'}
+                                    </button>
+                                </div>
+
+                                {/* Interest Tags */}
+                                {!profileData?.interests || profileData.interests.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-secondary)' }}>
+                                        <div style={{ fontSize: '32px', marginBottom: '10px' }}>🎯</div>
+                                        <p>No interests added yet</p>
+                                        <p style={{ fontSize: '12px', marginTop: '5px' }}>
+                                            Add interests above to help sellers find you
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: '10px'
+                                    }}>
+                                        {profileData.interests.map((interest, index) => (
+                                            <div key={index} style={{
+                                                background: 'linear-gradient(135deg, #667eea30, #764ba230)',
+                                                padding: '8px 16px',
+                                                borderRadius: '20px',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '8px',
+                                                border: '1px solid #667eea50'
+                                            }}>
+                                                <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{interest}</span>
+                                                <button
+                                                    onClick={() => removeInterest(index)}
+                                                    style={{
+                                                        background: 'none',
+                                                        border: 'none',
+                                                        cursor: 'pointer',
+                                                        color: '#888',
+                                                        fontSize: '16px',
+                                                        padding: '0 4px',
+                                                        transition: 'color 0.2s'
+                                                    }}
+                                                    onMouseEnter={(e) => (e.target.style.color = '#ff4444')}
+                                                    onMouseLeave={(e) => (e.target.style.color = '#888')}
+                                                >
+                                                    ×
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Footer Note */}
+                                <div style={{
+                                    marginTop: '20px',
+                                    padding: '12px',
+                                    background: 'var(--light-bg)',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    color: 'var(--text-secondary)'
+                                }}>
+                                    <p style={{ margin: 0 }}>
+                                        📌 Your interests are shared with sellers to help them find you with relevant products.
+                                        <br />
+                                        <span style={{ fontSize: '11px', color: 'var(--text-light)' }}>
+                                            You can add up to 20 interests. Be specific for better matches!
+                                        </span>
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>

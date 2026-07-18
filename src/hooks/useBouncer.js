@@ -1,29 +1,22 @@
 // src/hooks/useBouncer.js
-// 🚪 BOUNCER - His only job is to stop re-renders
-// He doesn't care about validation, errors, or form logic
-// He just makes sure NO re-renders happen while typing
-
-import { useRef, useCallback } from 'react';
+// 🚪 BOUNCER - No hooks version (avoids React hook issues)
+console.log('🔥🔥🔥 LOADING THE NEW USEBOUNCER FILE 🔥🔥🔥');
 
 export const useBouncer = (initialValues = {}) => {
-  // ✅ All values stored in refs - NO re-renders
-  const fieldRefs = useRef({});
+  // Use a simple object instead of useRef
+  const fieldRefs = {};
   
   // Initialize refs for each field
   Object.keys(initialValues).forEach(key => {
-    if (!fieldRefs.current[key]) {
-      fieldRefs.current[key] = { current: null };
-    }
+    fieldRefs[key] = { current: null };
   });
 
-  // Register a field - returns props for the input
-  const register = useCallback((fieldName) => {
-    const fieldRef = fieldRefs.current[fieldName];
+  const register = (fieldName) => {
+    const fieldRef = fieldRefs[fieldName];
     
     return {
       ref: (element) => {
         fieldRef.current = element;
-        // Set initial value if provided
         if (element && initialValues[fieldName] !== undefined) {
           if (element.type === 'checkbox') {
             element.checked = initialValues[fieldName];
@@ -36,13 +29,12 @@ export const useBouncer = (initialValues = {}) => {
       id: fieldName,
       defaultValue: initialValues[fieldName] || '',
     };
-  }, [initialValues]);
+  };
 
-  // Get all current values - called ONLY on submit
-  const getValues = useCallback(() => {
+  const getValues = () => {
     const result = {};
-    Object.keys(fieldRefs.current).forEach(key => {
-      const ref = fieldRefs.current[key];
+    Object.keys(fieldRefs).forEach(key => {
+      const ref = fieldRefs[key];
       if (ref && ref.current) {
         if (ref.current.type === 'checkbox') {
           result[key] = ref.current.checked;
@@ -54,11 +46,10 @@ export const useBouncer = (initialValues = {}) => {
       }
     });
     return result;
-  }, [initialValues]);
+  };
 
-  // Get a specific field value
-  const getValue = useCallback((fieldName) => {
-    const ref = fieldRefs.current[fieldName];
+  const getValue = (fieldName) => {
+    const ref = fieldRefs[fieldName];
     if (ref && ref.current) {
       if (ref.current.type === 'checkbox') {
         return ref.current.checked;
@@ -66,11 +57,10 @@ export const useBouncer = (initialValues = {}) => {
       return ref.current.value || '';
     }
     return initialValues[fieldName] || '';
-  }, [initialValues]);
+  };
 
-  // Set a specific field value (for reset)
-  const setValue = useCallback((fieldName, value) => {
-    const ref = fieldRefs.current[fieldName];
+  const setValue = (fieldName, value) => {
+    const ref = fieldRefs[fieldName];
     if (ref && ref.current) {
       if (ref.current.type === 'checkbox') {
         ref.current.checked = value;
@@ -78,12 +68,11 @@ export const useBouncer = (initialValues = {}) => {
         ref.current.value = value;
       }
     }
-  }, []);
+  };
 
-  // Reset ALL fields to initial values
-  const reset = useCallback(() => {
-    Object.keys(fieldRefs.current).forEach(key => {
-      const ref = fieldRefs.current[key];
+  const reset = () => {
+    Object.keys(fieldRefs).forEach(key => {
+      const ref = fieldRefs[key];
       if (ref && ref.current) {
         if (ref.current.type === 'checkbox') {
           ref.current.checked = initialValues[key] || false;
@@ -92,12 +81,11 @@ export const useBouncer = (initialValues = {}) => {
         }
       }
     });
-  }, [initialValues]);
+  };
 
-  // Clear all fields (set to empty)
-  const clear = useCallback(() => {
-    Object.keys(fieldRefs.current).forEach(key => {
-      const ref = fieldRefs.current[key];
+  const clear = () => {
+    Object.keys(fieldRefs).forEach(key => {
+      const ref = fieldRefs[key];
       if (ref && ref.current) {
         if (ref.current.type === 'checkbox') {
           ref.current.checked = false;
@@ -106,24 +94,15 @@ export const useBouncer = (initialValues = {}) => {
         }
       }
     });
-  }, []);
+  };
 
-  // 🚪 BOUNCER'S ONLY JOB - Stop re-renders
-  // Return only the essentials
   return {
-    // Registration - attaches refs to inputs
     register,
-    
-    // Value getters - ONLY used on submit
     getValues,
     getValue,
-    
-    // Value setters - for reset/clear
     setValue,
     reset,
     clear,
-    
-    // For debugging
     _refs: fieldRefs,
   };
 };

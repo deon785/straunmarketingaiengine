@@ -18,6 +18,7 @@ import GlobalBackHandler from './GlobalBackHandler.jsx';
 import { GlobalErrorHandler } from './GlobalErrorHandler.jsx';
 import { NavigationProvider } from './NavigationContext.jsx';
 import Auth from './signup.jsx';
+import BuyerSetupForm from './BuyerSetupForm.jsx';
 
 // --- LAZY LOAD ---
 const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
@@ -31,6 +32,7 @@ const ResetPassword = lazy(() => import('./ResetPassword.jsx'));
 const CookieBanner = lazy(() => import('./CookieBanner.jsx'));
 const PushNotificationHandler = lazy(() => import('./PushNotificationHandler.jsx'));
 const SellerDecision = lazy(() => import('./SellerDecision.jsx'));
+const BuyerDecision = lazy(() => import('./BuyerDecision.jsx'));
 
 // Helper function
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
@@ -387,7 +389,7 @@ const ProtectedRoute = React.memo(({ children }) => {
     path: location.pathname
   });
 
-  if (location.pathname === '/' || location.pathname === '/seller-decision') {
+  if (location.pathname === '/' || location.pathname === '/seller-decision' || location.pathname === '/buyer-decision' ||location.pathname === '/buyer-form') {
     return children;
   }
 
@@ -725,6 +727,7 @@ AppHeader.displayName = 'AppHeader';
 
 const MemoizedAuth = Auth;
 const MemoizedSellerDecision = React.memo(SellerDecision);
+const MemoizedBuyerDecision = React.memo(BuyerDecision);
 
 // ============ MAIN APP - OPTIMIZED ============
 function App() {
@@ -782,6 +785,9 @@ function App() {
                         <Routes>
                           <Route path="/" element={<Auth />} />
                           <Route path="/seller-decision" element={<MemoizedSellerDecision />} />
+                          <Route path="/buyer-decision" element={<MemoizedBuyerDecision />} />
+                          <Route path="/buyer-form" element={<BuyerSetupForm />} />
+                          
                           
                           <Route path="/app" element={
                             <ProtectedRoute>
@@ -794,7 +800,7 @@ function App() {
                               <NotificationsList />
                             </ProtectedRoute>
                           } />
-
+                         
                           <Route path="/privacy" element={<PrivacyPolicy />} />
                           <Route path="/terms" element={<Terms />} />
                           <Route path="/help" element={<HelpCenter />} />

@@ -489,21 +489,21 @@ const SellerDecision = () => {
           </div>
 
           <button
-            onClick={() => safeNavigate('/')}
+            onClick={onBack}
             style={{
-              marginTop: '20px',
-              width: '100%',
-              background: 'none',
-              border: 'none',
-              color: '#666',
-              cursor: 'pointer',
-              fontSize: '13px',
-              textDecoration: 'underline',
-              padding: '8px'
+                marginTop: '20px',
+                width: '100%',
+                background: 'none',
+                border: 'none',
+                color: '#666',
+                cursor: 'pointer',
+                fontSize: '13px',
+                textDecoration: 'underline',
+                padding: '8px'
             }}
           >
             ← Back to mode selection
-          </button>
+        </button>
         </div>
       </div>
 

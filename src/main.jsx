@@ -8,7 +8,7 @@ import { LoadingProvider } from './LoadingContext';
 import { AuthProvider } from './AuthContext';
 import { GlobalErrorHandler } from './GlobalErrorHandler';
 import { Toaster } from 'react-hot-toast';
-import { errorRecovery, executeWithRecovery } from './utils/errorRecovery';
+import errorRecovery, { executeWithRecovery } from './utils/errorRecovery.js?v=2'; // ✅ SINGLE IMPORT
 
 // ========== ANALYTICS ==========
 try {
@@ -208,7 +208,8 @@ if (canProceed) {
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     setTimeout(() => {
-      errorRecovery.executeWithRecovery(
+      // ✅ Now executeWithRecovery is properly imported
+      executeWithRecovery(
         async () => {
           const registration = await navigator.serviceWorker.register('/sw.js');
           console.log('[SW] Registered successfully:', registration.scope);

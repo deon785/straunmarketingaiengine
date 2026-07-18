@@ -1,6 +1,7 @@
 // src/GlobalErrorHandler.jsx
 import React, { useEffect, useState } from 'react';
-import { errorRecovery, ErrorSeverity } from './utils/errorRecovery';
+// ✅ Import errorRecovery as named export (it's now exported both ways)
+import { errorRecovery, ErrorSeverity } from './utils/errorRecovery.js';
 import * as Sentry from "@sentry/react";
 import { toast } from 'react-hot-toast';
 
@@ -10,7 +11,7 @@ export function GlobalErrorHandler({ children }) {
 
   useEffect(() => {
     // Prevent reload loops
-    if (errorRecovery.isInReloadLoop()) {
+    if (errorRecovery && errorRecovery.isInReloadLoop && errorRecovery.isInReloadLoop()) {
       console.warn('[Global] Detected reload loop, preventing further reloads');
       setShowFallback(true);
       setErrorMessage('The app is having trouble loading. Please clear your browser cache or try again later.');
@@ -24,25 +25,29 @@ export function GlobalErrorHandler({ children }) {
       const error = event.error || event;
       console.error('[Global] Uncaught error:', error);
       
-      errorRecovery.handleError(error, {
-        showToast: (toastOptions) => {
-          toast.error(toastOptions.message);
-        },
-        showFallback: (err) => {
-          setShowFallback(true);
-          setErrorMessage(err.message || 'Something went wrong');
-        },
-        saveState: () => {
-          // Save any critical state before reload
-          try {
-            const criticalState = {
-              userId: localStorage.getItem('userId'),
-              lastRoute: window.location.pathname
-            };
-            sessionStorage.setItem('preReloadState', JSON.stringify(criticalState));
-          } catch (e) {}
-        }
-      });
+      if (errorRecovery && errorRecovery.handleError) {
+        errorRecovery.handleError(error, {
+          showToast: (toastOptions) => {
+            toast.error(toastOptions.message);
+          },
+          showFallback: (err) => {
+            setShowFallback(true);
+            setErrorMessage(err.message || 'Something went wrong');
+          },
+          saveState: () => {
+            try {
+              const criticalState = {
+                userId: localStorage.getItem('userId'),
+                lastRoute: window.location.pathname
+              };
+              sessionStorage.setItem('preReloadState', JSON.stringify(criticalState));
+            } catch (e) {}
+          }
+        });
+      } else {
+        setShowFallback(true);
+        setErrorMessage(error.message || 'Something went wrong');
+      }
     };
 
     // Unhandled promise rejection handler
@@ -52,18 +57,23 @@ export function GlobalErrorHandler({ children }) {
       const error = event.reason;
       console.error('[Global] Unhandled rejection:', error);
       
-      errorRecovery.handleError(error, {
-        showToast: (toastOptions) => {
-          toast.error(toastOptions.message);
-        }
-      });
+      if (errorRecovery && errorRecovery.handleError) {
+        errorRecovery.handleError(error, {
+          showToast: (toastOptions) => {
+            toast.error(toastOptions.message);
+          }
+        });
+      } else {
+        toast.error(error?.message || 'An unexpected error occurred');
+      }
     };
 
     // Network error handler
     const handleOnline = () => {
       toast.success('Back online!', { duration: 3000 });
-      // Reset recovery attempts when connection returns
-      errorRecovery.resetRecoveryAttempts('NETWORK_ERROR');
+      if (errorRecovery && errorRecovery.resetRecoveryAttempts) {
+        errorRecovery.resetRecoveryAttempts('NETWORK_ERROR');
+      }
     };
 
     const handleOffline = () => {
