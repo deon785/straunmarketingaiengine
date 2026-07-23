@@ -1,11 +1,9 @@
-// src/BuyerDecision.jsx - COMPLETE WORKING VERSION
+// src/BuyerDecision.jsx - FIXED VERSION
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
-import BuyerSetupForm from './BuyerSetupForm';
 
-// ✅ fetchWithRetry helper
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
   let lastError;
   for (let i = 0; i < maxRetries; i++) {
@@ -21,7 +19,7 @@ const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
 };
 
 const BuyerDecision = ({ 
-  existingData,        // ✅ Pass profile data
+  existingData,        // ✅ Pass profile data from parent
   onSkip,              // ✅ Callback for skip
   onAddInterests,      // ✅ Callback for add interests
   onSwitchMode,        // ✅ Callback for switching modes
@@ -32,10 +30,9 @@ const BuyerDecision = ({
   const [tempLocation, setTempLocation] = useState('');
   const [tempPhone, setTempPhone] = useState('');
   const [profileData, setProfileData] = useState(existingData || null);
-  const [checking, setChecking] = useState(true);
   const [error, setError] = useState(null);
-  const [retryCount, setRetryCount] = useState(0);
-  const [showBuyerForm, setShowBuyerForm] = useState(false); // ✅ NEW: Control form visibility
+  const [checking, setChecking] = useState(false); // ✅ Set to false initially
+
   const navigate = useNavigate();
 
   const safeNavigate = (path) => {
@@ -52,94 +49,22 @@ const BuyerDecision = ({
     }
   };
 
-  // ✅ Fetch profile if not passed as prop
-  const fetchProfile = async (attempt = 0) => {
-    // If we already have profile data from parent, use it
+  // ✅ Simply use existingData from parent - NO FETCH NEEDED
+  useEffect(() => {
     if (existingData) {
       setProfileData(existingData);
-      setChecking(false);
-      return;
     }
-
-    try {
-      const { data: userData, error: userError } = await fetchWithRetry(() =>
-        supabase.auth.getUser()
-      );
-      
-      if (userError) {
-        console.warn('[BuyerDecision] User fetch error:', userError);
-        if (attempt < 3) {
-          setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
-          return;
-        }
-        setError('Please log in to continue');
-        setChecking(false);
-        return;
-      }
-      
-      const user = userData?.user;
-      
-      if (!user) {
-        setError('User not found. Please log in again.');
-        setChecking(false);
-        return;
-      }
-      
-      const { data: profileResult, error: profileError } = await fetchWithRetry(() =>
-        supabase
-          .from('profiles')
-          .select('location, phone_number, is_buyer, buyer_setup_completed, interests')
-          .eq('user_id', user.id)
-          .maybeSingle()
-      );
-      
-      if (profileError) {
-        console.warn('[BuyerDecision] Profile fetch error:', profileError);
-        if (attempt < 3) {
-          setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
-          return;
-        }
-        setError('Failed to load profile. Please refresh the page.');
-        setChecking(false);
-        return;
-      }
-      
-      setProfileData({
-        location: profileResult?.location || '',
-        phone_number: profileResult?.phone_number || '',
-        is_buyer: profileResult?.is_buyer || false,
-        buyer_setup_completed: profileResult?.buyer_setup_completed || false,
-        interests: profileResult?.interests || []
-      });
-      
-      setError(null);
-      setRetryCount(0);
-      
-    } catch (err) {
-      console.error('[BuyerDecision] Unexpected error:', err);
-      if (attempt < 3) {
-        setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
-        return;
-      }
-      setError('Failed to load profile. Please refresh the page.');
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchProfile();
+    setChecking(false); // ✅ Always set to false after data is set
   }, [existingData]);
 
-  // ✅ HANDLE ADD INTERESTS - Show the form inline
+  // ✅ HANDLE ADD INTERESTS
   const handleAddInterests = () => {
-    // ✅ Just call the parent callback
     if (onAddInterests) {
-        onAddInterests();
+      onAddInterests();
     }
   };
 
-  // ✅ HANDLE SKIP - EXACTLY like SellerDecision
+  // ✅ HANDLE SKIP - Simplified
   const handleSkipForNow = async () => {
     if (!navigator.onLine) {
       setError('You are offline. Please connect to the internet to continue.');
@@ -168,29 +93,7 @@ const BuyerDecision = ({
         return;
       }
       
-      const hasLocation = profileData?.location && profileData.location.trim() !== '';
-      const hasPhone = profileData?.phone_number && profileData.phone_number.trim() !== '';
-      
-      if (!hasLocation || !hasPhone) {
-        setTempLocation(profileData?.location || '');
-        setTempPhone(profileData?.phone_number || '');
-        setShowLocationModal(true);
-        setLoading(false);
-        return;
-      }
-      
-      await completeSkip(user.id);
-      
-    } catch (err) {
-      console.error('[BuyerDecision] Skip error:', err);
-      setError('Failed to skip. Please try again.');
-      setLoading(false);
-    }
-  };
-
-  // ✅ Complete skip
-  const completeSkip = async (userId) => {
-    try {
+      // ✅ Update database
       const { error: updateError } = await fetchWithRetry(() =>
         supabase
           .from('profiles')
@@ -199,7 +102,7 @@ const BuyerDecision = ({
             buyer_setup_completed: true,
             updated_at: new Date().toISOString()
           })
-          .eq('user_id', userId)
+          .eq('user_id', user.id)
       );
       
       if (updateError) {
@@ -209,7 +112,7 @@ const BuyerDecision = ({
         return;
       }
       
-      // ✅ Call onSkip callback to update parent
+      // ✅ Call parent callback
       if (onSkip) {
         onSkip();
       } else {
@@ -217,7 +120,7 @@ const BuyerDecision = ({
       }
       
     } catch (err) {
-      console.error('[BuyerDecision] Complete skip error:', err);
+      console.error('[BuyerDecision] Skip error:', err);
       setError('Failed to skip. Please try again.');
       setLoading(false);
     }
@@ -283,7 +186,7 @@ const BuyerDecision = ({
       
       setShowLocationModal(false);
       
-      // ✅ Call onSkip callback to update parent
+      // ✅ Call parent callback
       if (onSkip) {
         onSkip();
       } else {
@@ -297,14 +200,7 @@ const BuyerDecision = ({
     }
   };
 
-  const handleRetry = () => {
-    setError(null);
-    setChecking(true);
-    setRetryCount(prev => prev + 1);
-    fetchProfile(0);
-  };
-
-  // ✅ Loading spinner
+  // ✅ If checking is true, show loading spinner
   if (checking) {
     return (
       <div className="buyer-decision-page" style={{
@@ -336,11 +232,6 @@ const BuyerDecision = ({
               margin: '0 auto 15px auto'
             }} />
             <p>Loading your profile...</p>
-            {retryCount > 0 && (
-              <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
-                Attempting to connect... ({retryCount}/3)
-              </p>
-            )}
             <style>{`
               @keyframes spin {
                 0% { transform: rotate(0deg); }
@@ -353,7 +244,7 @@ const BuyerDecision = ({
     );
   }
 
-  // ✅ Main Decision UI - EXACTLY like SellerDecision
+  // ✅ Main Decision UI
   return (
     <div className="buyer-decision-page" style={{
       minHeight: '100vh',
@@ -408,20 +299,6 @@ const BuyerDecision = ({
               </span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button 
-                  onClick={handleRetry}
-                  style={{
-                    background: '#dc2626',
-                    color: 'white',
-                    border: 'none',
-                    padding: '4px 12px',
-                    borderRadius: '4px',
-                    cursor: 'pointer',
-                    fontSize: '12px'
-                  }}
-                >
-                  Retry
-                </button>
-                <button 
                   onClick={() => setError(null)}
                   style={{
                     background: 'none',
@@ -448,15 +325,10 @@ const BuyerDecision = ({
                 ✓ Your profile is complete (Location and Phone saved)
               </p>
             )}
-            {(!profileData?.location || !profileData?.phone_number) && (
-              <p style={{ color: '#f59e0b', fontSize: '12px', marginTop: '10px' }}>
-                ⚠️ You'll need to provide your location and phone number to continue
-              </p>
-            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* ✅ ADD INTERESTS - Shows the form inline */}
+            {/* ✅ ADD INTERESTS */}
             <button
               onClick={handleAddInterests}
               disabled={parentLoading || loading}
@@ -481,7 +353,7 @@ const BuyerDecision = ({
               🎯 ADD INTERESTS NOW
             </button>
 
-            {/* ✅ SKIP - Goes to social */}
+            {/* ✅ SKIP */}
             <button
               onClick={handleSkipForNow}
               disabled={parentLoading || loading}
@@ -541,7 +413,7 @@ const BuyerDecision = ({
         </div>
       </div>
 
-      {/* ✅ Location/Phone Modal */}
+      {/* ✅ Location/Phone Modal - Only shown if needed */}
       {showLocationModal && (
         <div style={{
           position: 'fixed',

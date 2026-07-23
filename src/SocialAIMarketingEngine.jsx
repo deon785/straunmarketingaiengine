@@ -114,8 +114,8 @@ const safeNumber = (num) => {
 };
 
 const safeObject = (obj) => {
-  if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
-  return {};
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+    return {};
 };
 
 class UserBehaviorAnalyzer {
@@ -1076,26 +1076,82 @@ function SocialAIMarketingEngine() {
     };
 
     const handleProductClick = async (product) => {
-        setLastViewedProduct(product);
-        
-        // ✅ ADD THIS: Track the view in database
-        if (product?.id) {
+        // ✅ Safe product validation
+        if (!product) {
+            console.warn('❌ No product provided');
+            return;
+        }
+
+        // ✅ Use safe string for product name
+        const productName = product?.name || 'product';
+        const productId = product?.id;
+
+        // ✅ Track view in database
+        if (productId) {
             try {
                 await supabase.rpc('increment_product_views', {
-                    p_product_id: product.id
+                    p_product_id: productId
                 });
-                console.log('✅ View tracked for:', product.name);
+                console.log(`✅ View tracked for: ${productName}`);
             } catch (error) {
                 console.error('Error tracking view:', error);
+                // Don't stop execution if tracking fails
             }
         }
         
-        // Track with recommendation engine
-        const engine = new RecommendationEngine(user.id);
-        await engine.trackBehavior(product.id, 'view');
+        // ✅ Track with recommendation engine (with try-catch)
+        try {
+            const engine = new RecommendationEngine(user.id);
+            await engine.trackBehavior(productId, 'view');
+        } catch (error) {
+            console.error('Error tracking behavior:', error);
+            // Don't stop execution if tracking fails
+        }
         
-        // Show notification
-        showToastNotification(`Viewing: ${product.name}`);
+        // ✅ Show notification
+        showToastNotification(`Viewing: ${productName}`);
+
+        // ✅ Open WhatsApp with seller (with validation)
+        const phoneNumber = product?.phone_number;
+        if (phoneNumber) {
+            try {
+                // Clean the phone number
+                const cleanNumber = phoneNumber.toString().replace(/\D/g, '');
+                
+                // Validate phone number length
+                if (cleanNumber.length < 9) {
+                    console.warn('⚠️ Invalid phone number:', phoneNumber);
+                    showToastNotification('⚠️ Seller phone number is invalid');
+                    return;
+                }
+
+                // Format for Zimbabwe (263)
+                let finalNumber;
+                if (cleanNumber.startsWith('263')) {
+                    finalNumber = cleanNumber;
+                } else if (cleanNumber.startsWith('0')) {
+                    finalNumber = `263${cleanNumber.substring(1)}`;
+                } else {
+                    finalNumber = `263${cleanNumber}`;
+                }
+
+                // Encode message
+                const message = encodeURIComponent(
+                    `Hi! I'm interested in your ${productName}. Is it still available?`
+                );
+                
+                // Open WhatsApp
+                const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
+                window.open(whatsappUrl, '_blank');
+                
+            } catch (error) {
+                console.error('Error opening WhatsApp:', error);
+                showToastNotification('⚠️ Failed to open WhatsApp');
+            }
+        } else {
+            // If no phone number, show a message
+            showToastNotification('⚠️ Seller phone number not available');
+        }
     };
 
     // In-app messaging instead of just WhatsApp

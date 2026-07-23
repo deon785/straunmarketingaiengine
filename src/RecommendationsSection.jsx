@@ -480,7 +480,7 @@ const RecommendationsSection = ({
     return (
         <div style={{ marginTop: '30px', padding: '20px', background: '#f8f9fa', borderRadius: '16px' }}>
             <div style={{ marginBottom: '20px' }}>
-                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' , color: '#1a1a1a' }}>
                     <span>🎯</span>
                     {isAlternative ? 'You might also like these:' : 'Recommended for You'}
                 </h3>
@@ -507,7 +507,7 @@ const RecommendationsSection = ({
                         onClick={() => setActiveTab('personalized')}
                         style={{
                             background: activeTab === 'personalized' ? '#667eea' : 'transparent',
-                            color: activeTab === 'personalized' ? 'white' : '#666',
+                            color: activeTab === 'personalized' ? 'white' : '#1a1a1a',
                             border: 'none',
                             padding: '8px 16px',
                             borderRadius: '20px',
@@ -524,7 +524,7 @@ const RecommendationsSection = ({
                         onClick={() => setActiveTab('trending')}
                         style={{
                             background: activeTab === 'trending' ? '#667eea' : 'transparent',
-                            color: activeTab === 'trending' ? 'white' : '#666',
+                            color: activeTab === 'trending' ? 'white' : '#1a1a1a',
                             border: 'none',
                             padding: '8px 16px',
                             borderRadius: '20px',
@@ -540,7 +540,7 @@ const RecommendationsSection = ({
                         onClick={() => setActiveTab('similar')}
                         style={{
                             background: activeTab === 'similar' ? '#667eea' : 'transparent',
-                            color: activeTab === 'similar' ? 'white' : '#666',
+                            color: activeTab === 'similar' ? 'white' : '#1a1a1a',
                             border: 'none',
                             padding: '8px 16px',
                             borderRadius: '20px',

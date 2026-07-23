@@ -62,7 +62,28 @@ class ComponentErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('[ComponentErrorBoundary] Error:', error, errorInfo);
+    
+    // ✅ Track with Sentry (you already have this)
     Sentry.captureException(error, { extra: errorInfo });
+    
+    // ✅ ADD THIS: Track with your errorTracker
+    try {
+      // Dynamically import errorTracker to avoid circular dependencies
+      import('./errorTracker').then(module => {
+        const errorTracker = module.default;
+        errorTracker.trackError(error, {
+          route: window.location.pathname,
+          userId: this.props.userId || null,
+          severity: 'error',
+          componentStack: errorInfo?.componentStack
+        });
+      }).catch(() => {
+        // If errorTracker fails, just log it
+        console.warn('Failed to track error with errorTracker');
+      });
+    } catch (trackError) {
+      // Silent fail - don't let tracking errors break the app
+    }
   }
 
   render() {

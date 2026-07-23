@@ -1,4 +1,5 @@
 import React, { Component } from 'react';
+import errorTracker from './errorTracker'; // ✅ ADD THIS IMPORT
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -7,33 +8,44 @@ class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so the next render shows the fallback UI
     return { hasError: true };
   }
 
+  // ✅ UPDATE: componentDidCatch to track errors
   componentDidCatch(error, errorInfo) {
-    // Log the error to an error reporting service
+    // Log to console
     console.error('Error caught by Error Boundary:', error, errorInfo);
+    
     this.setState({
       error: error,
       errorInfo: errorInfo
     });
+
+    // ✅ TRACK ERROR WITH errorTracker
+    try {
+      errorTracker.trackError(error, {
+        route: window.location.pathname,
+        userId: this.props.userId || null,
+        severity: 'error',
+        componentStack: errorInfo?.componentStack,
+        userAgent: navigator.userAgent
+      });
+    } catch (trackError) {
+      console.error('Failed to track error:', trackError);
+    }
+
     
-    // You can also send to error tracking service like Sentry:
-    // if (window.Sentry) {
-    //   window.Sentry.captureException(error);
-    // }
+    if (window.Sentry) {
+       window.Sentry.captureException(error);
+    }
   }
 
   handleReset = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    // Optional: navigate to home or refresh
-    // window.location.href = '/';
   };
 
   render() {
     if (this.state.hasError) {
-      // Fallback UI
       return (
         <div style={{
           padding: '20px',
