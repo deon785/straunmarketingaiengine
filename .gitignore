@@ -1,4 +1,6 @@
-# Logs
+# ==========================================
+# LOGS
+# ==========================================
 logs
 *.log
 npm-debug.log*
@@ -7,14 +9,27 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# ==========================================
+# DEPENDENCIES
+# ==========================================
 node_modules
 dist
-.env.local
-.env.*.local
 dist-ssr
 *.local
 
-# Editor directories and files
+# ==========================================
+# ENVIRONMENT VARIABLES
+# ==========================================
+.env
+.env.*
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# ==========================================
+# EDITOR DIRECTORIES
+# ==========================================
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -25,13 +40,9 @@ dist-ssr
 *.sln
 *.sw?
 
-
-# Environment variables
-.env
-.env.*
-.env.production
-.env.development
-
+# ==========================================
+# BACKUP SCRIPTS
+# ==========================================
 backup-scripts/.env
 backup-scripts/service-account-key.json
 backup-scripts/backups/
@@ -43,8 +54,85 @@ scripts/credentials.json
 scripts/backups/
 scripts/node_modules/
 
-# Backup files
+# ==========================================
+# BACKUP FILES
+# ==========================================
 *.backup
 *.sql
 *.sql.gz
 backup-*.json
+
+# ==========================================
+# DEPLOYMENT
+# ==========================================
+.vercel/
+.netlify/
+.cache/
+.parcel-cache/
+
+# ==========================================
+# ARCHIVES
+# ==========================================
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# ==========================================
+# TESTING
+# ==========================================
+coverage/
+.nyc_output/
+*.test.js
+*.spec.js
+*.test.jsx
+*.spec.jsx
+
+# ==========================================
+# TEMP FILES
+# ==========================================
+*.tmp
+*.temp
+*.cache
+.cache/
+
+# ==========================================
+# BUILD CACHE
+# ==========================================
+.vite/
+vite.config.js.timestamp-*
+
+# ==========================================
+# DATABASE
+# ==========================================
+*.sqlite
+*.db
+*.sqlite3
+*.sqlite-journal
+
+# ==========================================
+# SSL CERTIFICATES
+# ==========================================
+*.pem
+*.key
+*.crt
+*.p12
+
+# ==========================================
+# OS FILES
+# ==========================================
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ==========================================
+# MISC
+# ==========================================
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ========== DEV BUILD ==========
+dev-dist/

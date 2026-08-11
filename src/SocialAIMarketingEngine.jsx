@@ -1444,35 +1444,34 @@ function SocialAIMarketingEngine() {
             p_metadata: { targetUserId: targetUserId, type: type },
             p_message: `User contacted ${type} about ${product?.name || 'product'}` 
         });
-     
+
         if (!smartLimiterInstance) {
-            // Only initialize if not already done
             initializeRateLimiter();
         }
-        
-        // Behavior check
+
         if (!user) {
             alert('Please log in to contact');
             return;
         }
-        
-        // Check rate limit using the smart rate limiter instance
+
         let check;
         try {
             check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
-                targetId: targetUserId,
-                type: type,
-                product: product?.name
+            targetId: targetUserId,
+            type: type,
+            product: product?.name,
+            limit: 50,      // ✅ Increased from default 10
+            window: 1    
             });
-            
+
             if (!check.allowed) {
-                alert(`Contact blocked: ${check.reason}`);
-                return;
+            alert(`Contact blocked: ${check.reason}`);
+            return;
             }
         } catch (error) {
             console.error('Rate limit check error:', error);
-            // Continue anyway if rate limiter fails
         }
+
         setOpeningWhatsApp(true);
 
         if (!validatePhoneNumber(targetPhoneNumber)) {
@@ -1483,44 +1482,48 @@ function SocialAIMarketingEngine() {
 
         try {
             if (behaviorAnalyzerInstance) {
-                behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
-                    targetId: targetUserId,
-                    contactType: type,
-                    productName: product?.name
-                });
+            behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+                targetId: targetUserId,
+                contactType: type,
+                productName: product?.name
+            });
             }
 
-            // ===== ORIGINAL CONTACT LOGIC =====
             const { data: { user: currentUser } } = await supabase.auth.getUser();
-            const { data: profile } = await supabase
+            
+            // ✅ FIX: Get the SENDER's (current user's) phone number from profiles
+            const { data: senderProfile, error: senderError } = await supabase
             .from('profiles')
             .select('phone_number')
-            .eq('id', currentUser?.id)
+            .eq('user_id', currentUser?.id)
             .single();
 
+            const senderPhone = senderProfile?.phone_number || null;
+
+            // ✅ Create notification with sender's phone number
             await supabase.from('notifications').insert([
-                { 
-                    user_id: targetUserId,
-                    sender_id: currentUser?.id,
-                    product_id: product?.id,
-                    buyer_phone: profile?.phone_number || 'No phone provided',
-                    product_image: product?.image_url,
-                    message: type === 'seller'
-                        ? `📢 New buyer interested in ${targetName}!` 
-                        : `👋 Seller is reaching out about ${targetName}!`,
-                    link_type: type,
-                    is_read: false,  // ✅ FIXED
-                    created_at: new Date().toISOString()
-                }
+            { 
+                user_id: targetUserId,
+                sender_id: currentUser?.id,
+                product_id: product?.id,
+                buyer_phone: senderPhone,  // ✅ Sender's phone number
+                product_image: product?.image_url,
+                message: type === 'seller'
+                ? `📢 New buyer interested in ${targetName}!` 
+                : `👋 Seller is reaching out about ${targetName}!`,
+                link_type: type,
+                is_read: false,
+                created_at: new Date().toISOString()
+            }
             ]);
 
             await UserActivityTracker.trackContact(
-                user.id,
-                targetUserId,
-                product?.id,
-                'whatsapp',
-                true,
-                null
+            user.id,
+            targetUserId,
+            product?.id,
+            'whatsapp',
+            true,
+            null
             );
 
             if (!targetPhoneNumber) {
@@ -1528,21 +1531,21 @@ function SocialAIMarketingEngine() {
             setOpeningWhatsApp(false);
             return;
             }
-            
+
             const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
             const finalNumber = cleanNumber.startsWith('263') 
             ? cleanNumber 
             : `263${cleanNumber.replace(/^0/, '')}`;
-            
+
             const message = encodeURIComponent(
             type === 'seller' 
                 ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
                 : `Hi! I'm interested in your ${targetName}. Is it still available?`
             );
-            
+
             const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
             window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-                
+
             if (typeof ReactGA !== 'undefined') {
             ReactGA.event({
                 category: 'Conversion',
@@ -1550,10 +1553,10 @@ function SocialAIMarketingEngine() {
                 label: type
             });
             }
-            
+
             setLimits(prev => ({
-                ...prev,
-                CONTACT: check || { remaining: 4, total: 5 } // Default if check not available
+            ...prev,
+            CONTACT: check || { remaining: 4, total: 5 }
             }));
 
         } catch (error) {
@@ -1867,6 +1870,15 @@ function SocialAIMarketingEngine() {
                             );
 
                             if (hasMatch) {
+                                // ✅ ADD THIS: Get the seller's phone number
+                                const { data: sellerProfile } = await supabase
+                                    .from('profiles')
+                                    .select('phone_number')
+                                    .eq('user_id', user.id)
+                                    .single();
+
+                                const sellerPhone = sellerProfile?.phone_number || null;
+
                                 await supabase.from('notifications').insert([{
                                     user_id: buyer.user_id,
                                     sender_id: user.id,
@@ -1874,10 +1886,11 @@ function SocialAIMarketingEngine() {
                                     product_image: null,
                                     message: `🎯 New match! Seller listed "${sanitizedProduct}" that matches your interests!`,
                                     link_type: 'product_match',
-                                    is_read: false,  // ✅ FIXED
+                                    buyer_phone: sellerPhone,  // ✅ Add seller's phone number
+                                    is_read: false,
                                     created_at: new Date().toISOString()
                                 }]);
-                            }
+                                }
                         } catch (e) {
                             console.log('Error checking match:', e);
                         }
@@ -2523,6 +2536,23 @@ function SocialAIMarketingEngine() {
             });
         }
     }, [user, fetchProfile]);  
+
+    // ✅ Handle returning from notification detail page
+    useEffect(() => {
+    // Check if we're returning from a notification
+    if (location.state?.returnFromNotification) {
+        console.log('🔄 Returning from notification detail');
+        
+        // ✅ Clear the state so it doesn't trigger again
+        window.history.replaceState({}, document.title);
+        
+        // ✅ Refresh notifications if needed
+        fetchNotifications();
+        
+        // ✅ Show a toast notification
+        showToastNotification('🔔 Back to Social page');
+    }
+    }, [location.state, fetchNotifications, showToastNotification]);
 
     useEffect(() => {
         if (user) {
@@ -4227,6 +4257,15 @@ function SocialAIMarketingEngine() {
             // NOTE: 'is_read' NOT 'read'
             if (productsData && productsData.length > 0 && selectedMode === 'buyer') {
                 try {
+                    // ✅ Get the buyer's phone number
+                    const { data: buyerProfile } = await supabase
+                        .from('profiles')
+                        .select('phone_number')
+                        .eq('user_id', user.id)
+                        .single();
+
+                    const buyerPhone = buyerProfile?.phone_number || null;
+
                     const uniqueSellerIds = [...new Set(productsData
                         .filter(p => p.seller_id && p.seller_id !== user.id)
                         .map(p => p.seller_id)
@@ -4241,6 +4280,7 @@ function SocialAIMarketingEngine() {
                                     sender_id: user.id,
                                     message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
                                     link_type: 'search_match',
+                                    buyer_phone: buyerPhone,  // ✅ Add buyer's phone number
                                     is_read: false,
                                     created_at: new Date().toISOString()
                                 });
@@ -6019,15 +6059,22 @@ function SocialAIMarketingEngine() {
                 {/* Notifications */}
                 <div className="notification-container">
                     <button 
-                        className="notification-button"
-                        onClick={() => setShowNotifications(!showNotifications)}
+                    className="notification-button"
+                    onClick={() => {
+                        // ✅ Navigate to notifications list with state
+                        navigate('/notifications', { 
+                        state: { 
+                            referrer: '/app'  // Tell the notification page where to go back to
+                        } 
+                        });
+                    }}
                     >
-                        🔔
-                        {unreadCount > 0 && (
-                            <div className="notification-badge">
-                                {unreadCount > 9 ? '9+' : unreadCount}
-                            </div>
-                        )}
+                    🔔
+                    {unreadCount > 0 && (
+                        <div className="notification-badge">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                        </div>
+                    )}
                     </button>
                 
                     {showNotifications && (

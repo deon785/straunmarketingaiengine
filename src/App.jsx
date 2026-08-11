@@ -8,6 +8,7 @@ import * as Sentry from "@sentry/react";
 import ReactGA from "react-ga4";
 import { toast } from 'react-hot-toast';
 import SocialAIMarketingEngine from './SocialAIMarketingEngine.jsx';
+import NotificationDetail from './NotificationDetail.jsx';
 
 // ✅ ONLY import what's needed
 import { useAuthState, useAuthActions } from './AuthContext.jsx';
@@ -262,6 +263,98 @@ const NotificationWatcher = React.memo(() => {
   return null; // ✅ Returns null - NO DOM elements to re-render
 });
 NotificationWatcher.displayName = 'NotificationWatcher';
+
+// 2. Create AppOpenTracker component
+const AppOpenTracker = React.memo(() => {
+  const { user } = useAuthState();
+  const isFirstMount = useRef(true);
+  const lastUpdateTime = useRef(0);
+  const MIN_UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes minimum between updates
+
+  const trackAppOpen = useCallback(async () => {
+    if (!user?.id) return;
+    
+    // ✅ Rate limit to prevent excessive updates
+    const now = Date.now();
+    if (now - lastUpdateTime.current < MIN_UPDATE_INTERVAL) {
+      console.log('[AppOpenTracker] Skipping - too soon since last update');
+      return;
+    }
+
+    try {
+      console.log('[AppOpenTracker] 📱 Tracking app open for user:', user.id);
+      
+      // ✅ Update app_opened_at - This triggers the database trigger
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          app_opened_at: new Date().toISOString()
+        })
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('[AppOpenTracker] Failed to track app open:', error);
+      } else {
+        lastUpdateTime.current = now;
+        console.log('[AppOpenTracker] ✅ App open tracked successfully');
+      }
+    } catch (err) {
+      console.error('[AppOpenTracker] Error:', err);
+    }
+  }, [user?.id]);
+
+  // ✅ Track on initial mount (app open)
+  useEffect(() => {
+    if (isFirstMount.current && user?.id) {
+      isFirstMount.current = false;
+      // Small delay to ensure auth is fully loaded
+      setTimeout(() => {
+        trackAppOpen();
+      }, 1000);
+    }
+  }, [user?.id, trackAppOpen]);
+
+  // ✅ Track when app comes to foreground (for web: visibility change)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[AppOpenTracker] App came to foreground');
+        trackAppOpen();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user?.id, trackAppOpen]);
+
+  // ✅ Track when user navigates to the app (for SPA)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const handleRouteChange = () => {
+      // Only track if it's been more than MIN_UPDATE_INTERVAL
+      const now = Date.now();
+      if (now - lastUpdateTime.current > MIN_UPDATE_INTERVAL) {
+        trackAppOpen();
+      }
+    };
+
+    // Listen for route changes
+    window.addEventListener('popstate', handleRouteChange);
+    
+    return () => {
+      window.removeEventListener('popstate', handleRouteChange);
+    };
+  }, [user?.id, trackAppOpen]);
+
+  return null; // ✅ No UI - just tracking
+});
+AppOpenTracker.displayName = 'AppOpenTracker';
 
 // ============ OFFLINE BANNER - STABLE ============
 const OfflineBanner = React.memo(() => {
@@ -795,6 +888,7 @@ function App() {
                 <GlobalBackHandler />
                 <AnalyticsTracker />
                 <NotificationWatcher />
+                <AppOpenTracker />
                 
                 <div className="app">
                   <OfflineBanner />
@@ -808,7 +902,15 @@ function App() {
                           <Route path="/seller-decision" element={<MemoizedSellerDecision />} />
                           <Route path="/buyer-decision" element={<MemoizedBuyerDecision />} />
                           <Route path="/buyer-form" element={<BuyerSetupForm />} />
-                          
+
+                          <Route 
+                            path="/notification/:notificationId" 
+                            element={
+                              <ProtectedRoute>
+                                <NotificationDetail />
+                              </ProtectedRoute>
+                            } 
+                          />                 
                           
                           <Route path="/app" element={
                             <ProtectedRoute>

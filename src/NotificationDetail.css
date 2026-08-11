@@ -1,0 +1,544 @@
+/* ============================================
+   src/NotificationDetail.css - CLEANED VERSION
+   ============================================ */
+
+.notification-detail-container {
+  max-width: 650px;
+  margin: 0 auto;
+  padding: 20px 16px;
+  min-height: 100vh;
+  background: #f8f9fa;
+}
+
+/* Header */
+.notification-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.btn-back {
+  background: none;
+  border: none;
+  color: #007bff;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-back:hover {
+  background: #e7f3ff;
+}
+
+.btn-save-wishlist {
+  padding: 8px 16px;
+  background: #ffc107;
+  border: none;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-save-wishlist:hover:not(:disabled) {
+  background: #e0a800;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+}
+
+.btn-save-wishlist:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Content */
+.notification-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Notification Message Card */
+.notification-message-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.notification-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.notification-message {
+  flex: 1;
+}
+
+.notification-message p {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+  line-height: 1.6;
+}
+
+.notification-time {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #6c757d;
+}
+
+/* User Details Card */
+.user-details-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.user-details-header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.user-avatar {
+  flex-shrink: 0;
+}
+
+.avatar-placeholder {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.user-avatar img {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-info {
+  flex: 1;
+}
+
+.user-info h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #333;
+}
+
+.user-badges {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.badge-seller {
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.badge-buyer {
+  background: #dcfce7;
+  color: #166534;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.user-rating {
+  font-size: 14px;
+  color: #f59e0b;
+}
+
+/* User Details Body */
+.user-details-body {
+  margin-bottom: 16px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #f8f9fa;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  font-weight: 500;
+  color: #6c757d;
+}
+
+.detail-value {
+  color: #333;
+}
+
+/* Contact Row - ONE DEFINITION ONLY */
+.contact-row {
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.contact-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.contact-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  flex: 1;
+  justify-content: center;
+  min-width: 80px;
+}
+
+.contact-btn.call {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.contact-btn.call:hover {
+  background: #bbf7d0;
+  transform: scale(1.02);
+}
+
+.contact-btn.sms {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.contact-btn.sms:hover {
+  background: #bfdbfe;
+  transform: scale(1.02);
+}
+
+.contact-btn.whatsapp {
+  background: #dcfce7;
+  color: #075e54;
+}
+
+.contact-btn.whatsapp:hover {
+  background: #bbf7d0;
+  transform: scale(1.02);
+}
+
+.user-details-footer {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e9ecef;
+}
+
+.btn-view-profile {
+  width: 100%;
+  padding: 12px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-view-profile:hover {
+  background: #0056b3;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+}
+
+/* Product Details */
+.product-details-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.product-details-card h4 {
+  margin: 0 0 12px 0;
+  color: #333;
+}
+
+.product-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.product-name {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 16px;
+}
+
+.product-price {
+  font-size: 18px;
+  font-weight: bold;
+  color: #16a34a;
+}
+
+.product-condition,
+.product-category {
+  font-size: 14px;
+  color: #6c757d;
+}
+
+.product-description {
+  font-size: 14px;
+  color: #495057;
+  line-height: 1.5;
+  margin: 8px 0;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.btn-view-product {
+  margin-top: 8px;
+  padding: 10px 16px;
+  background: #17a2b8;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.btn-view-product:hover {
+  background: #138496;
+  transform: translateY(-1px);
+}
+
+/* Action Buttons */
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-save-large {
+  width: 100%;
+  padding: 14px;
+  background: #ffc107;
+  color: #212529;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-save-large:hover:not(:disabled) {
+  background: #e0a800;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3);
+}
+
+.btn-save-large:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-back-large {
+  width: 100%;
+  padding: 14px;
+  background: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-back-large:hover {
+  background: #5a6268;
+  transform: translateY(-2px);
+}
+
+/* Wishlist Help */
+.wishlist-help {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #f0fdf4;
+  border-radius: 10px;
+  border-left: 4px solid #16a34a;
+  margin-top: 8px;
+}
+
+.help-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.help-text {
+  font-size: 14px;
+  color: #495057;
+  line-height: 1.5;
+}
+
+.help-text .highlight {
+  font-weight: 600;
+  color: #16a34a;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Loading State */
+.notification-detail-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 16px;
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #e9ecef;
+  border-top: 4px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error State */
+.notification-detail-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .notification-detail-container {
+    padding: 12px;
+  }
+
+  .notification-detail-header {
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .btn-back,
+  .btn-save-wishlist {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .notification-message-card {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .user-details-header {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .user-badges {
+    justify-content: center;
+  }
+
+  .contact-actions {
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .contact-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .product-name {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .btn-view-product {
+    width: 100%;
+    text-align: center;
+  }
+
+  .wishlist-help {
+    flex-direction: column;
+    text-align: center;
+  }
+}

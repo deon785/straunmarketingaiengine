@@ -55,16 +55,65 @@ const RecommendationsSection = ({
             let trendingRecs = [];
             let similarRecs = [];
             let prospectsRecs = [];
-            
-            // ✅ NEW: Alternative prospects for sellers
+
+            // ✅ Helper: Fetch fallback products directly from database
+            const fetchFallbackProducts = async (limit = 8) => {
+                try {
+                    const { data, error } = await supabase
+                        .from('products')
+                        .select(`
+                            id,
+                            name,
+                            price,
+                            location,
+                            description,
+                            image_url,
+                            phone_number,
+                            seller_id,
+                            created_at,
+                            profiles:seller_id (
+                                user_id,
+                                username,
+                                location,
+                                phone_number,
+                                is_seller,
+                                is_buyer
+                            )
+                        `)
+                        .eq('status', 'active')
+                        .neq('seller_id', userId || '00000000-0000-0000-0000-000000000000')
+                        .order('created_at', { ascending: false })
+                        .limit(limit);
+
+                    if (error) {
+                        console.error('Fallback error:', error);
+                        return [];
+                    }
+
+                    return data?.map(product => ({
+                        ...product,
+                        image_url: product.image_url || null,
+                        profiles: product.profiles || null
+                    })) || [];
+
+                } catch (error) {
+                    console.error('Fallback error:', error);
+                    return [];
+                }
+            };
+
+            // ✅ Alternative prospects for sellers
             if (isAlternativeProspects && searchTerm) {
                 try {
                     if (engine && typeof engine.getAlternativeProspects === 'function') {
                         prospectsRecs = await engine.getAlternativeProspects(searchTerm, 8);
-                        console.log(`✅ Found ${prospectsRecs.length} alternative prospects`);
                     }
                 } catch (err) {
                     console.error('Error loading alternative prospects:', err);
+                }
+                // ✅ If no prospects found, show fallback products
+                if (!prospectsRecs || prospectsRecs.length === 0) {
+                    prospectsRecs = await fetchFallbackProducts(8);
                 }
             }
             // ✅ If no search results, show alternative products (Buyer mode)
@@ -76,6 +125,10 @@ const RecommendationsSection = ({
                 } catch (err) {
                     console.error('Error loading alternative products:', err);
                 }
+                // ✅ If no alternatives, show fallback
+                if (!personalizedRecs || personalizedRecs.length === 0) {
+                    personalizedRecs = await fetchFallbackProducts(8);
+                }
             }
             // ✅ If search has results, show similar products
             else if (isSimilar && currentProductId) {
@@ -85,6 +138,10 @@ const RecommendationsSection = ({
                     }
                 } catch (err) {
                     console.error('Error loading similar products:', err);
+                }
+                // ✅ If no similar, show fallback
+                if (!similarRecs || similarRecs.length === 0) {
+                    similarRecs = await fetchFallbackProducts(6);
                 }
             }
             // ✅ Default: show personalized
@@ -96,6 +153,10 @@ const RecommendationsSection = ({
                 } catch (err) {
                     console.error('Error loading personalized recommendations:', err);
                 }
+                // ✅ If no personalized, show fallback
+                if (!personalizedRecs || personalizedRecs.length === 0) {
+                    personalizedRecs = await fetchFallbackProducts(8);
+                }
             }
 
             // ✅ Also load trending as backup
@@ -105,6 +166,10 @@ const RecommendationsSection = ({
                 }
             } catch (trendingErr) {
                 console.error('Error loading trending products:', trendingErr);
+            }
+            // ✅ If no trending, show fallback
+            if (!trendingRecs || trendingRecs.length === 0) {
+                trendingRecs = await fetchFallbackProducts(4);
             }
 
             // ✅ If we're showing similar products but none found, fallback to personalized
@@ -116,6 +181,9 @@ const RecommendationsSection = ({
                 } catch (err) {
                     console.error('Error loading fallback recommendations:', err);
                 }
+                if (!personalizedRecs || personalizedRecs.length === 0) {
+                    personalizedRecs = await fetchFallbackProducts(6);
+                }
             }
 
             setPersonalized(personalizedRecs || []);
@@ -123,9 +191,44 @@ const RecommendationsSection = ({
             setSimilar(similarRecs || []);
             setAlternativeProspects(prospectsRecs || []);
             
+            // ✅ Log what we found
+            console.log('📊 Recommendations loaded:', {
+                personalized: personalizedRecs?.length || 0,
+                trending: trendingRecs?.length || 0,
+                similar: similarRecs?.length || 0,
+                prospects: prospectsRecs?.length || 0
+            });
+
         } catch (error) {
             console.error('Error loading recommendations:', error);
             setError('Failed to load recommendations');
+            // ✅ Fallback to direct database query
+            try {
+                const { data } = await supabase
+                    .from('products')
+                    .select(`
+                        id,
+                        name,
+                        price,
+                        location,
+                        description,
+                        image_url,
+                        phone_number,
+                        seller_id,
+                        created_at
+                    `)
+                    .eq('status', 'active')
+                    .neq('seller_id', userId || '00000000-0000-0000-0000-000000000000')
+                    .order('created_at', { ascending: false })
+                    .limit(8);
+                    
+                if (data && data.length > 0) {
+                    setPersonalized(data);
+                    setError(null);
+                }
+            } catch (fallbackErr) {
+                console.error('Fallback error:', fallbackErr);
+            }
         } finally {
             setLoading(false);
         }
@@ -134,6 +237,14 @@ const RecommendationsSection = ({
     // ✅ Render product card (for products)
     const renderProductCard = (product) => {
         if (!product || !product.id) return null;
+        
+        // ✅ Safe data extraction
+        const productName = product.name || product.product_name || 'Unnamed Product';
+        const productPrice = product.price || product.product_price || 0;
+        const productImage = product.image_url || product.product_image || null;
+        const productLocation = product.location || product.seller_location || 'Location N/A';
+        const productPhone = product.phone_number || product.seller_phone || null;
+        const productSeller = product.profiles?.username || product.seller?.username || null;
         
         let label = null;
         if (product.is_alternative) {
@@ -183,45 +294,89 @@ const RecommendationsSection = ({
                     e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
                 }}
             >
-                {product.image_url ? (
+                {/* ✅ Product Image with better fallback */}
+                {productImage ? (
                     <img 
-                        src={product.image_url} 
-                        alt={product.name || 'Product'}
-                        style={{ width: '100%', height: '150px', objectFit: 'cover' }}
+                        src={productImage} 
+                        alt={productName}
+                        style={{ 
+                            width: '100%', 
+                            height: '150px', 
+                            objectFit: 'cover',
+                            background: '#f0f0f0'
+                        }}
                         onError={(e) => {
                             e.target.style.display = 'none';
-                            e.target.nextSibling.style.display = 'flex';
+                            const parent = e.target.parentElement;
+                            const fallback = parent.querySelector('.image-fallback');
+                            if (fallback) fallback.style.display = 'flex';
                         }}
                     />
                 ) : null}
-                <div style={{ 
-                    width: '100%', 
-                    height: '150px', 
-                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                    display: product.image_url ? 'none' : 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'white',
-                    fontSize: '48px'
-                }}>
+                
+                {/* ✅ Fallback when no image */}
+                <div 
+                    className="image-fallback"
+                    style={{
+                        width: '100%', 
+                        height: productImage ? '0' : '150px',
+                        background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                        display: productImage ? 'none' : 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'white',
+                        fontSize: '48px',
+                        transition: 'height 0.3s'
+                    }}
+                >
                     🛍️
                 </div>
                 
                 <div style={{ padding: '12px' }}>
-                    <h4 style={{ margin: '0 0 5px 0', fontSize: '14px', fontWeight: 'bold' }}>
-                        {product.name || 'Unnamed Product'}
+                    {/* ✅ Product Name - ALWAYS SHOW */}
+                    <h4 style={{ 
+                        margin: '0 0 5px 0', 
+                        fontSize: '14px', 
+                        fontWeight: 'bold',
+                        color: '#333',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                    }}>
+                        {productName}
                     </h4>
+                    
+                    {/* ✅ Price */}
                     <div style={{ 
                         fontSize: '18px', 
                         fontWeight: 'bold', 
-                        color: '#4CAF50',
+                        color: '#16a34a',
                         marginBottom: '5px'
                     }}>
-                        ${product.price || '0'}
+                        ${typeof productPrice === 'number' ? productPrice.toFixed(2) : '0.00'}
                     </div>
-                    <div style={{ fontSize: '12px', color: '#666' }}>
-                        📍 {product.location || 'Location N/A'}
+                    
+                    {/* ✅ Location */}
+                    <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>
+                        📍 {productLocation}
                     </div>
+                    
+                    {/* ✅ Seller (if available) */}
+                    {productSeller && (
+                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>
+                            👤 {productSeller}
+                        </div>
+                    )}
+                    
+                    {/* ✅ Phone (if available) */}
+                    {productPhone && (
+                        <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '4px' }}>
+                            📞 {productPhone}
+                        </div>
+                    )}
+                    
+                    {/* ✅ Similarity score */}
                     {product.similarity_score && (
                         <div style={{ 
                             fontSize: '11px', 
@@ -231,6 +386,7 @@ const RecommendationsSection = ({
                             {Math.round(product.similarity_score * 100)}% match
                         </div>
                     )}
+                    
                     {label}
                 </div>
             </div>

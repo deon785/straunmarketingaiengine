@@ -3,6 +3,16 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from './lib/supabase';
 
+// ✅ Helper to check if error is session missing (which is expected)
+const isSessionMissingError = (error) => {
+  if (!error) return false;
+  return (
+    error.message?.includes('Auth session missing') ||
+    error.message?.includes('Session not found') ||
+    error.message?.includes('Invalid Refresh Token')
+  );
+};
+
 const UserContext = createContext(null);
 const LoadingContext = createContext(true);
 const ErrorContext = createContext(null);
@@ -61,18 +71,35 @@ export const AuthProvider = ({ children }) => {
       try {
         // ✅ Get session
         console.log('[Auth] Getting session...');
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        // ✅ FIX: Try to get session with error handling
+        let sessionData;
+        let sessionError;
+        
+        try {
+          const result = await supabase.auth.getSession();
+          sessionData = result.data;
+          sessionError = result.error;
+        } catch (err) {
+          // ✅ Catch the AuthSessionMissingError specifically
+          if (isSessionMissingError(err)) {
+            console.log('[Auth] No session found (expected for new users)');
+            sessionError = null; // Treat as no session, not an error
+            sessionData = { session: null };
+          } else {
+            throw err; // Re-throw other errors
+          }
+        }
         
         if (!isMountedRef.current) {
           console.log('[Auth] Not mounted, aborting');
           return;
         }
         
-        // ✅ CRITICAL FIX: Handle missing session gracefully
-        if (sessionError) {
+        // ✅ Handle session error (but not AuthSessionMissingError)
+        if (sessionError && !sessionError.message?.includes('Auth session missing')) {
           console.error('[Auth] Session error:', sessionError);
           if (isMountedRef.current) {
-            // ✅ Don't set error - just mark as not authenticated
             setLoading(false);
             setIsAuthenticated(false);
             setUser(null);
@@ -85,7 +112,7 @@ export const AuthProvider = ({ children }) => {
           return;
         }
         
-        const newUser = session?.user ?? null;
+        const newUser = sessionData?.session?.user ?? null;
         console.log('[Auth] Session found:', !!newUser, newUser?.email);
         
         // ✅ If no user, still complete initialization
@@ -107,8 +134,6 @@ export const AuthProvider = ({ children }) => {
           setLoading(false);
           setIsAuthenticated(false);
           setUser(null);
-          // ✅ Don't set error that blocks the app
-          // setError(err.message || 'Failed to get session');
         }
       }
     })();
@@ -162,16 +187,28 @@ export const AuthProvider = ({ children }) => {
         
         // ✅ Handle specific events
         if (event === 'SIGNED_IN') {
-            console.log('[Auth] User signed in:', newUser?.email);
-            // ✅ Clear mode on sign in - force mode selection
-            setSelectedMode(null);
-            try {
-                localStorage.removeItem('straun_selectedMode');
-            } catch (e) {}
+          console.log('[Auth] User signed in:', newUser?.email);
+          setSelectedMode(null);
+          try {
+            localStorage.removeItem('straun_selectedMode');
+          } catch (e) {}
         }
         
-        if (event === 'SIGNED_IN') {
-          console.log('[Auth] User signed in:', newUser?.email);
+        // ✅ FIX: Handle INITIAL_SESSION event properly
+        if (event === 'INITIAL_SESSION') {
+          console.log('[Auth] Initial session event');
+          // If session exists, user is authenticated
+          if (session) {
+            setUser(session.user);
+            setIsAuthenticated(true);
+            setLoading(false);
+          } else {
+            // No session - this is normal for new users
+            console.log('[Auth] No session on initial load (normal)');
+            setUser(null);
+            setIsAuthenticated(false);
+            setLoading(false);
+          }
         }
       }
     );
