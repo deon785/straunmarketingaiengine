@@ -168,12 +168,12 @@ class RecommendationEngine {
 
     saveToLocalCache(products, type = 'personalized') {
         try {
-            // ✅ Compress data - only essential fields
+            // ✅ Keep image_url as image_url, not 'image'
             const compressed = products.slice(0, 20).map(p => ({
                 id: p.id,
                 name: p.name,
                 price: p.price,
-                image: p.image_url,
+                image_url: p.image_url,  // ← CHANGE from 'image' to 'image_url'
                 location: p.location,
                 views: p.views,
                 seller_id: p.seller_id

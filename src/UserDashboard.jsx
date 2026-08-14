@@ -43,6 +43,9 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     const [newInterest, setNewInterest] = useState('');
     const [addingInterest, setAddingInterest] = useState(false);
 
+    const [claimedDeals, setClaimedDeals] = useState([]);
+    const [showClaimedDeals, setShowClaimedDeals] = useState(false);
+
     // Handle browser back button
     useEffect(() => {
         const handlePopState = (event) => {
@@ -300,6 +303,23 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         }
     };
 
+    const fetchClaimedDeals = async () => {
+        if (!userId) return;
+        try {
+            const { data, error } = await supabase
+                .from('claimed_deals')
+                .select('*')
+                .eq('user_id', userId)
+                .order('claimed_at', { ascending: false });
+
+            if (!error) {
+                setClaimedDeals(data || []);
+            }
+        } catch (error) {
+            console.error('Error fetching claimed deals:', error);
+        }
+    };
+
     // ✅ SIMPLIFIED: Just go back to overview
     const goBack = () => {
         setActiveTab('overview');
@@ -496,6 +516,7 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
             <div style={styles.tabNav}>
                 <button onClick={() => setActiveTab('overview')} style={{...styles.tabButton, background: activeTab === 'overview' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'overview' ? 'white' : 'var(--text-secondary)'}}>📊 Overview</button>
                 <button onClick={() => setActiveTab('deals')} style={{...styles.tabButton, background: activeTab === 'deals' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'deals' ? 'white' : 'var(--text-secondary)'}}>🔥 Daily Deals</button>
+                <button onClick={() => { setActiveTab('claimed_deals'); fetchClaimedDeals(); }} style={{...styles.tabButton, background: activeTab === 'claimed_deals' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'claimed_deals' ? 'white' : 'var(--text-secondary)'}}> 🎁 Claimed Deals ({claimedDeals.length})</button>
                 <button onClick={() => setActiveTab('wishlist')} style={{...styles.tabButton, background: activeTab === 'wishlist' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'wishlist' ? 'white' : 'var(--text-secondary)'}}>❤️ Wishlist ({stats.wishlistCount})</button>
                 {selectedMode === 'buyer' && (
                     <button onClick={() => setActiveTab('orders')} style={{...styles.tabButton, background: activeTab === 'orders' ? 'var(--primary-color)' : 'var(--light-bg)', color: activeTab === 'orders' ? 'white' : 'var(--text-secondary)'}}>📦 Orders ({stats.orderCount})</button>
@@ -891,6 +912,151 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                                 loadDashboardData();
                             }}
                         />
+                    </div>
+                )}
+
+                {/* ✅ ADD THIS NEW SECTION FOR CLAIMED DEALS */}
+                {activeTab === 'claimed_deals' && (
+                    <div style={styles.claimedDealsSection}>
+                        <div style={styles.claimedDealsHeader}>
+                            <button onClick={goBack} style={styles.backButton}>
+                                ← Back to Dashboard
+                            </button>
+                            <h3>🎁 My Claimed Deals</h3>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+                                Deals you have claimed from Daily Deals
+                            </p>
+                        </div>
+
+                        {claimedDeals.length === 0 ? (
+                            <div style={styles.emptyState}>
+                                <div style={{ fontSize: '48px', marginBottom: '10px' }}>🎁</div>
+                                <h4>No claimed deals yet</h4>
+                                <p>Go to Daily Deals and claim a deal to see it here.</p>
+                                <button 
+                                    onClick={() => setActiveTab('deals')} 
+                                    style={styles.emptyStateButton}
+                                >
+                                    🔥 View Daily Deals
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={styles.claimedDealsList}>
+                                {claimedDeals.map((claim) => (
+                                    <div key={claim.id} style={styles.claimedDealCard}>
+                                        <div style={styles.claimedDealImage}>
+                                            {claim.deal_image ? (
+                                                <img 
+                                                    src={claim.deal_image} 
+                                                    alt={claim.deal_name}
+                                                    style={{
+                                                        width: '100%',
+                                                        height: '100%',
+                                                        objectFit: 'cover',
+                                                        borderRadius: '8px'
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div style={{
+                                                    width: '100%',
+                                                    height: '100%',
+                                                    background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    fontSize: '32px',
+                                                    color: 'white',
+                                                    borderRadius: '8px'
+                                                }}>
+                                                    🎁
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        <div style={styles.claimedDealInfo}>
+                                            <div style={styles.claimedDealName}>
+                                                <strong>{claim.deal_name}</strong>
+                                                <span style={{
+                                                    padding: '2px 10px',
+                                                    borderRadius: '12px',
+                                                    fontSize: '11px',
+                                                    fontWeight: '500',
+                                                    background: claim.status === 'pending' ? '#fff3cd' : 
+                                                            claim.status === 'contacted' ? '#dbeafe' : '#dcfce7',
+                                                    color: claim.status === 'pending' ? '#856404' : 
+                                                        claim.status === 'contacted' ? '#1e40af' : '#166534'
+                                                }}>
+                                                    {claim.status === 'pending' ? '⏳ Pending' :
+                                                    claim.status === 'contacted' ? '📱 Contacted' : '✅ Completed'}
+                                                </span>
+                                            </div>
+                                            
+                                            <div style={styles.claimedDealDetails}>
+                                                <span>💰 ${claim.deal_price || '0'}</span>
+                                                <span>👤 {claim.seller_name || 'Unknown Seller'}</span>
+                                                <span>📅 {new Date(claim.claimed_at).toLocaleDateString()}</span>
+                                            </div>
+                                            
+                                            <div style={styles.claimedDealActions}>
+                                                {claim.seller_phone && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const cleanPhone = claim.seller_phone.replace(/\D/g, '');
+                                                            const finalNumber = cleanPhone.startsWith('263') 
+                                                                ? cleanPhone 
+                                                                : `263${cleanPhone.replace(/^0/, '')}`;
+                                                            const message = encodeURIComponent(
+                                                                `Hi! I claimed your deal "${claim.deal_name}". Is it still available?`
+                                                            );
+                                                            window.open(`https://wa.me/${finalNumber}?text=${message}`, '_blank');
+                                                        }}
+                                                        style={{
+                                                            padding: '8px 16px',
+                                                            background: '#25D366',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '13px',
+                                                            fontWeight: '500',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px'
+                                                        }}
+                                                    >
+                                                        💬 Contact Seller
+                                                    </button>
+                                                )}
+                                                
+                                                {claim.seller_id && (
+                                                    <button
+                                                        onClick={() => {
+                                                            // Navigate to seller profile
+                                                            navigate(`/profile/${claim.seller_id}`);
+                                                        }}
+                                                        style={{
+                                                            padding: '8px 16px',
+                                                            background: '#667eea',
+                                                            color: 'white',
+                                                            border: 'none',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer',
+                                                            fontSize: '13px',
+                                                            fontWeight: '500',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '6px'
+                                                        }}
+                                                    >
+                                                        👤 View Seller
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1385,7 +1551,69 @@ const styles = {
     },
     navSpacer: {
         flex: 1
-    }
+    },
+    claimedDealsSection: {
+        background: 'var(--card-bg)',
+        borderRadius: '12px',
+        padding: '20px',
+        border: '1px solid var(--border-color)',
+        minHeight: '300px'
+    },
+    claimedDealsHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px',
+        marginBottom: '20px',
+        flexWrap: 'wrap'
+    },
+    claimedDealsList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '15px',
+        marginTop: '15px'
+    },
+    claimedDealCard: {
+        display: 'flex',
+        gap: '16px',
+        background: 'var(--light-bg)',
+        borderRadius: '10px',
+        padding: '15px',
+        border: '1px solid var(--border-color)',
+        transition: 'all 0.2s',
+        alignItems: 'center'
+    },
+    claimedDealImage: {
+        width: '80px',
+        height: '80px',
+        borderRadius: '8px',
+        overflow: 'hidden',
+        flexShrink: 0
+    },
+    claimedDealInfo: {
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px'
+    },
+    claimedDealName: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        flexWrap: 'wrap'
+    },
+    claimedDealDetails: {
+        display: 'flex',
+        gap: '15px',
+        flexWrap: 'wrap',
+        fontSize: '13px',
+        color: 'var(--text-secondary)'
+    },
+    claimedDealActions: {
+        display: 'flex',
+        gap: '10px',
+        flexWrap: 'wrap',
+        marginTop: '5px'
+    },
 };
 
 export default UserDashboard;

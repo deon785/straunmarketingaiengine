@@ -1,95 +1,123 @@
-// src/hooks/useRateLimit.js
-import { useState, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+// ============================================
+// src/smartRateLimiter.js - FIXED
+// ============================================
 
-export const useRateLimit = () => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [limits, setLimits] = useState({});
+import { userMonitor } from './userBehaviorMonitor.js';
+import { supabase } from './lib/supabase.js';
 
-  // Check rate limit for a specific action
-  const checkLimit = useCallback(async (action, customLimit = null) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
-      // Define default limits per action
-      const defaultLimits = {
-        SEARCH: { limit: 15, window: 1 },      // 15 searches per minute
-        CONTACT: { limit: 10, window: 0.5 },   // 10 contacts per 30 seconds
-        SAVE: { limit: 20, window: 1 },        // 20 saves per minute
-        PRODUCT_CREATE: { limit: 3, window: 5 }, // 3 products per 5 minutes
-        NOTIFICATION_SEND: { limit: 20, window: 1 } // 20 notifications per minute
-      };
-
-      const config = customLimit || defaultLimits[action] || defaultLimits.SEARCH;
-      
-      const { data, error: rpcError } = await supabase.rpc('check_rate_limit', {
-        p_user_id: user.id,
-        p_action: action,
-        p_limit: config.limit,
-        p_window_minutes: config.window
-      });
-
-      if (rpcError) throw rpcError;
-
-      // Update local state
-      setLimits(prev => ({
-        ...prev,
-        [action]: data
-      }));
-
-      return data;
-
-    } catch (err) {
-      console.error('Rate limit check error:', err);
-      setError(err.message);
-      
-      // Fail open - allow action if rate limit check fails
-      return {
-        allowed: true,
-        attempts: 0,
-        remaining: 999,
-        message: 'Rate limit check failed, proceeding anyway.'
-      };
-    } finally {
-      setLoading(false);
+export class SmartRateLimiter {
+    constructor(behaviorAnalyzer) {
+        this.behaviorAnalyzer = behaviorAnalyzer || userMonitor;
+        // ✅ Default limits per action
+        this.defaultLimits = {
+            CONTACT: { limit: 50, window: 1 },       // 50 contacts per minute
+            SEARCH: { limit: 15, window: 1 },         // 15 searches per minute
+            SAVE_WISHLIST: { limit: 20, window: 1 },  // 20 saves per minute
+            PROFILE_SETUP: { limit: 3, window: 5 },   // 3 setups per 5 minutes
+            NOTIFICATION_SEND: { limit: 20, window: 1 }
+        };
     }
-  }, []);
 
-  // Reset rate limit for an action (admin/developer use)
-  const resetLimit = useCallback(async (action) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
+    // ✅ Main method your app calls
+    async checkAndUpdate(userId, action, options = {}) {
+        // 1. Get the limit config
+        const config = this.defaultLimits[action] || { limit: 10, window: 1 };
+        const limit = options.limit || config.limit;
+        const windowMinutes = options.window || config.window;
 
-      await supabase
-        .from('rate_limits')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('action', action);
+        console.log(`🔍 Rate limit check: ${action} (limit: ${limit}, window: ${windowMinutes}min)`);
 
-      setLimits(prev => {
-        const newLimits = { ...prev };
-        delete newLimits[action];
-        return newLimits;
-      });
+        // 2. Check behavior analyzer first
+        if (this.behaviorAnalyzer?.isBlocked && this.behaviorAnalyzer.isBlocked(userId)) {
+            return {
+                allowed: false,
+                reason: 'Temporarily blocked due to suspicious activity',
+                remaining: 0,
+                total: limit,
+                reset_in: 15 * 60
+            };
+        }
 
-      return { success: true };
-    } catch (err) {
-      console.error('Reset limit error:', err);
-      return { success: false, error: err.message };
+        // 3. Check database rate limit
+        try {
+            // ✅ Call the database function - it returns true/false
+            const { data, error } = await supabase.rpc('check_rate_limit', {
+                p_user_id: userId,
+                p_action: action,
+                p_limit: limit,
+                p_window_minutes: windowMinutes
+            });
+
+            if (error) {
+                console.warn('DB rate limit error:', error);
+                // ✅ Fail open - allow if DB fails
+                return {
+                    allowed: true,
+                    remaining: limit,
+                    total: limit,
+                    reason: 'Rate limit check unavailable'
+                };
+            }
+
+            // ✅ Get current attempts from the table
+            const { data: record } = await supabase
+                .from('rate_limits')
+                .select('attempts')
+                .eq('user_id', userId)
+                .eq('action', action)
+                .maybeSingle();
+
+            const attempts = record?.attempts || 0;
+            const remaining = Math.max(0, limit - attempts);
+            const allowed = data === true;
+
+            console.log(`📊 Rate limit result: ${allowed ? '✅ ALLOWED' : '❌ BLOCKED'} (${remaining}/${limit} remaining)`);
+
+            return {
+                allowed: allowed,
+                remaining: remaining,
+                total: limit,
+                attempts: attempts,
+                reset_in: windowMinutes * 60,
+                reason: allowed ? 'OK' : 'Rate limit exceeded'
+            };
+
+        } catch (error) {
+            console.error('Rate limit check failed:', error);
+            // ✅ Fail open
+            return {
+                allowed: true,
+                remaining: limit,
+                total: limit,
+                reason: 'Error checking rate limit'
+            };
+        }
     }
-  }, []);
 
-  return {
-    checkLimit,
-    resetLimit,
-    limits,
-    loading,
-    error
-  };
-};
+    // ✅ Static methods for backward compatibility
+    static async checkAndLog(userId, action, data = {}, dbLimitConfig = null) {
+        const instance = new SmartRateLimiter();
+        return instance.checkAndUpdate(userId, action, {
+            data: data,
+            limit: dbLimitConfig?.limit,
+            window: dbLimitConfig?.window
+        });
+    }
+
+    static async protectAction(userId, action, callback, options = {}) {
+        const instance = new SmartRateLimiter();
+        const check = await instance.checkAndUpdate(userId, action, {
+            limit: options.limit || 10,
+            window: options.window || 1,
+            data: options.data
+        });
+        
+        if (!check.allowed) {
+            throw new Error(`Action blocked: ${check.reason}`);
+        }
+        
+        return callback();
+    }
+}
+
+export default SmartRateLimiter;

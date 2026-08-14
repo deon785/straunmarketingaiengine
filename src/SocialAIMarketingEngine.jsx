@@ -444,10 +444,7 @@ function SocialAIMarketingEngine() {
     const [showSimilarProducts, setShowSimilarProducts] = useState(false);
     const [similarProductsLoading, setSimilarProductsLoading] = useState(false);
 
-    const [isFilterCollapsed, setIsFilterCollapsed] = useState(true);
-    const [showFilterModal, setShowFilterModal] = useState(false);
     const [showToolsPanel, setShowToolsPanel] = useState(false);
-
     const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [showInstallPrompt, setShowInstallPrompt] = useState(false);
     const [hasBeenPrompted, setHasBeenPrompted] = useState(false);
@@ -1604,6 +1601,365 @@ function SocialAIMarketingEngine() {
         const whatsappUrl = `https://wa.me/?text=${encodedText}`;
         
         window.open(whatsappUrl, '_blank');
+    };
+
+    // ============================================
+    // FILTER DROPDOWN COMPONENT - CLEAN VERSION
+    // ============================================
+    const FilterDropdown = ({ filters, setFilters, onApply, onClear, activeFilterCount }) => {
+        const [isOpen, setIsOpen] = useState(false);
+        const [tempFilters, setTempFilters] = useState(filters);
+        const dropdownRef = useRef(null);
+
+        // Close dropdown when clicking outside
+        useEffect(() => {
+            const handleClickOutside = (event) => {
+                if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                    setIsOpen(false);
+                }
+            };
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }, []);
+
+        // Reset temp filters when opening
+        useEffect(() => {
+            if (isOpen) {
+                setTempFilters(filters);
+            }
+        }, [isOpen, filters]);
+
+        const handleApply = () => {
+            setFilters(tempFilters);
+            onApply && onApply();
+            setIsOpen(false);
+        };
+
+        const handleClear = () => {
+            const cleared = {
+                minPrice: '',
+                maxPrice: '',
+                location: '',
+                sortBy: 'newest'
+            };
+            setTempFilters(cleared);
+            setFilters(cleared);
+            onClear && onClear();
+            setIsOpen(false);
+        };
+
+        return (
+            <div className="filter-dropdown-wrapper" ref={dropdownRef} style={{ position: 'relative' }}>
+                {/* FILTER BUTTON */}
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '10px 16px',
+                        background: isOpen ? '#667eea' : '#2d2d2d',
+                        color: isOpen ? 'white' : '#e0e0e0',
+                        border: isOpen ? '2px solid #667eea' : '2px solid #444',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        transition: 'all 0.2s ease',
+                        height: '48px',
+                        minWidth: '100px',
+                        position: 'relative'
+                    }}
+                >
+                    <span style={{ fontSize: '18px' }}>⚙️</span>
+                    <span>Filters</span>
+                    {activeFilterCount > 0 && (
+                        <span style={{
+                            background: '#ff4444',
+                            color: 'white',
+                            borderRadius: '50%',
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            minWidth: '20px',
+                            textAlign: 'center'
+                        }}>
+                            {activeFilterCount}
+                        </span>
+                    )}
+                    <span style={{
+                        fontSize: '12px',
+                        transform: isOpen ? 'rotate(180deg)' : 'rotate(0)',
+                        transition: 'transform 0.3s ease'
+                    }}>
+                        ▼
+                    </span>
+                </button>
+
+                {/* DROPDOWN OVERLAY - Full width on mobile */}
+                {isOpen && (
+                    <>
+                        {/* Backdrop for mobile */}
+                        <div 
+                            onClick={() => setIsOpen(false)}
+                            style={{
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                background: 'rgba(0,0,0,0.5)',
+                                zIndex: 9998,
+                                display: 'block'
+                            }}
+                        />
+                        
+                        {/* Dropdown Content */}
+                        <div style={{
+                            position: 'fixed',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: '#1a1a1a',
+                            borderRadius: '20px 20px 0 0',
+                            padding: '24px 20px 30px',
+                            zIndex: 9999,
+                            maxHeight: '80vh',
+                            overflow: 'auto',
+                            animation: 'slideUp 0.3s ease',
+                            boxShadow: '0 -10px 40px rgba(0,0,0,0.5)',
+                            borderTop: '2px solid #333'
+                        }}>
+                            {/* Drag Handle */}
+                            <div style={{
+                                width: '40px',
+                                height: '4px',
+                                background: '#555',
+                                borderRadius: '2px',
+                                margin: '0 auto 20px',
+                                cursor: 'pointer'
+                            }} />
+
+                            {/* Header */}
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: '20px'
+                            }}>
+                                <h3 style={{
+                                    margin: 0,
+                                    color: 'white',
+                                    fontSize: '20px',
+                                    fontWeight: 'bold'
+                                }}>
+                                    ⚙️ Filter Products
+                                </h3>
+                                <button
+                                    onClick={() => setIsOpen(false)}
+                                    style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#999',
+                                        fontSize: '24px',
+                                        cursor: 'pointer',
+                                        padding: '4px 8px'
+                                    }}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+
+                            {/* Filter Options */}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                                
+                                {/* Price Range */}
+                                <div>
+                                    <label style={{
+                                        color: '#aaa',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        display: 'block',
+                                        marginBottom: '8px'
+                                    }}>
+                                        💰 Price Range
+                                    </label>
+                                    <div style={{
+                                        display: 'grid',
+                                        gridTemplateColumns: '1fr 1fr',
+                                        gap: '10px'
+                                    }}>
+                                        <input
+                                            type="number"
+                                            placeholder="Min $"
+                                            value={tempFilters.minPrice}
+                                            onChange={(e) => setTempFilters(prev => ({ ...prev, minPrice: e.target.value }))}
+                                            style={{
+                                                padding: '12px 14px',
+                                                background: '#2d2d2d',
+                                                border: '2px solid #444',
+                                                borderRadius: '10px',
+                                                color: 'white',
+                                                fontSize: '15px',
+                                                width: '100%',
+                                                boxSizing: 'border-box'
+                                            }}
+                                        />
+                                        <input
+                                            type="number"
+                                            placeholder="Max $"
+                                            value={tempFilters.maxPrice}
+                                            onChange={(e) => setTempFilters(prev => ({ ...prev, maxPrice: e.target.value }))}
+                                            style={{
+                                                padding: '12px 14px',
+                                                background: '#2d2d2d',
+                                                border: '2px solid #444',
+                                                borderRadius: '10px',
+                                                color: 'white',
+                                                fontSize: '15px',
+                                                width: '100%',
+                                                boxSizing: 'border-box'
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Location */}
+                                <div>
+                                    <label style={{
+                                        color: '#aaa',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        display: 'block',
+                                        marginBottom: '8px'
+                                    }}>
+                                        📍 Location
+                                    </label>
+                                    <input
+                                        type="text"
+                                        placeholder="City or area"
+                                        value={tempFilters.location}
+                                        onChange={(e) => setTempFilters(prev => ({ ...prev, location: e.target.value }))}
+                                        style={{
+                                            padding: '12px 14px',
+                                            background: '#2d2d2d',
+                                            border: '2px solid #444',
+                                            borderRadius: '10px',
+                                            color: 'white',
+                                            fontSize: '15px',
+                                            width: '100%',
+                                            boxSizing: 'border-box'
+                                        }}
+                                    />
+                                </div>
+
+                                {/* Sort By */}
+                                <div>
+                                    <label style={{
+                                        color: '#aaa',
+                                        fontSize: '13px',
+                                        fontWeight: '600',
+                                        display: 'block',
+                                        marginBottom: '8px'
+                                    }}>
+                                        📊 Sort By
+                                    </label>
+                                    <select
+                                        value={tempFilters.sortBy}
+                                        onChange={(e) => setTempFilters(prev => ({ ...prev, sortBy: e.target.value }))}
+                                        style={{
+                                            padding: '12px 14px',
+                                            background: '#2d2d2d',
+                                            border: '2px solid #444',
+                                            borderRadius: '10px',
+                                            color: 'white',
+                                            fontSize: '15px',
+                                            width: '100%',
+                                            boxSizing: 'border-box',
+                                            appearance: 'none',
+                                            WebkitAppearance: 'none'
+                                        }}
+                                    >
+                                        <option value="newest">🆕 Newest First</option>
+                                        <option value="price_low">💰 Price: Low to High</option>
+                                        <option value="price_high">💎 Price: High to Low</option>
+                                    </select>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '2fr 1fr',
+                                    gap: '12px',
+                                    marginTop: '10px'
+                                }}>
+                                    <button
+                                        onClick={handleApply}
+                                        style={{
+                                            padding: '14px',
+                                            background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '12px',
+                                            fontSize: '16px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                    >
+                                        ✅ Apply Filters
+                                    </button>
+                                    <button
+                                        onClick={handleClear}
+                                        style={{
+                                            padding: '14px',
+                                            background: '#2d2d2d',
+                                            color: '#e0e0e0',
+                                            border: '2px solid #444',
+                                            borderRadius: '12px',
+                                            fontSize: '16px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                    >
+                                        ✕ Clear
+                                    </button>
+                                </div>
+
+                                {/* Active filters summary */}
+                                {activeFilterCount > 0 && (
+                                    <div style={{
+                                        padding: '10px 14px',
+                                        background: '#2d2d2d',
+                                        borderRadius: '8px',
+                                        fontSize: '12px',
+                                        color: '#888',
+                                        textAlign: 'center'
+                                    }}>
+                                        {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                )}
+
+                {/* Add keyframe animation if not exists */}
+                {!document.getElementById('filter-animation') && (
+                    <style dangerouslySetInnerHTML={{
+                        __html: `
+                            @keyframes slideUp {
+                                from { transform: translateY(100%); opacity: 0; }
+                                to { transform: translateY(0); opacity: 1; }
+                            }
+                        `
+                    }} />
+                )}
+            </div>
+        );
     };
 
     // Fetch products with seller info     
@@ -3823,6 +4179,7 @@ function SocialAIMarketingEngine() {
                         price: typeof details.price === 'number' ? 
                         Math.max(0, Math.min(details.price, 999999.99)) : 0,
                         description: sanitizedDescription, 
+                        image_url: details.image_url || null, 
                         created_at: new Date().toISOString()
                     };
 
@@ -6173,53 +6530,6 @@ function SocialAIMarketingEngine() {
                     />
                 </div>
 
-                {/* 4. FILTER BUTTON - Left side */}
-                <button 
-                    className={`filter-icon-mobile ${activeFilterCount > 0 ? 'active' : ''}`}
-                    onClick={() => setShowFilterModal(true)}
-                    title="Filter Results"
-                    style={{
-                        position: 'fixed',
-                        bottom: '140px',
-                        left: '20px',
-                        background: activeFilterCount > 0 ? '#4CAF50' : '#667eea',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '50%',
-                        width: '55px',
-                        height: '55px',
-                        fontSize: '24px',
-                        cursor: 'pointer',
-                        zIndex: 1000,
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}
-                >
-                    🔍
-                    {activeFilterCount > 0 && (
-                        <span style={{
-                            position: 'absolute',
-                            top: '-5px',
-                            right: '-5px',
-                            background: '#ff3b30',
-                            color: 'white',
-                            borderRadius: '50%',
-                            width: '22px',
-                            height: '22px',
-                            fontSize: '12px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontWeight: 'bold',
-                            border: '2px solid white'
-                        }}>
-                            {activeFilterCount}
-                        </span>
-                    )}
-                </button>
-
                 {showDashboard && (
                     <UserDashboard 
                         userId={user?.id}
@@ -6270,7 +6580,34 @@ function SocialAIMarketingEngine() {
                                     disabled={searchLoading}
                                 />
                             </div>
-                        
+
+                            {/* ✅ FILTER DROPDOWN */}
+                             <FilterDropdown 
+                                filters={filters}
+                                setFilters={setFilters}
+                                onApply={() => {
+                                    if (productSearch.trim()) {
+                                        findProducts(productSearch, true);
+                                    } else {
+                                        fetchProducts();
+                                    }
+                                }}
+                                onClear={() => {
+                                    setFilters({
+                                        minPrice: '',
+                                        maxPrice: '',
+                                        location: '',
+                                        sortBy: 'newest'
+                                    });
+                                    if (productSearch.trim()) {
+                                        findProducts(productSearch);
+                                    } else {
+                                        fetchProducts();
+                                    }
+                                }}
+                                activeFilterCount={activeFilterCount}
+                            />
+
                             <button 
                                 onClick={handleSearch} 
                                 disabled={searchLoading || !productSearch.trim()}
@@ -6296,121 +6633,6 @@ function SocialAIMarketingEngine() {
                                     {selectedMode === 'seller' ? 'Prospects Found:' : 'Products Found:'} 
                                 </strong> 
                                 {selectedMode === 'seller' ? prospects.length : productsFound.length}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="filter-container">
-                        <button 
-                            onClick={() => setIsFilterCollapsed(!isFilterCollapsed)}
-                            className={`filter-toggle-button ${isFilterCollapsed ? 'collapsed' : ''}`}
-                        >
-                            <span className="filter-icon">🔻</span>
-                            {isFilterCollapsed ? 'Show Filters' : 'Hide Filters'}
-                            {activeFilterCount > 0 && (
-                                <span className="active-filter-indicator">
-                                    {activeFilterCount} Active
-                                </span>
-                            )}
-                        </button>
-                        
-                        <div className={`collapsible-filter-section ${isFilterCollapsed ? 'collapsed' : ''}`}>
-                            <div className="filter-section-content">
-                                <div className="filter-header">
-                                    <h4>
-                                        <span style={{ marginRight: '8px' }}>🔍</span>
-                                        Filter Results
-                                    </h4>
-                                    <button 
-                                        onClick={() => {
-                                            setFilters({
-                                                minPrice: '',
-                                                maxPrice: '',
-                                                location: '',
-                                                sortBy: 'newest',
-                                                category: ''
-                                            });
-                                            if (productSearch.trim()) {
-                                                findProducts(productSearch);
-                                            } else {
-                                                fetchProducts();
-                                            }
-                                        }}
-                                        className="clear-filters-btn"
-                                        disabled={!Object.values(filters).some(val => 
-                                            (typeof val === 'string' && val !== '' && val !== 'newest') || 
-                                            (typeof val === 'number' && val !== 0)
-                                        )}
-                                    >
-                                        Clear Filters
-                                    </button>
-                                </div>
-                                
-                                <div className="filter-grid">
-                                    {/* Price Range */}
-                                    <div className="filter-group">
-                                        <label>Price Range</label>
-                                        <div className="price-inputs">
-                                            <input
-                                                type="number"
-                                                placeholder="Min $"
-                                                value={filters.minPrice}
-                                                onChange={(e) => setFilters(prev => ({...prev, minPrice: e.target.value}))}
-                                                min="0"
-                                            />
-                                            <span style={{ color: 'var(--text-secondary)' }}>to</span>
-                                            <input
-                                                type="number"
-                                                placeholder="Max $"
-                                                value={filters.maxPrice}
-                                                onChange={(e) => setFilters(prev => ({...prev, maxPrice: e.target.value}))}
-                                                min="0"
-                                            />
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Location */}
-                                    <div className="filter-group">
-                                        <label>Location</label>
-                                        <input
-                                            type="text"
-                                            placeholder="City or area"
-                                            value={filters.location}
-                                            onChange={(e) => setFilters(prev => ({...prev, location: e.target.value}))}
-                                        />
-                                    </div>
-                                    
-                                    {/* Sort By */}
-                                    <div className="filter-group">
-                                        <label>Sort By</label>
-                                        <select
-                                            value={filters.sortBy}
-                                            onChange={(e) => setFilters(prev => ({...prev, sortBy: e.target.value}))}
-                                        >
-                                            <option value="newest">Newest First</option>
-                                            <option value="price_low">Price: Low to High</option>
-                                            <option value="price_high">Price: High to Low</option>
-                                        </select>
-                                    </div>
-                                    
-                                    {/* Apply Filters Button */}
-                                    <div className="filter-group">
-                                        <label>&nbsp;</label>
-                                        <button
-                                            onClick={() => {
-                                                if (productSearch.trim()) {
-                                                    findProducts(productSearch, true);
-                                                } else {
-                                                    fetchProducts();
-                                                }
-                                            }}
-                                            className="apply-filters-btn"
-                                            disabled={searchLoading}
-                                        >
-                                            {searchLoading ? 'Applying...' : 'Apply Filters'}
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -7712,287 +7934,59 @@ function SocialAIMarketingEngine() {
                 )}
             </div>
         </div>
-      </div>
+    </div>
 
-        {/* Mobile Filter Modal */}
-        {showFilterModal && (
-            <div 
-                className="filter-modal-overlay" 
-                onClick={() => setShowFilterModal(false)}
-                style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    background: 'rgba(0,0,0,0.5)',
-                    zIndex: 9999,
-                    display: 'flex',
-                    alignItems: 'flex-end',
-                    justifyContent: 'center'
-                }}
-            >
-                <div 
-                    className="filter-modal-content" 
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                        background: 'white',
-                        width: '100%',
-                        maxHeight: '80vh',
-                        borderTopLeftRadius: '20px',
-                        borderTopRightRadius: '20px',
-                        padding: '20px',
-                        overflow: 'auto'
+    <PWAInstallPrompt />
+    
+    <div className="mobile-nav-container">
+    {/* Hamburger Menu Button - Only visible on mobile */}
+    <button 
+        className="mobile-menu-button" 
+        onClick={toggleMobileMenu}
+        aria-label="Menu"
+    >
+        <span className="menu-icon">☰</span>
+    </button>
+
+    </div>
+
+    {/* Chat List Modal */}
+    {showChatList && (
+        <div style={styles.modalOverlay} onClick={() => setShowChatList(false)}>
+            <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+                <ChatList
+                    userId={user?.id}
+                    onSelectChat={(chat) => {
+                        setSelectedChat({
+                            otherUserId: chat.otherUserId,
+                            otherUserName: chat.otherUser?.username,
+                            productId: chat.product_id,
+                            productName: chat.product?.name
+                        });
+                        setShowChatList(false);
+                        setShowChat(true);
                     }}
-                >
-                    <div className="filter-modal-header" style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '20px',
-                        paddingBottom: '15px',
-                        borderBottom: '1px solid #e0e0e0'
-                    }}>
-                        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span>🔍</span>
-                            Filter Results
-                            {activeFilterCount > 0 && (
-                                <span style={{
-                                    marginLeft: '10px',
-                                    background: '#4CAF50',
-                                    color: 'white',
-                                    padding: '2px 8px',
-                                    borderRadius: '10px',
-                                    fontSize: '12px'
-                                }}>
-                                    {activeFilterCount} active
-                                </span>
-                            )}
-                        </h3>
-                        <button 
-                            className="filter-modal-close"
-                            onClick={() => setShowFilterModal(false)}
-                            style={{
-                                background: 'none',
-                                border: 'none',
-                                fontSize: '28px',
-                                cursor: 'pointer',
-                                color: '#666'
-                            }}
-                        >
-                            ×
-                        </button>
-                    </div>
-                    
-                    <div className="filter-modal-body">
-                        <div className="mobile-filter-section">
-                            <div className="filter-grid" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                                {/* Price Range */}
-                                <div className="filter-group">
-                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>💰 Price Range</label>
-                                    <div className="price-inputs" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <div style={{ flex: 1 }}>
-                                            <input
-                                                type="number"
-                                                placeholder="Min $"
-                                                value={filters.minPrice}
-                                                onChange={(e) => setFilters(prev => ({...prev, minPrice: e.target.value}))}
-                                                min="0"
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '12px',
-                                                    border: '2px solid #ddd',
-                                                    borderRadius: '8px'
-                                                }}
-                                            />
-                                        </div>
-                                        <span style={{ color: '#666', margin: '0 5px' }}>to</span>
-                                        <div style={{ flex: 1 }}>
-                                            <input
-                                                type="number"
-                                                placeholder="Max $"
-                                                value={filters.maxPrice}
-                                                onChange={(e) => setFilters(prev => ({...prev, maxPrice: e.target.value}))}
-                                                min="0"
-                                                style={{
-                                                    width: '100%',
-                                                    padding: '12px',
-                                                    border: '2px solid #ddd',
-                                                    borderRadius: '8px'
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                {/* Location */}
-                                <div className="filter-group">
-                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>📍 Location</label>
-                                    <input
-                                        type="text"
-                                        placeholder="City or area"
-                                        value={filters.location}
-                                        onChange={(e) => setFilters(prev => ({...prev, location: e.target.value}))}
-                                        style={{
-                                            width: '100%',
-                                            padding: '12px',
-                                            border: '2px solid #ddd',
-                                            borderRadius: '8px',
-                                            fontSize: '16px'
-                                        }}
-                                    />
-                                </div>
-                                
-                                {/* Sort By */}
-                                <div className="filter-group">
-                                    <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>📊 Sort By</label>
-                                    <select
-                                        value={filters.sortBy}
-                                        onChange={(e) => setFilters(prev => ({...prev, sortBy: e.target.value}))}
-                                        style={{
-                                            width: '100%',
-                                            padding: '12px',
-                                            border: '2px solid #ddd',
-                                            borderRadius: '8px',
-                                            fontSize: '16px',
-                                            background: 'white'
-                                        }}
-                                    >
-                                        <option value="newest">🆕 Newest First</option>
-                                        <option value="price_low">💰 Price: Low to High</option>
-                                        <option value="price_high">💎 Price: High to Low</option>
-                                    </select>
-                                </div>
-                                
-                                {/* Action Buttons */}
-                                <div style={{ 
-                                    display: 'flex', 
-                                    gap: '10px', 
-                                    marginTop: '20px',
-                                    position: 'sticky',
-                                    bottom: '0',
-                                    background: 'white',
-                                    padding: '15px 0',
-                                    borderTop: '1px solid #e0e0e0'
-                                }}>
-                                    <button
-                                        onClick={() => {
-                                            setFilters({
-                                                minPrice: '',
-                                                maxPrice: '',
-                                                location: '',
-                                                sortBy: 'newest',
-                                                category: ''
-                                            });
-                                        }}
-                                        className="clear-filters-btn"
-                                        disabled={activeFilterCount === 0}
-                                        style={{ 
-                                            flex: 1,
-                                            padding: '14px',
-                                            background: activeFilterCount === 0 ? '#ccc' : '#ff4444',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            fontWeight: 'bold',
-                                            fontSize: '16px',
-                                            cursor: activeFilterCount === 0 ? 'not-allowed' : 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: '8px'
-                                        }}
-                                    >
-                                        ❌ Clear All
-                                    </button>
-                                    
-                                    <button
-                                        onClick={() => {
-                                            if (productSearch.trim()) {
-                                                findProducts(productSearch, true);
-                                            } else {
-                                                fetchProducts();
-                                            }
-                                            setShowFilterModal(false);
-                                        }}
-                                        className="apply-filters-btn"
-                                        disabled={searchLoading}
-                                        style={{ 
-                                            flex: 1,
-                                            padding: '14px',
-                                            background: searchLoading ? '#ccc' : '#4CAF50',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            fontWeight: 'bold',
-                                            fontSize: '16px',
-                                            cursor: searchLoading ? 'not-allowed' : 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            gap: '8px'
-                                        }}
-                                    >
-                                        {searchLoading ? '⏳ Applying...' : '✅ Apply Filters'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                    onClose={() => setShowChatList(false)}
+                />
             </div>
-        )}
-        <PWAInstallPrompt />
-       
-        <div className="mobile-nav-container">
-        {/* Hamburger Menu Button - Only visible on mobile */}
-        <button 
-            className="mobile-menu-button" 
-            onClick={toggleMobileMenu}
-            aria-label="Menu"
-        >
-            <span className="menu-icon">☰</span>
-        </button>
-
         </div>
+    )}
 
-        {/* Chat List Modal */}
-        {showChatList && (
-            <div style={styles.modalOverlay} onClick={() => setShowChatList(false)}>
-                <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
-                    <ChatList
-                        userId={user?.id}
-                        onSelectChat={(chat) => {
-                            setSelectedChat({
-                                otherUserId: chat.otherUserId,
-                                otherUserName: chat.otherUser?.username,
-                                productId: chat.product_id,
-                                productName: chat.product?.name
-                            });
-                            setShowChatList(false);
-                            setShowChat(true);
-                        }}
-                        onClose={() => setShowChatList(false)}
-                    />
-                </div>
+    {/* Chat Modal */}
+    {showChat && selectedChat && (
+        <div style={styles.modalOverlay} onClick={() => setShowChat(false)}>
+            <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+                <ChatSystem
+                    currentUserId={user?.id}
+                    otherUserId={selectedChat.otherUserId}
+                    otherUserName={selectedChat.otherUserName}
+                    productId={selectedChat.productId}
+                    productName={selectedChat.productName}
+                    onClose={() => setShowChat(false)}
+                />
             </div>
-        )}
-
-        {/* Chat Modal */}
-        {showChat && selectedChat && (
-            <div style={styles.modalOverlay} onClick={() => setShowChat(false)}>
-                <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
-                    <ChatSystem
-                        currentUserId={user?.id}
-                        otherUserId={selectedChat.otherUserId}
-                        otherUserName={selectedChat.otherUserName}
-                        productId={selectedChat.productId}
-                        productName={selectedChat.productName}
-                        onClose={() => setShowChat(false)}
-                    />
-                </div>
-            </div>
-        )}
+        </div>
+    )}
     <InterestPopup />
     </div>
      

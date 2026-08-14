@@ -241,7 +241,7 @@ const RecommendationsSection = ({
         // ✅ Safe data extraction
         const productName = product.name || product.product_name || 'Unnamed Product';
         const productPrice = product.price || product.product_price || 0;
-        const productImage = product.image_url || product.product_image || null;
+        const productImage = product.image_url || product.image || product.product_image || null;
         const productLocation = product.location || product.seller_location || 'Location N/A';
         const productPhone = product.phone_number || product.seller_phone || null;
         const productSeller = product.profiles?.username || product.seller?.username || null;

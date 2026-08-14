@@ -493,26 +493,187 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         console.log('🎯 Claiming deal:', deal.product?.name);
         
         if (deal.sold_count >= deal.max_quantity) {
-            alert('❌ This deal is sold out!');
+            toast?.error('❌ This deal is sold out!');
             return;
         }
 
         setClaiming(prev => ({ ...prev, [deal.id]: true }));
 
-        setTimeout(() => {
-            alert(`🎉 Deal claimed! You selected "${deal.product?.name}"`);
-            console.log('✅ Deal claimed successfully:', deal.product?.name);
-            
-            setDeals(prev => prev.map(d => 
-                d.id === deal.id ? { ...d, sold_count: d.sold_count + 1 } : d
-            ));
-            
-            if (onClaimDeal) {
-                onClaimDeal(deal);
+        try {
+            // ✅ Get current user's profile
+            const { data: currentUser, error: userError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .maybeSingle();
+
+            if (userError) throw userError;
+
+            // ✅ Get seller's profile
+            const { data: seller, error: sellerError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', deal.product.seller_id)
+                .maybeSingle();
+
+            if (sellerError) throw sellerError;
+
+            // ✅ Determine if user is buyer or seller
+            const isBuyer = currentUser?.is_buyer === true;
+            const isSeller = currentUser?.is_seller === true;
+
+            // ✅ SCENARIO 1: Buyer claims deal
+            if (isBuyer) {
+                // 1. Create claimed_deal record
+                const { error: claimError } = await supabase
+                    .from('claimed_deals')
+                    .insert({
+                        user_id: userId,
+                        deal_id: deal.product_id,
+                        deal_name: deal.product?.name,
+                        deal_price: deal.product?.price,
+                        deal_image: deal.product?.image_url,
+                        seller_id: deal.product.seller_id,
+                        seller_name: seller?.username || 'Seller',
+                        seller_phone: seller?.phone_number || deal.product?.phone_number,
+                        claimed_at: new Date().toISOString(),
+                        status: 'pending'
+                    });
+
+                if (claimError) throw claimError;
+
+                // 2. Send notification to seller
+                await supabase.from('notifications').insert({
+                    user_id: deal.product.seller_id,
+                    sender_id: userId,
+                    message: `🎉 A buyer claimed your daily deal: "${deal.product?.name}"!`,
+                    link_type: 'deal_claimed',
+                    buyer_phone: currentUser?.phone_number || 'No phone provided',
+                    product_image: deal.product?.image_url,
+                    is_read: false,
+                    created_at: new Date().toISOString()
+                });
+
+                // 3. Update deal count
+                setDeals(prev => prev.map(d => 
+                    d.id === deal.id ? { ...d, sold_count: d.sold_count + 1 } : d
+                ));
+
+                toast?.success('🎉 Deal claimed! Seller has been notified.');
+                
+                if (onClaimDeal) {
+                    onClaimDeal(deal);
+                }
             }
-            
+
+            // ✅ SCENARIO 2: Seller claims deal (sellers claiming their own deal)
+            else if (isSeller && deal.product.seller_id === userId) {
+                // ✅ Get ALL buyers who claimed this deal
+                const { data: buyers, error: buyersError } = await supabase
+                    .from('claimed_deals')
+                    .select(`
+                        *,
+                        buyer:user_id (
+                            user_id,
+                            username,
+                            phone_number,
+                            location,
+                            is_buyer
+                        )
+                    `)
+                    .eq('deal_id', deal.product_id)
+                    .eq('status', 'pending');
+
+                if (buyersError) {
+                    console.error('Error fetching buyers:', buyersError);
+                    toast?.error('Failed to fetch buyer information');
+                    return;
+                }
+
+                if (!buyers || buyers.length === 0) {
+                    toast?.info('No buyers have claimed this deal yet.');
+                    return;
+                }
+
+                // ✅ Show buyer list with contact options
+                const buyerList = buyers.map((b, i) => 
+                    `${i + 1}. ${b.buyer?.username || 'Anonymous'} - 📱 ${b.buyer?.phone_number || 'No phone'}`
+                ).join('\n');
+
+                const showContact = window.confirm(
+                    `📋 Buyers who claimed your deal:\n\n` +
+                    `${buyerList}\n\n` +
+                    `Click OK to contact the first buyer via WhatsApp.`
+                );
+
+                if (showContact && buyers[0]?.buyer?.phone_number) {
+                    const cleanPhone = buyers[0].buyer.phone_number.replace(/\D/g, '');
+                    const finalNumber = cleanPhone.startsWith('263') 
+                        ? cleanPhone 
+                        : `263${cleanPhone.replace(/^0/, '')}`;
+                    const message = encodeURIComponent(
+                        `Hi! I saw you claimed my deal "${deal.product?.name}". Are you still interested?`
+                    );
+                    window.open(`https://wa.me/${finalNumber}?text=${message}`, '_blank');
+                    
+                    // ✅ Mark first buyer as contacted
+                    await supabase
+                        .from('claimed_deals')
+                        .update({ status: 'contacted' })
+                        .eq('id', buyers[0].id);
+                }
+
+                // ✅ Update local state
+                setDeals(prev => prev.map(d => 
+                    d.id === deal.id ? { ...d, sold_count: d.sold_count + 1 } : d
+                ));
+
+            }
+
+            // ✅ SCENARIO 3: Seller claims another seller's deal
+            else if (isSeller) {
+                // Seller claiming another seller's deal - create notification
+                await supabase.from('notifications').insert({
+                    user_id: deal.product.seller_id,
+                    sender_id: userId,
+                    message: `👋 Another seller is interested in your deal: "${deal.product?.name}"!`,
+                    link_type: 'deal_interest',
+                    buyer_phone: currentUser?.phone_number || 'No phone provided',
+                    product_image: deal.product?.image_url,
+                    is_read: false,
+                    created_at: new Date().toISOString()
+                });
+
+                toast?.success('✅ Seller notified!');
+            }
+
+            // ✅ Show seller contact info
+            if (seller?.phone_number) {
+                const showContact = window.confirm(
+                    `📱 Contact Seller?\n\n` +
+                    `Name: ${seller?.username || 'Seller'}\n` +
+                    `Phone: ${seller?.phone_number}\n\n` +
+                    `Click OK to WhatsApp them.`
+                );
+                
+                if (showContact) {
+                    const cleanPhone = seller.phone_number.replace(/\D/g, '');
+                    const finalNumber = cleanPhone.startsWith('263') 
+                        ? cleanPhone 
+                        : `263${cleanPhone.replace(/^0/, '')}`;
+                    const message = encodeURIComponent(
+                        `Hi! I'm interested in your deal: "${deal.product?.name}"`
+                    );
+                    window.open(`https://wa.me/${finalNumber}?text=${message}`, '_blank');
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Error claiming deal:', error);
+            toast?.error('Failed to claim deal. Please try again.');
+        } finally {
             setClaiming(prev => ({ ...prev, [deal.id]: false }));
-        }, 500);
+        }
     };
 
     // ✅ OPTIMIZED: Load more deals with preloading
@@ -552,12 +713,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         const [imgError, setImgError] = useState(false);
         const [isLoading, setIsLoading] = useState(true);
         
+        // ✅ Handle both 'image_url' and 'image' field names
+        const imageUrl = product?.image_url || product?.image || null;
+        const hasImage = imageUrl && typeof imageUrl === 'string' && imageUrl.trim() !== '';
+        
         const getInitialLetter = () => {
             if (!product?.name) return '?';
             return product.name.charAt(0).toUpperCase();
         };
-        
-        const hasImage = product?.image_url && typeof product.image_url === 'string' && product.image_url.trim() !== '';
         
         if (!hasImage || imgError) {
             return (
@@ -592,7 +755,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 background: '#1a1a1a',
                 minHeight: '180px'
             }}>
-                {/* ✅ Background placeholder - shows immediately, no blinking */}
+                {/* Background placeholder */}
                 <div style={{
                     position: 'absolute',
                     top: 0,
@@ -615,9 +778,9 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                     </div>
                 </div>
                 
-                {/* ✅ Image fades in smoothly - no blinking */}
+                {/* Image - use imageUrl variable */}
                 <img 
-                    src={getOptimizedImageUrl(product.image_url, 200, 150)} 
+                    src={getOptimizedImageUrl(imageUrl, 200, 150)} 
                     alt={product.name || 'Product'}
                     style={{
                         position: 'absolute',
