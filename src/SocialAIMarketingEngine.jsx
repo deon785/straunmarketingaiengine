@@ -108,9 +108,10 @@ const safeString = (str) => {
 };
 
 const safeNumber = (num) => {
-  if (typeof num === 'number' && !isNaN(num)) return num;
-  if (typeof num === 'string' && !isNaN(Number(num))) return Number(num);
-  return 0;
+    if (num === undefined || num === null) return 0;
+    if (typeof num === 'number' && !isNaN(num)) return num;
+    if (typeof num === 'string' && !isNaN(Number(num))) return Number(num);
+    return 0;
 };
 
 const safeObject = (obj) => {
@@ -438,7 +439,6 @@ function SocialAIMarketingEngine() {
     const [isAdmin, setIsAdmin] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
  
-    const [limits, setLimits] = useState({});
     const [showSafetyWarning, setShowSafetyWarning] = useState(false);
     const [similarProducts, setSimilarProducts] = useState([]);
     const [showSimilarProducts, setShowSimilarProducts] = useState(false);
@@ -475,6 +475,14 @@ function SocialAIMarketingEngine() {
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [tempLocation, setTempLocation] = useState('');
     const [tempPhone, setTempPhone] = useState('');
+
+    const [limits, setLimits] = useState({
+        CONTACT: { remaining: 50, total: 50 },
+        SEARCH: { remaining: 15, total: 15 },
+        SAVE_WISHLIST: { remaining: 20, total: 20 },
+        PROFILE_SETUP: { remaining: 3, total: 3 },
+        NOTIFICATION_SEND: { remaining: 20, total: 20 }
+    });
 
     const [filters, setFilters] = useState({
     minPrice: '',
@@ -1427,134 +1435,148 @@ function SocialAIMarketingEngine() {
         return clean.length >= 9 && clean.length <= 12;
     };
 
-    // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---  
+    // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---   
     const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
-        setGlobalLoading(true);
-        setGlobalLoadingMessage('Opening WhatsApp...');
-
-        const engine = new RecommendationEngine(user.id);
-        await engine.trackBehavior(product?.id, 'contact');
-
-        await supabase.rpc('track_user_activity', {
-            p_user_id: user.id,
-            p_activity_type: 'contact',
-            p_metadata: { targetUserId: targetUserId, type: type },
-            p_message: `User contacted ${type} about ${product?.name || 'product'}` 
-        });
-
-        if (!smartLimiterInstance) {
-            initializeRateLimiter();
-        }
-
+        // ✅ 1. Check if user is logged in FIRST
         if (!user) {
             alert('Please log in to contact');
             return;
         }
 
-        let check;
-        try {
-            check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
-            targetId: targetUserId,
-            type: type,
-            product: product?.name,
-            limit: 50,      // ✅ Increased from default 10
-            window: 1    
-            });
-
-            if (!check.allowed) {
-            alert(`Contact blocked: ${check.reason}`);
-            return;
-            }
-        } catch (error) {
-            console.error('Rate limit check error:', error);
+        // ✅ 2. Initialize rate limiter if needed
+        if (!smartLimiterInstance) {
+            initializeRateLimiter();
         }
 
+        // ✅ 3. Validate phone number FIRST
+        if (!targetPhoneNumber || !validatePhoneNumber(targetPhoneNumber)) {
+            alert("This user has an invalid phone number. We cannot connect you.");
+            return;
+        }
+
+        setGlobalLoading(true);
+        setGlobalLoadingMessage('Opening WhatsApp...');
         setOpeningWhatsApp(true);
 
-        if (!validatePhoneNumber(targetPhoneNumber)) {
-            alert("This user has an invalid phone number. We cannot connect you.");
-            setOpeningWhatsApp(false);
-            return;
-        }
-
         try {
-            if (behaviorAnalyzerInstance) {
-            behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+            // ✅ 4. SINGLE RATE LIMIT CHECK - ONLY ONCE
+            const check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
                 targetId: targetUserId,
-                contactType: type,
-                productName: product?.name
+                type: type,
+                product: product?.name,
+                limit: 50,
+                window: 1    
             });
+
+            // ✅ 5. Check if allowed
+            if (!check.allowed) {
+                alert(`Contact blocked: ${check.reason}. Please wait ${check.reset_in || 60} seconds before trying again.`);
+                setOpeningWhatsApp(false);
+                setGlobalLoading(false);
+                setGlobalLoadingMessage('');
+                return;
             }
 
+            // ✅ 6. Track behavior
+            const engine = new RecommendationEngine(user.id);
+            await engine.trackBehavior(product?.id, 'contact');
+
+            await supabase.rpc('track_user_activity', {
+                p_user_id: user.id,
+                p_activity_type: 'contact',
+                p_metadata: { targetUserId: targetUserId, type: type },
+                p_message: `User contacted ${type} about ${product?.name || 'product'}` 
+            });
+
+            // ✅ 7. Record in behavior analyzer
+            if (behaviorAnalyzerInstance) {
+                behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+                    targetId: targetUserId,
+                    contactType: type,
+                    productName: product?.name
+                });
+            }
+
+            // ✅ 8. Get current user
             const { data: { user: currentUser } } = await supabase.auth.getUser();
             
-            // ✅ FIX: Get the SENDER's (current user's) phone number from profiles
-            const { data: senderProfile, error: senderError } = await supabase
-            .from('profiles')
-            .select('phone_number')
-            .eq('user_id', currentUser?.id)
-            .single();
+            // ✅ 9. Get sender's phone number
+            const { data: senderProfile } = await supabase
+                .from('profiles')
+                .select('phone_number')
+                .eq('user_id', currentUser?.id)
+                .single();
 
             const senderPhone = senderProfile?.phone_number || null;
 
-            // ✅ Create notification with sender's phone number
+            // ✅ 10. Create notification
             await supabase.from('notifications').insert([
-            { 
-                user_id: targetUserId,
-                sender_id: currentUser?.id,
-                product_id: product?.id,
-                buyer_phone: senderPhone,  // ✅ Sender's phone number
-                product_image: product?.image_url,
-                message: type === 'seller'
-                ? `📢 New buyer interested in ${targetName}!` 
-                : `👋 Seller is reaching out about ${targetName}!`,
-                link_type: type,
-                is_read: false,
-                created_at: new Date().toISOString()
-            }
+                { 
+                    user_id: targetUserId,
+                    sender_id: currentUser?.id,
+                    product_id: product?.id,
+                    buyer_phone: senderPhone,
+                    product_image: product?.image_url,
+                    message: type === 'seller'
+                        ? `📢 New buyer interested in ${targetName}!` 
+                        : `👋 Seller is reaching out about ${targetName}!`,
+                    link_type: type,
+                    is_read: false,
+                    created_at: new Date().toISOString()
+                }
             ]);
 
             await UserActivityTracker.trackContact(
-            user.id,
-            targetUserId,
-            product?.id,
-            'whatsapp',
-            true,
-            null
+                user.id,
+                targetUserId,
+                product?.id,
+                'whatsapp',
+                true,
+                null
             );
 
-            if (!targetPhoneNumber) {
-            alert('Phone number not available');
-            setOpeningWhatsApp(false);
-            return;
+            // ✅ 11. Clean and format phone number
+            const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
+            let finalNumber;
+            if (cleanNumber.startsWith('263')) {
+                finalNumber = cleanNumber;
+            } else if (cleanNumber.startsWith('0')) {
+                finalNumber = `263${cleanNumber.substring(1)}`;
+            } else {
+                finalNumber = `263${cleanNumber}`;
             }
 
-            const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
-            const finalNumber = cleanNumber.startsWith('263') 
-            ? cleanNumber 
-            : `263${cleanNumber.replace(/^0/, '')}`;
-
+            // ✅ 12. Encode message
             const message = encodeURIComponent(
-            type === 'seller' 
-                ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
-                : `Hi! I'm interested in your ${targetName}. Is it still available?`
+                type === 'seller' 
+                    ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
+                    : `Hi! I'm interested in your ${targetName}. Is it still available?`
             );
 
+            // ✅ 13. Open WhatsApp
             const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
             window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
 
+            // ✅ 14. Track with Google Analytics
             if (typeof ReactGA !== 'undefined') {
-            ReactGA.event({
-                category: 'Conversion',
-                action: 'WhatsApp Contact Clicked',
-                label: type
-            });
+                ReactGA.event({
+                    category: 'Conversion',
+                    action: 'WhatsApp Contact Clicked',
+                    label: type
+                });
             }
 
+            // ✅ 15. Update limits display
             setLimits(prev => ({
-            ...prev,
-            CONTACT: check || { remaining: 4, total: 5 }
+                ...prev,
+                CONTACT: {
+                    remaining: check.remaining,
+                    total: check.total
+                }
             }));
+
+            // ✅ 16. Show success message
+            showToastNotification(`✅ WhatsApp opened for ${targetName}`);
 
         } catch (error) {
             console.error('Error in handleContact:', error);
@@ -1604,7 +1626,7 @@ function SocialAIMarketingEngine() {
     };
 
     // ============================================
-    // FILTER DROPDOWN COMPONENT - CLEAN VERSION
+    // COMPACT FILTER DROPDOWN - MOBILE FRIENDLY
     // ============================================
     const FilterDropdown = ({ filters, setFilters, onApply, onClear, activeFilterCount }) => {
         const [isOpen, setIsOpen] = useState(false);
@@ -1631,7 +1653,7 @@ function SocialAIMarketingEngine() {
 
         const handleApply = () => {
             setFilters(tempFilters);
-            onApply && onApply();
+            if (onApply) onApply();
             setIsOpen(false);
         };
 
@@ -1644,59 +1666,57 @@ function SocialAIMarketingEngine() {
             };
             setTempFilters(cleared);
             setFilters(cleared);
-            onClear && onClear();
+            if (onClear) onClear();
             setIsOpen(false);
         };
 
         return (
-            <div className="filter-dropdown-wrapper" ref={dropdownRef} style={{ position: 'relative' }}>
-                {/* FILTER BUTTON */}
+            <div className="filter-dropdown-wrapper" ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+                {/* 🔽 FILTER BUTTON - ICON ONLY, SMALLER */}
                 <button
                     onClick={() => setIsOpen(!isOpen)}
                     style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '8px',
-                        padding: '10px 16px',
+                        justifyContent: 'center',
+                        padding: '8px',
                         background: isOpen ? '#667eea' : '#2d2d2d',
                         color: isOpen ? 'white' : '#e0e0e0',
                         border: isOpen ? '2px solid #667eea' : '2px solid #444',
-                        borderRadius: '12px',
+                        borderRadius: '10px',
                         cursor: 'pointer',
-                        fontSize: '14px',
-                        fontWeight: '600',
+                        fontSize: '24px',  /* ← Increased from 18px to 24px for bigger icon */
                         transition: 'all 0.2s ease',
-                        height: '48px',
-                        minWidth: '100px',
+                        width: '48px',     /* ← Slightly wider */
+                        height: '48px',    /* ← Slightly taller */
+                        minWidth: '48px',
                         position: 'relative'
                     }}
+                    title="Filter Products"
                 >
-                    <span style={{ fontSize: '18px' }}>⚙️</span>
-                    <span>Filters</span>
+                    <span>🔻</span>  {/* ← DOWN ARROW - bigger and more visible */}
                     {activeFilterCount > 0 && (
                         <span style={{
+                            position: 'absolute',
+                            top: '-6px',
+                            right: '-6px',
                             background: '#ff4444',
                             color: 'white',
                             borderRadius: '50%',
-                            padding: '2px 8px',
-                            fontSize: '11px',
+                            padding: '1px 6px',
+                            fontSize: '10px',
                             fontWeight: 'bold',
-                            minWidth: '20px',
-                            textAlign: 'center'
+                            minWidth: '18px',
+                            textAlign: 'center',
+                            lineHeight: '18px',
+                            boxShadow: '0 2px 6px rgba(255,68,68,0.4)'
                         }}>
                             {activeFilterCount}
                         </span>
                     )}
-                    <span style={{
-                        fontSize: '12px',
-                        transform: isOpen ? 'rotate(180deg)' : 'rotate(0)',
-                        transition: 'transform 0.3s ease'
-                    }}>
-                        ▼
-                    </span>
                 </button>
 
-                {/* DROPDOWN OVERLAY - Full width on mobile */}
+                {/* DROPDOWN CONTAINER */}
                 {isOpen && (
                     <>
                         {/* Backdrop for mobile */}
@@ -1708,23 +1728,23 @@ function SocialAIMarketingEngine() {
                                 left: 0,
                                 right: 0,
                                 bottom: 0,
-                                background: 'rgba(0,0,0,0.5)',
+                                background: 'rgba(0,0,0,0.4)',
                                 zIndex: 9998,
                                 display: 'block'
                             }}
                         />
                         
-                        {/* Dropdown Content */}
+                        {/* Dropdown Content - Slides from bottom on mobile */}
                         <div style={{
                             position: 'fixed',
                             bottom: 0,
                             left: 0,
                             right: 0,
                             background: '#1a1a1a',
-                            borderRadius: '20px 20px 0 0',
-                            padding: '24px 20px 30px',
+                            borderRadius: '16px 16px 0 0',
+                            padding: '20px 20px 30px',
                             zIndex: 9999,
-                            maxHeight: '80vh',
+                            maxHeight: '75vh',
                             overflow: 'auto',
                             animation: 'slideUp 0.3s ease',
                             boxShadow: '0 -10px 40px rgba(0,0,0,0.5)',
@@ -1736,7 +1756,7 @@ function SocialAIMarketingEngine() {
                                 height: '4px',
                                 background: '#555',
                                 borderRadius: '2px',
-                                margin: '0 auto 20px',
+                                margin: '0 auto 16px',
                                 cursor: 'pointer'
                             }} />
 
@@ -1745,12 +1765,12 @@ function SocialAIMarketingEngine() {
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
-                                marginBottom: '20px'
+                                marginBottom: '16px'
                             }}>
                                 <h3 style={{
                                     margin: 0,
                                     color: 'white',
-                                    fontSize: '20px',
+                                    fontSize: '18px',
                                     fontWeight: 'bold'
                                 }}>
                                     ⚙️ Filter Products
@@ -1761,7 +1781,7 @@ function SocialAIMarketingEngine() {
                                         background: 'none',
                                         border: 'none',
                                         color: '#999',
-                                        fontSize: '24px',
+                                        fontSize: '22px',
                                         cursor: 'pointer',
                                         padding: '4px 8px'
                                     }}
@@ -1771,23 +1791,23 @@ function SocialAIMarketingEngine() {
                             </div>
 
                             {/* Filter Options */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                                 
                                 {/* Price Range */}
                                 <div>
                                     <label style={{
                                         color: '#aaa',
-                                        fontSize: '13px',
+                                        fontSize: '12px',
                                         fontWeight: '600',
                                         display: 'block',
-                                        marginBottom: '8px'
+                                        marginBottom: '5px'
                                     }}>
                                         💰 Price Range
                                     </label>
                                     <div style={{
                                         display: 'grid',
                                         gridTemplateColumns: '1fr 1fr',
-                                        gap: '10px'
+                                        gap: '8px'
                                     }}>
                                         <input
                                             type="number"
@@ -1795,12 +1815,12 @@ function SocialAIMarketingEngine() {
                                             value={tempFilters.minPrice}
                                             onChange={(e) => setTempFilters(prev => ({ ...prev, minPrice: e.target.value }))}
                                             style={{
-                                                padding: '12px 14px',
+                                                padding: '10px 12px',
                                                 background: '#2d2d2d',
                                                 border: '2px solid #444',
-                                                borderRadius: '10px',
+                                                borderRadius: '8px',
                                                 color: 'white',
-                                                fontSize: '15px',
+                                                fontSize: '14px',
                                                 width: '100%',
                                                 boxSizing: 'border-box'
                                             }}
@@ -1811,12 +1831,12 @@ function SocialAIMarketingEngine() {
                                             value={tempFilters.maxPrice}
                                             onChange={(e) => setTempFilters(prev => ({ ...prev, maxPrice: e.target.value }))}
                                             style={{
-                                                padding: '12px 14px',
+                                                padding: '10px 12px',
                                                 background: '#2d2d2d',
                                                 border: '2px solid #444',
-                                                borderRadius: '10px',
+                                                borderRadius: '8px',
                                                 color: 'white',
-                                                fontSize: '15px',
+                                                fontSize: '14px',
                                                 width: '100%',
                                                 boxSizing: 'border-box'
                                             }}
@@ -1828,10 +1848,10 @@ function SocialAIMarketingEngine() {
                                 <div>
                                     <label style={{
                                         color: '#aaa',
-                                        fontSize: '13px',
+                                        fontSize: '12px',
                                         fontWeight: '600',
                                         display: 'block',
-                                        marginBottom: '8px'
+                                        marginBottom: '5px'
                                     }}>
                                         📍 Location
                                     </label>
@@ -1841,12 +1861,12 @@ function SocialAIMarketingEngine() {
                                         value={tempFilters.location}
                                         onChange={(e) => setTempFilters(prev => ({ ...prev, location: e.target.value }))}
                                         style={{
-                                            padding: '12px 14px',
+                                            padding: '10px 12px',
                                             background: '#2d2d2d',
                                             border: '2px solid #444',
-                                            borderRadius: '10px',
+                                            borderRadius: '8px',
                                             color: 'white',
-                                            fontSize: '15px',
+                                            fontSize: '14px',
                                             width: '100%',
                                             boxSizing: 'border-box'
                                         }}
@@ -1857,10 +1877,10 @@ function SocialAIMarketingEngine() {
                                 <div>
                                     <label style={{
                                         color: '#aaa',
-                                        fontSize: '13px',
+                                        fontSize: '12px',
                                         fontWeight: '600',
                                         display: 'block',
-                                        marginBottom: '8px'
+                                        marginBottom: '5px'
                                     }}>
                                         📊 Sort By
                                     </label>
@@ -1868,12 +1888,12 @@ function SocialAIMarketingEngine() {
                                         value={tempFilters.sortBy}
                                         onChange={(e) => setTempFilters(prev => ({ ...prev, sortBy: e.target.value }))}
                                         style={{
-                                            padding: '12px 14px',
+                                            padding: '10px 12px',
                                             background: '#2d2d2d',
                                             border: '2px solid #444',
-                                            borderRadius: '10px',
+                                            borderRadius: '8px',
                                             color: 'white',
-                                            fontSize: '15px',
+                                            fontSize: '14px',
                                             width: '100%',
                                             boxSizing: 'border-box',
                                             appearance: 'none',
@@ -1890,18 +1910,18 @@ function SocialAIMarketingEngine() {
                                 <div style={{
                                     display: 'grid',
                                     gridTemplateColumns: '2fr 1fr',
-                                    gap: '12px',
-                                    marginTop: '10px'
+                                    gap: '10px',
+                                    marginTop: '6px'
                                 }}>
                                     <button
                                         onClick={handleApply}
                                         style={{
-                                            padding: '14px',
+                                            padding: '12px',
                                             background: 'linear-gradient(135deg, #667eea, #764ba2)',
                                             color: 'white',
                                             border: 'none',
-                                            borderRadius: '12px',
-                                            fontSize: '16px',
+                                            borderRadius: '10px',
+                                            fontSize: '15px',
                                             fontWeight: 'bold',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s ease'
@@ -1909,17 +1929,17 @@ function SocialAIMarketingEngine() {
                                         onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
                                         onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                     >
-                                        ✅ Apply Filters
+                                        ✅ Apply
                                     </button>
                                     <button
                                         onClick={handleClear}
                                         style={{
-                                            padding: '14px',
+                                            padding: '12px',
                                             background: '#2d2d2d',
                                             color: '#e0e0e0',
                                             border: '2px solid #444',
-                                            borderRadius: '12px',
-                                            fontSize: '16px',
+                                            borderRadius: '10px',
+                                            fontSize: '15px',
                                             fontWeight: 'bold',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s ease'
@@ -1932,10 +1952,10 @@ function SocialAIMarketingEngine() {
                                 {/* Active filters summary */}
                                 {activeFilterCount > 0 && (
                                     <div style={{
-                                        padding: '10px 14px',
+                                        padding: '8px 12px',
                                         background: '#2d2d2d',
-                                        borderRadius: '8px',
-                                        fontSize: '12px',
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
                                         color: '#888',
                                         textAlign: 'center'
                                     }}>
@@ -2820,6 +2840,38 @@ function SocialAIMarketingEngine() {
             return () => release();
         });
     }, []);
+
+    useEffect(() => {
+        const loadLimits = async () => {
+            if (!user) return;
+            
+            try {
+                // Get current CONTACT limit status
+                const { data: contactRecord } = await supabase
+                    .from('rate_limits')
+                    .select('attempts, limit')
+                    .eq('user_id', user.id)
+                    .eq('action', 'CONTACT')
+                    .maybeSingle();
+                
+                if (contactRecord) {
+                    const limit = contactRecord.limit || 50;
+                    const attempts = contactRecord.attempts || 0;
+                    setLimits(prev => ({
+                        ...prev,
+                        CONTACT: {
+                            remaining: Math.max(0, limit - attempts),
+                            total: limit
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('Error loading limits:', error);
+            }
+        };
+        
+        loadLimits();
+    }, [user]);
 
    // ✅ Update URL when search changes
     useEffect(() => {

@@ -1,6 +1,4 @@
-// ============================================
-// src/smartRateLimiter.js - SIMPLIFIED FIXED
-// ============================================
+// src/smartRateLimiter.js - FIXED VERSION
 
 import { userMonitor } from './userBehaviorMonitor.js';
 import { supabase } from './lib/supabase.js';
@@ -16,8 +14,8 @@ export class SmartRateLimiter {
         
         // ✅ Default limits per action
         this.defaultLimits = {
-            CONTACT: { limit: isDevMode ? 999 : 50, window: 1 },
-            SEARCH: { limit: isDevMode ? 999 : 15, window: 1 },
+            CONTACT: { limit: isDevMode ? 999 : 50, window: 1 },    // 50 contacts per minute
+            SEARCH: { limit: isDevMode ? 999 : 100, window: 1 },    // 100 searches per minute
             SAVE_WISHLIST: { limit: isDevMode ? 999 : 20, window: 1 },
             PROFILE_SETUP: { limit: isDevMode ? 999 : 3, window: 5 },
             NOTIFICATION_SEND: { limit: isDevMode ? 999 : 20, window: 1 }
@@ -67,7 +65,7 @@ export class SmartRateLimiter {
             };
         }
 
-        // ✅ CALL THE DATABASE FUNCTION (NOT direct table queries)
+        // ✅ CALL THE DATABASE FUNCTION
         try {
             const { data, error } = await supabase.rpc('check_rate_limit', {
                 p_user_id: userId,
@@ -125,32 +123,25 @@ export class SmartRateLimiter {
         }
     }
 
-    // ✅ Get current status
+    // ✅ Get current status (DOES NOT increment)
     async getStatus(userId, action) {
         if (!userId) return { attempts: 0, remaining: 10, total: 10 };
         
         try {
-            const { data, error } = await supabase.rpc('check_rate_limit', {
-                p_user_id: userId,
-                p_action: action,
-                p_limit: 10,
-                p_window_minutes: 1
-            });
-            
-            // ✅ Note: This will increment attempts!
-            // For just checking status, query the table directly
             const { data: record } = await supabase
                 .from('rate_limits')
-                .select('attempts, limit')
+                .select('attempts, limit, window_start')
                 .eq('user_id', userId)
                 .eq('action', action)
                 .maybeSingle();
             
             if (record) {
+                const limit = record.limit || 10;
+                const attempts = record.attempts || 0;
                 return {
-                    attempts: record.attempts || 0,
-                    remaining: Math.max(0, (record.limit || 10) - (record.attempts || 0)),
-                    total: record.limit || 10
+                    attempts: attempts,
+                    remaining: Math.max(0, limit - attempts),
+                    total: limit
                 };
             }
         } catch (error) {
