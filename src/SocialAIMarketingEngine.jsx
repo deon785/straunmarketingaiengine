@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate , useLocation } from 'react-router-dom';
 import { supabase, queryWithRetry, sendPushNotification, callEdgeFunction } from './lib/supabase';
 import './App.css';
@@ -401,6 +401,7 @@ function SocialAIMarketingEngine() {
     const [allProducts, setAllProducts] = useState([]);
     const searchTimeoutRef = useRef(null);
     const isSearchingRef = useRef(false);
+    const profileFetchedRef = useRef(false);
     
     // --- PROFILE DATA ---
     const [profileData, setProfileData] = useState(null);
@@ -449,8 +450,6 @@ function SocialAIMarketingEngine() {
     const [showInstallPrompt, setShowInstallPrompt] = useState(false);
     const [hasBeenPrompted, setHasBeenPrompted] = useState(false);
 
-    const userInitials = user?.email ? user.email.charAt(0).toUpperCase() : '?';
-    const userName = profileData?.username || user?.email?.split('@')[0] || 'User';
     const userMode = selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode';
     const [showPriceAlerts, setShowPriceAlerts] = useState(false);
     const [lastViewedProduct, setLastViewedProduct] = useState(null);
@@ -492,6 +491,21 @@ function SocialAIMarketingEngine() {
     category: '' // Optional: if you have categories
     });
 
+    const activeFilterCount = useMemo(() => {
+        return Object.values(filters).filter(val => 
+            (typeof val === 'string' && val !== '' && val !== 'newest') || 
+            (typeof val === 'number' && val !== 0)
+        ).length;
+    }, [filters]);
+
+    const userInitials = useMemo(() => {
+        return user?.email ? user.email.charAt(0).toUpperCase() : '?';
+    }, [user]);
+
+    const userName = useMemo(() => {
+        return profileData?.username || user?.email?.split('@')[0] || 'User';
+    }, [profileData, user]);
+
     const handleNavigationWithLoading = async (path) => {
         await withLoading(async () => {
             navigate(path);
@@ -522,12 +536,6 @@ function SocialAIMarketingEngine() {
             overflow: 'hidden'
         }
     };
-
-    // Calculate active filter count
-    const activeFilterCount = Object.values(filters).filter(val => 
-        (typeof val === 'string' && val !== '' && val !== 'newest') || 
-        (typeof val === 'number' && val !== 0)
-    ).length;
 
     const [showInterestPopup, setShowInterestPopup] = useState(false);
 
@@ -1628,7 +1636,7 @@ function SocialAIMarketingEngine() {
     // ============================================
     // COMPACT FILTER DROPDOWN - MOBILE FRIENDLY
     // ============================================
-    const FilterDropdown = ({ filters, setFilters, onApply, onClear, activeFilterCount }) => {
+    const FilterDropdown = React.memo(({ filters, setFilters, onApply, onClear, activeFilterCount }) => {
         const [isOpen, setIsOpen] = useState(false);
         const [tempFilters, setTempFilters] = useState(filters);
         const dropdownRef = useRef(null);
@@ -1980,7 +1988,7 @@ function SocialAIMarketingEngine() {
                 )}
             </div>
         );
-    };
+    });
 
     // Fetch products with seller info     
     const fetchProducts = useCallback(async (searchTerm = '') => {
@@ -2730,6 +2738,22 @@ function SocialAIMarketingEngine() {
         }
     }, [user]);
 
+    // Add a loading timeout guard
+    useEffect(() => {
+        let timeoutId;
+        
+        if (initialDataLoading) {
+            timeoutId = setTimeout(() => {
+                console.warn('⚠️ Loading taking too long, forcing stop');
+                setInitialDataLoading(false);
+            }, 5000); // 5 second timeout
+        }
+        
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [initialDataLoading]);
+
     // ✅ Save location on every page change
     useEffect(() => {
         if (user && selectedMode) {
@@ -2846,16 +2870,32 @@ function SocialAIMarketingEngine() {
             if (!user) return;
             
             try {
-                // Get current CONTACT limit status
-                const { data: contactRecord } = await supabase
+                // ✅ Use .maybeSingle() with proper error handling
+                const { data: contactRecord, error } = await supabase
                     .from('rate_limits')
-                    .select('attempts, limit')
+                    .select('attempts')
                     .eq('user_id', user.id)
                     .eq('action', 'CONTACT')
                     .maybeSingle();
                 
+                // ✅ Handle the error gracefully
+                if (error) {
+                    // If it's a 400 or 404, just log and continue (no record exists)
+                    if (error.code === 'PGRST116' || error.message?.includes('JSON object requested')) {
+                        console.log('No rate limit record found for CONTACT action');
+                        // ✅ Set default limits
+                        setLimits(prev => ({
+                            ...prev,
+                            CONTACT: { remaining: 50, total: 50 }
+                        }));
+                        return;
+                    }
+                    console.warn('Error loading rate limits:', error.message);
+                    return;
+                }
+                
                 if (contactRecord) {
-                    const limit = contactRecord.limit || 50;
+                    const limit = 50;
                     const attempts = contactRecord.attempts || 0;
                     setLimits(prev => ({
                         ...prev,
@@ -2864,9 +2904,20 @@ function SocialAIMarketingEngine() {
                             total: limit
                         }
                     }));
+                } else {
+                    // ✅ No record exists, set default
+                    setLimits(prev => ({
+                        ...prev,
+                        CONTACT: { remaining: 50, total: 50 }
+                    }));
                 }
             } catch (error) {
-                console.error('Error loading limits:', error);
+                console.warn('Rate limits not available:', error.message);
+                // ✅ Don't show error to user - set defaults
+                setLimits(prev => ({
+                    ...prev,
+                    CONTACT: { remaining: 50, total: 50 }
+                }));
             }
         };
         
@@ -2937,29 +2988,31 @@ function SocialAIMarketingEngine() {
 
     // Combined useEffect for initial data load
     useEffect(() => {
-        if (user && !profileData) { 
+        // Only fetch if we haven't fetched before AND user exists AND no profile data
+        if (user && !profileData && !profileFetchedRef.current) {
+            profileFetchedRef.current = true; // ✅ Prevent duplicate fetches
             setInitialDataLoading(true);
             fetchProfile().finally(() => {
                 setInitialDataLoading(false);
             });
         }
-    }, [user, fetchProfile]);  
+    }, [user, profileData]); // ✅ Only runs when user or profileData changes
 
     // ✅ Handle returning from notification detail page
     useEffect(() => {
-    // Check if we're returning from a notification
-    if (location.state?.returnFromNotification) {
-        console.log('🔄 Returning from notification detail');
-        
-        // ✅ Clear the state so it doesn't trigger again
-        window.history.replaceState({}, document.title);
-        
-        // ✅ Refresh notifications if needed
-        fetchNotifications();
-        
-        // ✅ Show a toast notification
-        showToastNotification('🔔 Back to Social page');
-    }
+        // Check if we're returning from a notification
+        if (location.state?.returnFromNotification) {
+            console.log('🔄 Returning from notification detail');
+            
+            // ✅ Clear the state so it doesn't trigger again
+            window.history.replaceState({}, document.title);
+            
+            // ✅ Refresh notifications if needed
+            fetchNotifications();
+            
+            // ✅ Show a toast notification
+            showToastNotification('🔔 Back to Social page');
+        }
     }, [location.state, fetchNotifications, showToastNotification]);
 
     useEffect(() => {
