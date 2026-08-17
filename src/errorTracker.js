@@ -40,11 +40,20 @@ class ErrorTracker {
 
     async updateSummary(errorData) {
         try {
-            await supabase.rpc('update_error_summary', {
+            const result = await supabase.rpc('update_error_summary', {
                 p_error_code: errorData.error_code,
                 p_error_message: errorData.error_message,
                 p_user_id: errorData.user_id
             });
+
+            // ✅ Handle the result safely, checking if it's a valid object
+            // This prevents the "L.rpc(...).catch is not a function" error
+            if (result && typeof result.then === 'function') {
+                await result;
+            } else {
+                console.log('Error summary update skipped (non-Promise response)');
+            }
+
         } catch (e) {
             console.warn('Error updating summary:', e);
         }

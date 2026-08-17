@@ -15,18 +15,46 @@ const AdminErrorAnalytics = () => {
     const [loading, setLoading] = useState(true);
     const [selectedError, setSelectedError] = useState(null);
     const [resetMessage, setResetMessage] = useState('');
+    const [weeklySummary, setWeeklySummary] = useState(null);
 
     useEffect(() => {
         loadErrorAnalytics();
-        // Auto-refresh every 30 seconds
         const interval = setInterval(loadErrorAnalytics, 30000);
         return () => clearInterval(interval);
     }, []);
 
+    // ✅ FIXED: Calculate weekly summary
+    const calculateWeeklySummary = (errorData) => {
+        const now = new Date();
+        const sevenDaysAgo = new Date(now);
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const weeklyErrors = errorData.filter(e => {
+            const lastOccurrence = e.last_occurrence ? new Date(e.last_occurrence) : new Date(0);
+            return lastOccurrence >= sevenDaysAgo;
+        });
+
+        const totalErrorsThisWeek = weeklyErrors.reduce((sum, e) => sum + e.total_occurrences, 0);
+
+        return {
+            hasErrors: totalErrorsThisWeek > 0,
+            totalErrors: totalErrorsThisWeek,
+            uniqueErrorTypes: weeklyErrors.length,
+            errorDetails: weeklyErrors.map(e => ({
+                code: e.error_code,
+                message: e.error_message,
+                count: e.total_occurrences,
+                users: e.unique_users
+            })),
+            daysWithoutErrors: totalErrorsThisWeek === 0 ? 7 : 0,
+            lastErrorDate: weeklyErrors.length > 0 ? weeklyErrors[0].last_occurrence : null
+        };
+    };
+
+    // ✅ FIXED: Load error analytics
     const loadErrorAnalytics = async () => {
         setLoading(true);
         try {
-            // Get error summary
             const { data: summary, error } = await supabase
                 .from('error_summary')
                 .select('*')
@@ -34,21 +62,28 @@ const AdminErrorAnalytics = () => {
 
             if (error) throw error;
 
+            const summaryData = summary || [];
+            
             // Calculate stats
-            const totalErrors = summary.reduce((sum, e) => sum + e.total_occurrences, 0);
-            const uniqueUsers = summary.reduce((sum, e) => sum + e.unique_users, 0);
-            const activeErrors = summary.filter(e => !e.resolved).length;
-            const resolvedErrors = summary.filter(e => e.resolved).length;
-            const mostCommon = summary.length > 0 ? summary[0] : null;
+            const totalErrors = summaryData.reduce((sum, e) => sum + e.total_occurrences, 0);
+            const uniqueUsers = summaryData.reduce((sum, e) => sum + e.unique_users, 0);
+            const activeErrors = summaryData.filter(e => !e.resolved).length;
+            const resolvedErrors = summaryData.filter(e => e.resolved).length;
+            const mostCommon = summaryData.length > 0 ? summaryData[0] : null;
+            
+            // ✅ FIXED: Calculate weekly summary from the data
+            const weekly = calculateWeeklySummary(summaryData);
 
-            setErrorData(summary || []);
+            // ✅ FIXED: Set data correctly
+            setErrorData(summaryData);        // Full array for table
+            setWeeklySummary(weekly);          // Weekly summary object
             setErrorStats({
                 totalErrors,
                 uniqueUsers,
                 activeErrors,
                 resolvedErrors,
                 mostCommon,
-                resetHistory: summary.filter(e => e.reset_count > 0)
+                resetHistory: summaryData.filter(e => e.reset_count > 0)
             });
 
         } catch (err) {
@@ -58,9 +93,9 @@ const AdminErrorAnalytics = () => {
         }
     };
 
-    // ✅ NEW: Reset counts for a specific error
+    // Reset count for specific error
     const resetErrorCount = async (errorCode) => {
-        if (!window.confirm(`Reset count for error "${errorCode}"? This will restart tracking from 0.`)) return;
+        if (!window.confirm(`Reset count for error "${errorCode}"?`)) return;
 
         try {
             const { error } = await supabase
@@ -84,9 +119,9 @@ const AdminErrorAnalytics = () => {
         }
     };
 
-    // ✅ NEW: Reset ALL error counts (when reaching 100 users threshold)
+    // Reset all error counts
     const resetAllErrorCounts = async () => {
-        if (!window.confirm('⚠️ This will reset ALL error counts to 0. This is typically done after reaching 100 users. Continue?')) return;
+        if (!window.confirm('⚠️ Reset ALL error counts to 0?')) return;
 
         try {
             const { error } = await supabase
@@ -109,7 +144,7 @@ const AdminErrorAnalytics = () => {
         }
     };
 
-    // ✅ NEW: Check and auto-reset errors that reached 100
+    // Auto-reset errors with 100+ occurrences
     const checkAndAutoReset = async () => {
         const errorsToReset = errorData.filter(e => e.total_occurrences >= 100);
         
@@ -128,7 +163,7 @@ const AdminErrorAnalytics = () => {
                     .in('error_code', errorCodes);
 
                 if (!error) {
-                    console.log(`🔄 Auto-reset ${errorsToReset.length} errors that reached 100 occurrences`);
+                    console.log(`🔄 Auto-reset ${errorsToReset.length} errors`);
                     await loadErrorAnalytics();
                 }
             } catch (err) {
@@ -143,14 +178,6 @@ const AdminErrorAnalytics = () => {
         return () => clearInterval(interval);
     }, [errorData]);
 
-    const getSeverityColor = (count) => {
-        if (count > 100) return '#dc3545'; // Critical - Red
-        if (count > 50) return '#ff6b6b'; // High - Light Red
-        if (count > 20) return '#ffc107'; // Medium - Yellow
-        if (count > 5) return '#17a2b8'; // Low - Blue
-        return '#28a745'; // Minimal - Green
-    };
-
     const getTrendIcon = (trend) => {
         if (trend === 'up') return '📈';
         if (trend === 'down') return '📉';
@@ -163,7 +190,7 @@ const AdminErrorAnalytics = () => {
 
     return (
         <div>
-            {/* Header with Stats */}
+            {/* Header */}
             <div style={{ 
                 display: 'flex', 
                 justifyContent: 'space-between', 
@@ -214,6 +241,56 @@ const AdminErrorAnalytics = () => {
                     border: '1px solid #c3e6cb'
                 }}>
                     {resetMessage}
+                </div>
+            )}
+
+            {/* ✅ NEW: Weekly Summary Report */}
+            {weeklySummary && (
+                <div style={{
+                    background: weeklySummary.hasErrors ? '#fff3cd' : '#d4edda',
+                    border: `2px solid ${weeklySummary.hasErrors ? '#ffc107' : '#28a745'}`,
+                    borderRadius: '8px',
+                    padding: '15px',
+                    marginBottom: '20px'
+                }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div>
+                            <h4 style={{ margin: '0 0 5px 0', color: weeklySummary.hasErrors ? '#856404' : '#155724' }}>
+                                📅 Weekly Report (Last 7 Days)
+                            </h4>
+                            {weeklySummary.hasErrors ? (
+                                <div>
+                                    <p style={{ margin: '0', color: '#856404', fontWeight: 'bold' }}>
+                                        ⚠️ {weeklySummary.totalErrors} errors this week ({weeklySummary.uniqueErrorTypes} unique types)
+                                    </p>
+                                    <div style={{ marginTop: '8px' }}>
+                                        {weeklySummary.errorDetails.map((err, idx) => (
+                                            <div key={idx} style={{
+                                                fontSize: '13px',
+                                                color: '#856404',
+                                                padding: '4px 0',
+                                                borderBottom: idx < weeklySummary.errorDetails.length - 1 ? '1px solid #ffe8a1' : 'none'
+                                            }}>
+                                                • <strong>{err.code}</strong>: {err.message} — {err.count} occurrences, {err.users} users affected
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <p style={{ margin: '0', color: '#155724', fontSize: '16px', fontWeight: 'bold' }}>
+                                    ✅ 7 days without errors! Everything is running smoothly.
+                                </p>
+                            )}
+                        </div>
+                        <div style={{ fontSize: '13px', color: weeklySummary.hasErrors ? '#856404' : '#155724', marginTop: '8px' }}>
+                            {weeklySummary.hasErrors && weeklySummary.lastErrorDate && (
+                                <span>Last error: {new Date(weeklySummary.lastErrorDate).toLocaleString()}</span>
+                            )}
+                            {!weeklySummary.hasErrors && (
+                                <span>🎉 Perfect week!</span>
+                            )}
+                        </div>
+                    </div>
                 </div>
             )}
 
