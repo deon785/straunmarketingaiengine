@@ -1,7 +1,7 @@
 // RecommendationsSection.jsx - COMPLETE FIXED VERSION WITH ALTERNATIVE PROSPECTS
-
 import React, { useState, useEffect } from 'react';
 import RecommendationEngine from './recommendationEngine';
+import { supabase } from './lib/supabase';
 
 const RecommendationsSection = ({ 
     userId, 

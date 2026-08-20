@@ -1442,22 +1442,24 @@ function SocialAIMarketingEngine() {
         const clean = phone.replace(/\D/g, '');
         return clean.length >= 9 && clean.length <= 12;
     };
-
+ 
     // --- HANDLE WHATSAPP CONTACT WITH NOTIFICATIONS & GA TRACKING ---   
     const handleContact = async (targetUserId, targetPhoneNumber, targetName, type, product) => {
-        // ✅ 1. Check if user is logged in FIRST
+        // ✅ 1. Check login
         if (!user) {
             alert('Please log in to contact');
             return;
         }
 
-        // ✅ 2. Initialize rate limiter if needed
-        if (!smartLimiterInstance) {
-            initializeRateLimiter();
+        // ✅ 2. Validate phone number
+        if (!targetPhoneNumber) {
+            alert("This user has no phone number. We cannot connect you.");
+            return;
         }
 
-        // ✅ 3. Validate phone number FIRST
-        if (!targetPhoneNumber || !validatePhoneNumber(targetPhoneNumber)) {
+        // Clean and validate phone number
+        const cleanPhone = targetPhoneNumber.toString().replace(/\D/g, '');
+        if (cleanPhone.length < 9 || cleanPhone.length > 12) {
             alert("This user has an invalid phone number. We cannot connect you.");
             return;
         }
@@ -1466,60 +1468,127 @@ function SocialAIMarketingEngine() {
         setGlobalLoadingMessage('Opening WhatsApp...');
         setOpeningWhatsApp(true);
 
-        try {
-            // ✅ 4. SINGLE RATE LIMIT CHECK - ONLY ONCE
-            const check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
-                targetId: targetUserId,
-                type: type,
-                product: product?.name,
-                limit: 50,
-                window: 1    
-            });
+        // ✅ 3. RATE LIMIT CHECK
+        let isBlocked = false;
+        let blockReason = '';
+        let blockResetTime = 0;
+        let remaining = 50;
+        let total = 50;
 
-            // ✅ 5. Check if allowed
-            if (!check.allowed) {
-                alert(`Contact blocked: ${check.reason}. Please wait ${check.reset_in || 60} seconds before trying again.`);
-                setOpeningWhatsApp(false);
-                setGlobalLoading(false);
-                setGlobalLoadingMessage('');
-                return;
-            }
+        // Make sure rate limiter is initialized
+        if (!smartLimiterInstance) {
+            initializeRateLimiter();
+        }
 
-            // ✅ 6. Track behavior
-            const engine = new RecommendationEngine(user.id);
-            await engine.trackBehavior(product?.id, 'contact');
-
-            await supabase.rpc('track_user_activity', {
-                p_user_id: user.id,
-                p_activity_type: 'contact',
-                p_metadata: { targetUserId: targetUserId, type: type },
-                p_message: `User contacted ${type} about ${product?.name || 'product'}` 
-            });
-
-            // ✅ 7. Record in behavior analyzer
-            if (behaviorAnalyzerInstance) {
-                behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+        if (smartLimiterInstance) {
+            try {
+                console.log('🔍 Checking rate limit for user:', user.id);
+                
+                const check = await smartLimiterInstance.checkAndUpdate(user.id, 'CONTACT', {
                     targetId: targetUserId,
-                    contactType: type,
-                    productName: product?.name
+                    type: type,
+                    product: product?.name,
+                    limit: 50,
+                    window: 1    
                 });
+                
+                console.log('📊 Rate limit result:', check);
+                
+                // Check if rate limit is exceeded
+                if (check.allowed === false) {
+                    isBlocked = true;
+                    blockReason = check.reason || 'Rate limit exceeded';
+                    blockResetTime = check.reset_in || 60;
+                    remaining = check.remaining || 0;
+                    total = check.total || 50;
+                } else {
+                    // Allowed - update remaining count
+                    remaining = check.remaining || 50;
+                    total = check.total || 50;
+                }
+                
+            } catch (limitError) {
+                console.error('⚠️ Rate limiter error:', limitError);
+                // Fail open - allow contact if rate limiter fails
+                isBlocked = false;
+            }
+        } else {
+            // No rate limiter - allow contact
+            console.warn('⚠️ No rate limiter instance - allowing contact');
+            isBlocked = false;
+        }
+
+        // ✅ 4. If blocked, show alert and STOP
+        if (isBlocked === true) {
+            console.log('🚫 Contact BLOCKED:', blockReason);
+            alert(`⚠️ Contact blocked: ${blockReason}\n\nPlease wait ${blockResetTime} seconds before trying again.`);
+            setOpeningWhatsApp(false);
+            setGlobalLoading(false);
+            setGlobalLoadingMessage('');
+            return;
+        }
+
+        // ✅ 5. If we get here, contact is allowed - PROCEED
+        console.log('✅ Contact ALLOWED - opening WhatsApp');
+
+        // =========================================================================
+        // ✅ 6. OPEN WHATSAPP - MAIN LOGIC
+        // =========================================================================
+        try {
+            // Track behavior (isolated - won't break WhatsApp)
+            try {
+                if (product?.id) {
+                    const engine = new RecommendationEngine(user.id);
+                    await engine.trackBehavior(product.id, 'contact');
+                }
+            } catch (e) { 
+                console.warn('Tracking failed:', e); 
             }
 
-            // ✅ 8. Get current user
-            const { data: { user: currentUser } } = await supabase.auth.getUser();
-            
-            // ✅ 9. Get sender's phone number
-            const { data: senderProfile } = await supabase
-                .from('profiles')
-                .select('phone_number')
-                .eq('user_id', currentUser?.id)
-                .single();
+            // Track user activity (isolated)
+            try {
+                await supabase.rpc('track_user_activity', {
+                    p_user_id: user.id,
+                    p_activity_type: 'contact',
+                    p_metadata: { targetUserId: targetUserId, type: type },
+                    p_message: `User contacted ${type} about ${product?.name || 'product'}`
+                });
+            } catch (e) { 
+                console.warn('Activity tracking failed:', e); 
+            }
 
-            const senderPhone = senderProfile?.phone_number || null;
+            // Record behavior (isolated)
+            try {
+                if (behaviorAnalyzerInstance) {
+                    behaviorAnalyzerInstance.recordUserAction(user.id, 'contact_attempt', {
+                        targetId: targetUserId,
+                        contactType: type,
+                        productName: product?.name
+                    });
+                }
+            } catch (e) { 
+                console.warn('Behavior record failed:', e); 
+            }
 
-            // ✅ 10. Create notification
-            await supabase.from('notifications').insert([
-                { 
+            // Get current user info (isolated)
+            let currentUser = null;
+            let senderPhone = null;
+            try {
+                const { data: { user: u } } = await supabase.auth.getUser();
+                currentUser = u;
+                const { data: sp } = await supabase
+                    .from('profiles')
+                    .select('phone_number')
+                    .eq('user_id', currentUser?.id)
+                    .single();
+                senderPhone = sp?.phone_number || null;
+            } catch (e) { 
+                console.warn('User profile fetch failed:', e); 
+            }
+
+            // Create notification (isolated)
+            try {
+                await supabase.from('notifications').insert([{
                     user_id: targetUserId,
                     sender_id: currentUser?.id,
                     product_id: product?.id,
@@ -1531,64 +1600,83 @@ function SocialAIMarketingEngine() {
                     link_type: type,
                     is_read: false,
                     created_at: new Date().toISOString()
-                }
-            ]);
-
-            await UserActivityTracker.trackContact(
-                user.id,
-                targetUserId,
-                product?.id,
-                'whatsapp',
-                true,
-                null
-            );
-
-            // ✅ 11. Clean and format phone number
-            const cleanNumber = targetPhoneNumber.replace(/\D/g, '');
-            let finalNumber;
-            if (cleanNumber.startsWith('263')) {
-                finalNumber = cleanNumber;
-            } else if (cleanNumber.startsWith('0')) {
-                finalNumber = `263${cleanNumber.substring(1)}`;
-            } else {
-                finalNumber = `263${cleanNumber}`;
+                }]);
+                
+                await UserActivityTracker.trackContact(
+                    user.id,
+                    targetUserId,
+                    product?.id,
+                    'whatsapp',
+                    true,
+                    null
+                );
+            } catch (e) { 
+                console.warn('Notification creation failed:', e); 
             }
 
-            // ✅ 12. Encode message
-            const message = encodeURIComponent(
-                type === 'seller' 
-                    ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
-                    : `Hi! I'm interested in your ${targetName}. Is it still available?`
-            );
+            // ✅ 7. CLEAN AND FORMAT PHONE NUMBER
+            let finalNumber;
+            if (cleanPhone.startsWith('263')) {
+                finalNumber = cleanPhone;
+            } else if (cleanPhone.startsWith('0')) {
+                finalNumber = `263${cleanPhone.substring(1)}`;
+            } else {
+                finalNumber = `263${cleanPhone}`;
+            }
 
-            // ✅ 13. Open WhatsApp
-            const whatsappUrl = `https://wa.me/${finalNumber}?text=${message}`;
+            // ✅ 8. ENCODE MESSAGE
+            const messageText = type === 'seller' 
+                ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
+                : `Hi! I'm interested in your ${targetName}. Is it still available?`;
+            
+            const encodedMessage = encodeURIComponent(messageText);
+
+            // ✅ 9. OPEN WHATSAPP
+            const whatsappUrl = `https://wa.me/${finalNumber}?text=${encodedMessage}`;
+            console.log('📱 Opening WhatsApp:', whatsappUrl);
             window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
 
-            // ✅ 14. Track with Google Analytics
-            if (typeof ReactGA !== 'undefined') {
-                ReactGA.event({
-                    category: 'Conversion',
-                    action: 'WhatsApp Contact Clicked',
-                    label: type
-                });
+            // Track with Google Analytics (isolated)
+            try {
+                if (typeof ReactGA !== 'undefined') {
+                    ReactGA.event({
+                        category: 'Conversion',
+                        action: 'WhatsApp Contact Clicked',
+                        label: type
+                    });
+                }
+            } catch (e) { 
+                console.warn('GA tracking failed:', e); 
             }
 
-            // ✅ 15. Update limits display
-            setLimits(prev => ({
-                ...prev,
-                CONTACT: {
-                    remaining: check.remaining,
-                    total: check.total
-                }
-            }));
+            // Update limits display
+            try {
+                setLimits(prev => ({
+                    ...prev,
+                    CONTACT: { remaining: remaining, total: total }
+                }));
+            } catch (e) { 
+                // Ignore 
+            }
 
-            // ✅ 16. Show success message
+            // Success message
             showToastNotification(`✅ WhatsApp opened for ${targetName}`);
 
         } catch (error) {
-            console.error('Error in handleContact:', error);
-            alert('Failed to initiate WhatsApp contact. Please try again.');
+            // ✅ GUARANTEED SAFETY NET: Try opening WhatsApp one more time
+            console.error('CRITICAL ERROR in handleContact:', error);
+            try {
+                // Try opening WhatsApp with basic info
+                const fallbackUrl = `https://wa.me/${finalNumber}?text=${encodeURIComponent(
+                    type === 'seller' 
+                        ? `Hi! I saw you're interested in ${targetName}. I have this available for sale. Are you interested?` 
+                        : `Hi! I'm interested in your ${targetName}. Is it still available?`
+                )}`;
+                window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+            } catch (finalError) {
+                console.error('Fallback WhatsApp failed:', finalError);
+                alert('Failed to open WhatsApp. Please copy the phone number and try again manually.\n\nPhone: ' + finalNumber);
+            }
         } finally {
             setOpeningWhatsApp(false);
             setGlobalLoading(false);
@@ -7385,7 +7473,7 @@ function SocialAIMarketingEngine() {
                                                             </button>
                                                             <button 
                                                                 onClick={() => handleContact(p.id, p.phone_number, p.interest, 'seller', {
-                                                                    id: null,   
+                                                                    id: p.id,   
                                                                     name: p.interest,
                                                                     image_url: null
                                                                 })}
