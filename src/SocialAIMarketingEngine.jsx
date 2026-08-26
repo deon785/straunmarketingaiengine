@@ -483,6 +483,181 @@ function SocialAIMarketingEngine() {
         NOTIFICATION_SEND: { remaining: 20, total: 20 }
     });
 
+    // Search persistence state - with safe defaults
+    const [searchSessionId, setSearchSessionId] = useState(null);
+    const [contactedIds, setContactedIds] = useState(() => {
+        // Try to load from localStorage safely on init
+        try {
+            if (!user?.id) return [];
+            const key = `straun_last_search_${user.id}`;
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                const data = JSON.parse(raw);
+                return data.contactedIds || [];
+            }
+        } catch (e) {
+            // Silent fail - just return empty array
+        }
+        return [];
+    });
+    const [restoredSearch, setRestoredSearch] = useState(false);
+    const [searchExpired, setSearchExpired] = useState(false);
+
+    // ========== SEARCH PERSISTENCE HELPERS ==========
+    const SEARCH_EXPIRY_MS = 20 * 60 * 1000; // 20 minutes
+
+    const getSearchStorageKey = () => {
+        if (!user?.id) return null;
+        return `straun_last_search_${user.id}`;
+    };
+
+    // ✅ Save search results with full state
+    const saveSearchResults = (results, searchTerm, mode) => {
+        if (!user?.id || !results || results.length === 0) {
+            console.log('⚠️ Not saving search - missing user or results');
+            return;
+        }
+
+        try {
+            const key = getSearchStorageKey();
+            if (!key) return;
+
+            const searchData = {
+                results: results,
+                searchTerm: searchTerm || '',
+                mode: mode || selectedMode,
+                timestamp: Date.now(),
+                sessionId: searchSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                contactedIds: contactedIds || [],
+                // ✅ Save current page and scroll position
+                page: currentPage,
+                hasMore: hasMore,
+                // ✅ Save the actual data structure
+                data: {
+                    prospects: selectedMode === 'seller' ? results : [],
+                    productsFound: selectedMode === 'buyer' ? results : []
+                }
+            };
+            
+            localStorage.setItem(key, JSON.stringify(searchData));
+            console.log('💾 Search results saved successfully with', results.length, 'items');
+        } catch (e) {
+            console.warn('Could not save search results:', e.message);
+        }
+    };
+
+    // ✅ Load search results with full state
+    const loadSearchResults = () => {
+        if (!user?.id) {
+            console.log('⚠️ No user to load search for');
+            return null;
+        }
+
+        try {
+            const key = getSearchStorageKey();
+            if (!key) return null;
+            
+            const raw = localStorage.getItem(key);
+            if (!raw) return null;
+            
+            const data = JSON.parse(raw);
+            
+            if (!data || !data.results || !Array.isArray(data.results)) {
+                console.log('⚠️ Invalid search data format');
+                localStorage.removeItem(key);
+                return null;
+            }
+            
+            const age = Date.now() - data.timestamp;
+            
+            // ⏰ Check if search is still relevant (20 minutes)
+            if (age > SEARCH_EXPIRY_MS) {
+                console.log('⏰ Search expired (older than 20 minutes)');
+                localStorage.removeItem(key);
+                return null;
+            }
+            
+            console.log(`✅ Restored search from ${Math.round(age / 1000)} seconds ago`);
+            return data;
+        } catch (e) {
+            console.warn('Could not load search results:', e.message);
+            return null;
+        }
+    };
+
+    // ✅ Clear search results
+    const clearSearchResults = () => {
+        try {
+            const key = getSearchStorageKey();
+            if (key) {
+                localStorage.removeItem(key);
+                console.log('🗑️ Search results cleared');
+            }
+        } catch (e) {
+            console.warn('Could not clear search results:', e.message);
+        }
+    };
+
+    // ✅ Update contacted status and save
+    const updateContactedStatus = (contactId) => {
+        if (!contactId) {
+            console.log('⚠️ No contactId provided');
+            return false;
+        }
+
+        try {
+            // Update local state
+            setContactedIds(prev => {
+                if (prev.includes(contactId)) return prev;
+                return [...prev, contactId];
+            });
+            
+            // Update localStorage
+            const key = getSearchStorageKey();
+            if (!key) return false;
+            
+            const raw = localStorage.getItem(key);
+            if (!raw) return false;
+            
+            const data = JSON.parse(raw);
+            if (!data.contactedIds) {
+                data.contactedIds = [];
+            }
+            
+            if (!data.contactedIds.includes(contactId)) {
+                data.contactedIds.push(contactId);
+                localStorage.setItem(key, JSON.stringify(data));
+                console.log(`🔵 Marked ${contactId} as contacted`);
+                return true;
+            }
+            
+            return false;
+        } catch (e) {
+            console.warn('Could not update contacted status:', e.message);
+            return false;
+        }
+    };
+
+    // ✅ Check if already contacted
+    const isContacted = (id) => {
+        if (!id) return false;
+        
+        try {
+            if (contactedIds.includes(id)) return true;
+            
+            const key = getSearchStorageKey();
+            if (!key) return false;
+            
+            const raw = localStorage.getItem(key);
+            if (!raw) return false;
+            
+            const data = JSON.parse(raw);
+            return data.contactedIds?.includes(id) || false;
+        } catch (e) {
+            return false;
+        }
+    };
+
     const [filters, setFilters] = useState({
     minPrice: '',
     maxPrice: '',
@@ -535,6 +710,131 @@ function SocialAIMarketingEngine() {
             borderRadius: '12px',
             overflow: 'hidden'
         }
+    };
+
+    // ========== INTEREST CATEGORIES ==========
+    const INTEREST_CATEGORIES = {
+        // Electronics & Tech
+        electronics: ['electronics', 'technology', 'gadgets', 'smartphone', 'laptop', 'computer', 'tablet', 'tv', 'television', 'monitor', 'speaker', 'headphone', 'earphone', 'headset', 'charger', 'cable', 'battery', 'power bank', 'phone', 'iphone', 'samsung', 'xiaomi', 'huawei', 'apple', 'macbook', 'dell', 'hp', 'lenovo', 'asus', 'acer', 'gaming', 'console', 'playstation', 'xbox', 'nintendo', 'vr', 'virtual reality', 'drone', 'camera', 'lens', 'tripod', 'microphone', 'webcam'],
+        
+        // Home & Furniture
+        home: ['furniture', 'sofa', 'couch', 'table', 'chair', 'bed', 'wardrobe', 'cabinet', 'shelf', 'bookshelf', 'drawer', 'desk', 'office chair', 'dining table', 'coffee table', 'bed frame', 'mattress', 'pillow', 'blanket', 'curtain', 'rug', 'carpet', 'lamp', 'lighting', 'decor', 'decoration', 'mirror', 'painting', 'picture frame', 'vase', 'pot', 'plant', 'flower', 'fridge', 'refrigerator', 'stove', 'oven', 'microwave', 'washing machine', 'dryer', 'air conditioner', 'fan', 'heater'],
+        
+        // Fashion & Clothing
+        fashion: ['clothing', 'clothes', 'shirt', 't-shirt', 'pants', 'jeans', 'trousers', 'shorts', 'skirt', 'dress', 'blouse', 'jacket', 'coat', 'sweater', 'hoodie', 'socks', 'underwear', 'lingerie', 'swimwear', 'bikini', 'swimsuit', 'suit', 'tie', 'belt', 'hat', 'cap', 'sunglasses', 'watch', 'jewelry', 'necklace', 'bracelet', 'ring', 'earring', 'handbag', 'bag', 'backpack', 'wallet', 'shoe', 'sneaker', 'boot', 'heels', 'sandal', 'athletic', 'sportswear', 'leather'],
+        
+        // Food & Groceries
+        food: ['food', 'grocery', 'vegetable', 'fruit', 'meat', 'chicken', 'beef', 'pork', 'fish', 'seafood', 'rice', 'pasta', 'bread', 'milk', 'cheese', 'yogurt', 'egg', 'oil', 'spice', 'seasoning', 'snack', 'chips', 'chocolate', 'candy', 'beverage', 'drink', 'soda', 'juice', 'wine', 'beer', 'spirit', 'coffee', 'tea', 'sugar', 'flour', 'cereal', 'oatmeal', 'pizza', 'burger', 'fries', 'ice cream'],
+        
+        // Health & Beauty
+        health: ['health', 'beauty', 'cosmetic', 'makeup', 'foundation', 'lipstick', 'mascara', 'eyeshadow', 'nail polish', 'perfume', 'deodorant', 'soap', 'body wash', 'shampoo', 'conditioner', 'lotion', 'cream', 'serum', 'face mask', 'skin care', 'hair care', 'nail care', 'toothpaste', 'mouthwash', 'vitamin', 'supplement', 'protein', 'gym', 'fitness', 'exercise', 'yoga', 'mat', 'dumbbell', 'weight', 'band', 'massage', 'relaxation'],
+        
+        // Auto & Vehicles
+        auto: ['auto', 'vehicle', 'car', 'truck', 'van', 'suv', 'sedan', 'hatchback', 'coupe', 'convertible', 'motorcycle', 'bike', 'bicycle', 'cycle', 'scooter', 'tyre', 'tire', 'rim', 'wheel', 'battery', 'oil', 'filter', 'brake', 'light', 'bulb', 'audio', 'speaker', 'subwoofer', 'amplifier', 'tool', 'jack', 'spanner', 'wrench', 'socket', 'screwdriver'],
+        
+        // Books & Media
+        media: ['book', 'novel', 'magazine', 'newspaper', 'comic', 'manga', 'textbook', 'dictionary', 'encyclopedia', 'cd', 'dvd', 'blu-ray', 'vinyl', 'record', 'music', 'album', 'movie', 'film', 'documentary', 'series', 'season', 'episode', 'game', 'board game', 'puzzle', 'toy', 'doll', 'action figure', 'collectible', 'statue', 'figurine'],
+        
+        // Sports & Outdoors
+        sports: ['sport', 'football', 'soccer', 'basketball', 'tennis', 'golf', 'rugby', 'cricket', 'hockey', 'volleyball', 'baseball', 'badminton', 'squash', 'table tennis', 'ping pong', 'swimming', 'running', 'jogging', 'cycling', 'hiking', 'camping', 'tent', 'sleeping bag', 'backpack', 'compass', 'knife', 'lantern', 'stove', 'cookware', 'water bottle', 'thermos'],
+        
+        // Services
+        services: ['service', 'repair', 'maintenance', 'cleaning', 'gardening', 'plumbing', 'electrical', 'carpentry', 'painting', 'roofing', 'tiling', 'plastering', 'welding', 'mechanic', 'auto repair', 'towing', 'delivery', 'transport', 'shipping', 'logistics', 'storage', 'moving', 'relocation', 'event planning', 'catering', 'photography', 'videography', 'editing', 'design', 'graphic design', 'web design', 'programming', 'development', 'it', 'computer repair', 'phone repair', 'tutoring', 'teaching'],
+    };
+
+    // ========== SMART INTEREST FILTERING ==========
+    const getRelevantInterests = (interests, searchTerm) => {
+        if (!interests || !Array.isArray(interests) || interests.length === 0) {
+            return [];
+        }
+        
+        const searchLower = searchTerm ? searchTerm.toLowerCase().trim() : '';
+        if (!searchLower) return interests.slice(0, 5); // Return first 5 if no search term
+        
+        // Find which category the search term belongs to
+        let searchCategory = null;
+        for (const [category, keywords] of Object.entries(INTEREST_CATEGORIES)) {
+            if (keywords.some(keyword => searchLower.includes(keyword) || keyword.includes(searchLower))) {
+                searchCategory = category;
+                break;
+            }
+        }
+        
+        // If no category found, try to match with any interest
+        if (!searchCategory) {
+            // Sort interests by relevance to search term
+            const sorted = [...interests].sort((a, b) => {
+                const aLower = a.toLowerCase();
+                const bLower = b.toLowerCase();
+                const aScore = aLower.includes(searchLower) ? 10 : (searchLower.includes(aLower) ? 5 : 0);
+                const bScore = bLower.includes(searchLower) ? 10 : (searchLower.includes(bLower) ? 5 : 0);
+                return bScore - aScore;
+            });
+            return sorted.slice(0, 5); // Return top 5 most relevant
+        }
+        
+        // Get all interests in the same category
+        const categoryKeywords = INTEREST_CATEGORIES[searchCategory] || [];
+        const relevantInterests = interests.filter(interest => {
+            const interestLower = interest.toLowerCase();
+            // Check if interest is in the same category
+            return categoryKeywords.some(keyword => 
+                interestLower.includes(keyword) || keyword.includes(interestLower)
+            );
+        });
+        
+        // If we found relevant interests in the same category, return them
+        if (relevantInterests.length > 0) {
+            // Sort by relevance (exact matches first)
+            const sorted = relevantInterests.sort((a, b) => {
+                const aLower = a.toLowerCase();
+                const bLower = b.toLowerCase();
+                const aExact = aLower === searchLower ? 10 : (aLower.includes(searchLower) ? 5 : 0);
+                const bExact = bLower === searchLower ? 10 : (bLower.includes(searchLower) ? 5 : 0);
+                return bExact - aExact;
+            });
+            return sorted.slice(0, 5); // Show top 5 relevant interests
+        }
+        
+        // Fallback: show interests that contain search term or are in same category
+        const fallback = interests.filter(interest => {
+            const interestLower = interest.toLowerCase();
+            return interestLower.includes(searchLower) || searchLower.includes(interestLower);
+        });
+        
+        return fallback.length > 0 ? fallback.slice(0, 5) : interests.slice(0, 5);
+    };
+
+    // ========== GROUP INTERESTS BY CATEGORY ==========
+    const groupInterestsByCategory = (interests) => {
+        if (!interests || !Array.isArray(interests)) return {};
+        
+        const grouped = {};
+        const uncategorized = [];
+        
+        interests.forEach(interest => {
+            const interestLower = interest.toLowerCase();
+            let categorized = false;
+            
+            for (const [category, keywords] of Object.entries(INTEREST_CATEGORIES)) {
+                if (keywords.some(keyword => interestLower.includes(keyword) || keyword.includes(interestLower))) {
+                    if (!grouped[category]) grouped[category] = [];
+                    grouped[category].push(interest);
+                    categorized = true;
+                    break;
+                }
+            }
+            
+            if (!categorized) {
+                uncategorized.push(interest);
+            }
+        });
+        
+        if (uncategorized.length > 0) {
+            grouped['Other'] = uncategorized;
+        }
+        
+        return grouped;
     };
 
     const [showInterestPopup, setShowInterestPopup] = useState(false);
@@ -758,6 +1058,49 @@ function SocialAIMarketingEngine() {
             console.error('Unexpected error fetching notifications:', error);
         }
     }, [user]);
+
+    // Add this helper function before the useEffect
+    const getModeExpiryInfo = useCallback(() => {
+        if (!user) return null;
+        
+        const isAdminUser = user.email === 'deonmahachi8@gmail.com';
+        const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
+        
+        if (isAdminUser) {
+            return {
+                isAdmin: true,
+                isExpired: false,
+                timeRemaining: 'Never expires',
+                timeRemainingMs: Infinity,
+                expiresAt: 'Never'
+            };
+        }
+        
+        if (!timestamp || !selectedMode) {
+            return {
+                isAdmin: false,
+                isExpired: true,
+                timeRemaining: 'No mode selected',
+                timeRemainingMs: 0,
+                expiresAt: 'N/A'
+            };
+        }
+        
+        const age = Date.now() - parseInt(timestamp);
+        const MODE_EXPIRY_MS = 60 * 60 * 1000;
+        const isExpired = age >= MODE_EXPIRY_MS;
+        const remainingMs = Math.max(0, MODE_EXPIRY_MS - age);
+        const remainingMinutes = Math.floor(remainingMs / 60000);
+        const remainingSeconds = Math.floor((remainingMs % 60000) / 1000);
+        
+        return {
+            isAdmin: false,
+            isExpired: isExpired,
+            timeRemaining: isExpired ? 'Expired' : `${remainingMinutes}m ${remainingSeconds}s`,
+            timeRemainingMs: remainingMs,
+            expiresAt: new Date(parseInt(timestamp) + MODE_EXPIRY_MS).toLocaleTimeString()
+        };
+    }, [user, selectedMode]);
 
     const PushEnableButton = () => {
         const handleEnable = async () => {
@@ -1468,12 +1811,35 @@ function SocialAIMarketingEngine() {
         setGlobalLoadingMessage('Opening WhatsApp...');
         setOpeningWhatsApp(true);
 
+         // ✅ 1. MARK AS CONTACTED FIRST (BEFORE ANYTHING ELSE)
+        try {
+            const contactId = targetUserId || product?.id;
+            if (contactId) {
+                updateContactedStatus(contactId);
+            }
+        } catch (markError) {
+            // ✅ SILENT FAIL - Won't break WhatsApp opening
+            console.warn('Failed to mark as contacted:', markError.message);
+        }
+
         // ✅ 3. RATE LIMIT CHECK
         let isBlocked = false;
         let blockReason = '';
         let blockResetTime = 0;
         let remaining = 50;
         let total = 50;
+
+        // ✅ SAVE SEARCH BEFORE OPENING WHATSAPP
+        try {
+            if (selectedMode === 'seller' && prospects.length > 0) {
+                saveSearchResults(prospects, productSearch, 'seller');
+            } else if (selectedMode === 'buyer' && productsFound.length > 0) {
+                saveSearchResults(productsFound, productSearch, 'buyer');
+            }
+            console.log('💾 Search saved before opening WhatsApp');
+        } catch (saveError) {
+            console.warn('Could not save search before WhatsApp:', saveError.message);
+        }
 
         // Make sure rate limiter is initialized
         if (!smartLimiterInstance) {
@@ -2849,59 +3215,138 @@ function SocialAIMarketingEngine() {
         }
     }, [location.pathname, user, selectedMode, saveUserLocation]);
 
-    // ✅ Restore location on app load (no auto-restore)
+    // ✅ Restore location on app load - WITH EXPIRY CHECK
     useEffect(() => {
-        if (!user || !user.id) return;
+        // ✅ Wait for auth to finish loading
+        if (authLoading) {
+            console.log('[Location] Auth still loading, waiting...');
+            return;
+        }
         
-        // ✅ Only restore if no mode is selected AND no mode was chosen
+        if (!user || !user.id) {
+            console.log('[Location] No user, skipping');
+            return;
+        }
+        
+        // ✅ If mode is null, just show mode selection (don't navigate away from /app)
         if (!selectedMode) {
-            // ✅ First check if user has a chosen mode preference
-            const chosenMode = localStorage.getItem(`straun_chosen_mode_${user.id}`);
-            
-            if (chosenMode) {
-                console.log('✅ User has chosen mode:', chosenMode);
-                // Don't auto-set - show mode selection but remember their choice
-                // This allows them to change mode if they want
-                return;
-            }
-            
-            const storageKey = `straun_userLocation_${user.id}`;
-            const saved = localStorage.getItem(storageKey);
-            
-            if (saved) {
-                try {
-                    const data = JSON.parse(saved);
-                    const ONE_HOUR = 60 * 60 * 1000;
-                    
-                    if (Date.now() - data.timestamp < ONE_HOUR) {
-                        console.log('🔄 Found saved location for user:', user.id);
-                        
-                        // ✅ DON'T auto-restore mode - show mode selection
-                        // Just navigate to the page if valid
-                        if (data.path && data.path !== '/' && data.path !== '/login') {
-                            setTimeout(() => {
-                                navigate(data.path);
-                            }, 100);
-                        }
-                        return;
-                    } else {
-                        localStorage.removeItem(storageKey);
-                        console.log('⏰ Location expired for user:', user.id);
-                    }
-                } catch (e) {
-                    console.error('Error restoring location:', e);
-                    localStorage.removeItem(storageKey);
-                }
-            }
-            
-            // ✅ No valid saved location - show mode selection
-            console.log('👤 No valid saved location - showing mode selection');
+            console.log('⏰ Mode is null - showing mode selection');
             setMode(null);
             setIsProfileComplete(false);
             setShowSellerDecision(false);
             setShowBuyerDecision(false);
+            
+            // Clear location data
+            const storageKey = `straun_userLocation_${user.id}`;
+            localStorage.removeItem(storageKey);
+            localStorage.removeItem(`straun_chosen_mode_${user.id}`);
+            
+            // ✅ If we're on /app, stay there (mode selection UI will show)
+            // ✅ If we're on root, stay there (mode selection UI will show)
+            // ✅ Only navigate if we're on some other page
+            if (location.pathname !== '/' && location.pathname !== '/app') {
+                console.log('[Location] Navigating to home for mode selection');
+                navigate('/');
+            } else {
+                console.log('[Location] Staying on current page for mode selection');
+            }
+            return;
         }
-    }, [user, selectedMode, setMode, navigate, profileData]);
+        
+        // ✅ If mode exists, try to restore location (but only if within 1 hour)
+        const storageKey = `straun_userLocation_${user.id}`;
+        const saved = localStorage.getItem(storageKey);
+        
+        if (saved) {
+            try {
+                const data = JSON.parse(saved);
+                const ONE_HOUR = 60 * 60 * 1000;
+                
+                // ✅ Admin: No expiry check
+                // ✅ Regular user: Check 1 hour expiry
+                const isAdminUser = user.email === 'deonmahachi8@gmail.com';
+                const isExpired = Date.now() - data.timestamp >= ONE_HOUR;
+                
+                if (isAdminUser || !isExpired) {
+                    console.log('🔄 Found valid saved location for user:', user.id, isAdminUser ? '(Admin - no expiry)' : '');
+                    
+                    if (data.path && data.path !== '/' && data.path !== '/login') {
+                        setTimeout(() => {
+                            navigate(data.path);
+                        }, 100);
+                    }
+                    return;
+                } else {
+                    localStorage.removeItem(storageKey);
+                    console.log('⏰ Location expired for regular user');
+                }
+            } catch (e) {
+                console.error('Error restoring location:', e);
+                localStorage.removeItem(storageKey);
+            }
+        }
+    }, [user, selectedMode, setMode, navigate, location.pathname, authLoading]);
+
+    // ⏰ MODE EXPIRY TIMER - Console logging for debugging
+    useEffect(() => {
+        if (!user) return;
+        
+        // Log expiry info immediately
+        const logExpiryInfo = () => {
+            if (authLoading) return;
+            
+            const expiryInfo = getModeExpiryInfo ? getModeExpiryInfo() : null;
+            
+            if (!expiryInfo) {
+            console.log('⏰ [Expiry] No expiry info available');
+            return;
+            }
+            
+            if (expiryInfo.isAdmin) {
+            console.log('👑 [Expiry] Admin mode - NEVER expires');
+            return;
+            }
+            
+            if (!selectedMode) {
+            console.log('⏰ [Expiry] No mode selected - showing mode selection');
+            return;
+            }
+            
+            const status = expiryInfo.isExpired ? '❌ EXPIRED' : '✅ Active';
+            const timeLeft = expiryInfo.timeRemaining;
+            const expiresAt = expiryInfo.expiresAt;
+            
+            console.log(`⏰ [Expiry] Mode: ${selectedMode.toUpperCase()} | Status: ${status} | Time remaining: ${timeLeft} | Expires at: ${expiresAt}`);
+            
+            // ⚠️ Warning if less than 5 minutes left
+            if (!expiryInfo.isExpired && expiryInfo.timeRemainingMs < 300000) {
+            console.warn(`⚠️ [Expiry] LESS THAN 5 MINUTES LEFT! ${timeLeft} remaining`);
+            }
+        };
+        
+        // Log immediately
+        logExpiryInfo();
+        
+        // Log every 30 seconds
+        const intervalId = setInterval(() => {
+            logExpiryInfo();
+        }, 30000); // 30 seconds
+        
+        // Log every minute with a different message
+        const minuteInterval = setInterval(() => {
+            if (selectedMode) {
+            const expiryInfo = getModeExpiryInfo ? getModeExpiryInfo() : null;
+            if (expiryInfo && !expiryInfo.isExpired) {
+                console.log(`⏰ [Expiry] Still active - ${expiryInfo.timeRemaining} remaining`);
+            }
+            }
+        }, 60000); // 1 minute
+        
+        return () => {
+            clearInterval(intervalId);
+            clearInterval(minuteInterval);
+        };
+    }, [user, selectedMode, getModeExpiryInfo, authLoading]);
 
     // ✅ Update search when URL changes (back/forward navigation)
     useEffect(() => {
@@ -3297,6 +3742,196 @@ function SocialAIMarketingEngine() {
             setLoading(false);
         }
     };
+
+    // 🔄 RESTORE SEARCH ON PAGE LOAD - IMPROVED VERSION (ERROR-PROOF)
+    useEffect(() => {
+        // ✅ GUARD: Must have user, profile complete, and not already restored
+        if (!user || !isProfileComplete || restoredSearch) {
+            return;
+        }
+
+        // ✅ Wait for auth to load
+        if (authLoading) {
+            console.log('[Search Restore] Auth still loading...');
+            return;
+        }
+
+        // ✅ Only restore when page is visible (returning from WhatsApp)
+        if (document.visibilityState !== 'visible') {
+            console.log('[Search Restore] Page not visible, waiting...');
+            return;
+        }
+
+        try {
+            const savedData = loadSearchResults();
+            if (!savedData) {
+                console.log('[Search Restore] No saved data found');
+                return;
+            }
+
+            // ✅ GUARD: Mode must match
+            if (savedData.mode !== selectedMode) {
+                console.log('🔄 Mode mismatch, not restoring');
+                return;
+            }
+
+            // ✅ GUARD: Results must be valid array
+            if (!savedData.results || !Array.isArray(savedData.results) || savedData.results.length === 0) {
+                console.log('⚠️ No results to restore');
+                return;
+            }
+
+            console.log('🔄 Restoring search results...', savedData.results.length, 'items');
+            
+            // ✅ Restore data based on mode
+            if (selectedMode === 'seller') {
+                setProspects(savedData.results);
+            } else {
+                setProductsFound(savedData.results);
+            }
+            
+            // ✅ Restore search term
+            if (savedData.searchTerm) {
+                setProductSearch(savedData.searchTerm);
+            }
+            
+            // ✅ Restore contacted IDs
+            if (savedData.contactedIds && Array.isArray(savedData.contactedIds)) {
+                setContactedIds(savedData.contactedIds);
+            }
+            
+            // ✅ Restore page and scroll state
+            if (savedData.page !== undefined) {
+                setCurrentPage(savedData.page || 0);
+            }
+            if (savedData.hasMore !== undefined) {
+                setHasMore(savedData.hasMore);
+            }
+            
+            // ✅ Restore session ID
+            if (savedData.sessionId) {
+                setSearchSessionId(savedData.sessionId);
+            }
+            
+            setRestoredSearch(true);
+            
+            // ✅ Show subtle notification
+            const count = savedData.results.length;
+            const elapsed = Math.round((Date.now() - savedData.timestamp) / 1000);
+            const timeStr = elapsed < 60 ? `${elapsed} seconds` : `${Math.round(elapsed / 60)} minutes`;
+            showToastNotification(`🔄 Restored ${count} results from ${timeStr} ago`);
+
+            // ✅ Scroll to results section
+            setTimeout(() => {
+                const resultsSection = document.querySelector('.results-section');
+                if (resultsSection) {
+                    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 300);
+
+        } catch (restoreError) {
+            console.warn('Search restore failed:', restoreError.message);
+            // Clear corrupted data
+            try {
+                const key = getSearchStorageKey();
+                if (key) localStorage.removeItem(key);
+            } catch (e) {}
+        }
+    }, [user, isProfileComplete, selectedMode, restoredSearch, authLoading]);
+
+    // ⏰ CHECK SEARCH EXPIRY EVERY 30 SECONDS
+    useEffect(() => {
+        if (!user?.id || !restoredSearch) return;
+
+        const checkExpiry = () => {
+            try {
+                const key = getSearchStorageKey();
+                if (!key) return;
+                
+                const raw = localStorage.getItem(key);
+                if (!raw) {
+                    // Search was cleared, reset state
+                    setRestoredSearch(false);
+                    return;
+                }
+                
+                const data = JSON.parse(raw);
+                const age = Date.now() - data.timestamp;
+                
+                if (age > SEARCH_EXPIRY_MS) {
+                    console.log('⏰ Search expired!');
+                    localStorage.removeItem(key);
+                    setSearchExpired(true);
+                    setRestoredSearch(false);
+                    
+                    // Clear results
+                    if (selectedMode === 'seller') {
+                        setProspects([]);
+                    } else {
+                        setProductsFound([]);
+                    }
+                    
+                    showToastNotification('⏰ Search results expired after 20 minutes');
+                }
+            } catch (e) {
+                // ✅ SILENT FAIL
+                console.warn('Expiry check failed:', e.message);
+            }
+        };
+
+        // Check immediately
+        checkExpiry();
+
+        // Check every 30 seconds
+        const interval = setInterval(checkExpiry, 30000);
+
+        return () => clearInterval(interval);
+    }, [user, restoredSearch, selectedMode]);
+
+    // 💾 SAVE SEARCH WHEN USER LEAVES THE PAGE
+    useEffect(() => {
+        if (!user || !isProfileComplete) return;
+
+        const handleVisibilityChange = () => {
+            // When user leaves the page (goes to WhatsApp, switches tabs, etc.)
+            if (document.visibilityState === 'hidden') {
+                // Save current search results if any
+                if (selectedMode === 'seller' && prospects.length > 0) {
+                    saveSearchResults(prospects, productSearch, 'seller');
+                } else if (selectedMode === 'buyer' && productsFound.length > 0) {
+                    saveSearchResults(productsFound, productSearch, 'buyer');
+                }
+                console.log('💾 Search saved on page hide');
+            }
+            
+            // When user comes back to the page
+            if (document.visibilityState === 'visible') {
+                if (!restoredSearch) {
+                    // Try to restore search results
+                    const savedData = loadSearchResults();
+                    if (savedData && savedData.results && savedData.results.length > 0) {
+                        console.log('🔄 Restoring search on visibility change');
+                        if (selectedMode === 'seller') {
+                            setProspects(savedData.results);
+                        } else {
+                            setProductsFound(savedData.results);
+                        }
+                        if (savedData.searchTerm) {
+                            setProductSearch(savedData.searchTerm);
+                        }
+                        setRestoredSearch(true);
+                        showToastNotification(`🔄 Restored ${savedData.results.length} results`);
+                    }
+                }
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [user, isProfileComplete, selectedMode, prospects, productsFound, productSearch, restoredSearch]);
 
     // COMPLETE FIXED NOTIFICATION useEffect
     useEffect(() => {
@@ -3906,6 +4541,33 @@ function SocialAIMarketingEngine() {
             supabase.removeChannel(buyerMatchChannel);
         };
     }, [user, isProfileComplete, selectedMode, fetchNotifications, showNotifications]);
+
+    // ✅ RESTORE MODE ON PAGE LOAD - BUT ONLY IF MODE IS NOT EXPIRED
+    useEffect(() => {
+        // ✅ If user is logged in and mode is NOT null, navigate to app
+        if (user && selectedMode && location.pathname === '/') {
+            console.log('🔄 Mode loaded from AuthContext, navigating to app');
+            navigate('/app');
+            return;
+        }
+        
+        // ✅ CRITICAL FIX: If mode is null and we're on /app
+        // Admin: Allow staying on /app to see mode selection
+        // Regular user: Should also see mode selection on /app
+        if (user && !selectedMode && location.pathname === '/app') {
+            console.log('⏰ Mode is null - showing mode selection on /app');
+            // ✅ DON'T navigate away - just show mode selection
+            // The mode selection UI is already rendered when selectedMode is null
+            // So we just stay on /app and let the UI handle it
+            return;
+        }
+        
+        // ✅ If mode is null and we're on any other page except / and /app, go to /
+        if (user && !selectedMode && location.pathname !== '/' && location.pathname !== '/app') {
+            console.log('⏰ Mode is null - redirecting to mode selection');
+            navigate('/');
+        }
+    }, [user, selectedMode, location.pathname, navigate, isAdmin]);
 
     // Save filters to localStorage
     useEffect(() => {
@@ -4582,6 +5244,18 @@ function SocialAIMarketingEngine() {
                 }
             }
 
+            // ✅ SAVE RESULTS AFTER SUCCESSFUL SEARCH (with error protection)
+            try {
+                if (selectedMode === 'seller' && prospects.length > 0) {
+                    saveSearchResults(prospects, productSearch, 'seller');
+                } else if (selectedMode === 'buyer' && productsFound.length > 0) {
+                    saveSearchResults(productsFound, productSearch, 'buyer');
+                }
+            } catch (saveError) {
+                // ✅ SILENT FAIL - Won't break the search
+                console.warn('Search save failed:', saveError.message);
+            }
+
         } catch (error) {
             setError(error.message || 'Search failed');
         } finally {
@@ -4889,7 +5563,7 @@ function SocialAIMarketingEngine() {
 
             console.log('📋 Fetching buyers from database...');
             
-            // SIMPLIFIED LIKE PREVIOUS VERSION
+            // ✅ Get buyers from profiles table - username already contains email
             const { data: allBuyers, error: prospectsError } = await supabase
                 .from('profiles')
                 .select('user_id, username, location, interests, phone_number')
@@ -4941,7 +5615,6 @@ function SocialAIMarketingEngine() {
                     return false;
                 }
 
-                // If no interests after sanitization, return false
                 if (interestsArray.length === 0) return false;
 
                 const hasMatch = interestsArray.some(interest => {
@@ -4949,13 +5622,11 @@ function SocialAIMarketingEngine() {
                     
                     const interestLower = interest.toLowerCase();
                     
-                    // Check for word matches
                     const wordMatch = searchWords.some(word => {
                         if (!word) return false;
                         return interestLower.includes(word);
                     });
 
-                    // Check for full term match
                     const fullTermMatch = interestLower.includes(searchTermLower);
 
                     return wordMatch || fullTermMatch;
@@ -4977,22 +5648,57 @@ function SocialAIMarketingEngine() {
                 return aLocation.localeCompare(bLocation);
             });
 
+            // ✅ Format prospects - username already contains email
             const formattedProspects = sortedProspects.map(prospect => {
                 let interests = [];
                 try {
-                    interests = typeof prospect.interests === 'string' 
-                        ? JSON.parse(prospect.interests) 
-                        : (Array.isArray(prospect.interests) ? prospect.interests : []);
+                    if (typeof prospect.interests === 'string') {
+                        try {
+                            interests = JSON.parse(prospect.interests);
+                        } catch (e) {
+                            interests = [prospect.interests];
+                        }
+                    } else if (Array.isArray(prospect.interests)) {
+                        interests = prospect.interests;
+                    }
                 } catch (e) {
                     interests = [];
                 }
 
+                // ✅ username is the email (as you confirmed)
+                const email = prospect.username || 'No email provided';
+                
+                // ✅ FILTER INTERESTS - ONLY show relevant ones
+                const relevantInterests = getRelevantInterests(interests, searchTerm);
+                
+                // ✅ GROUP interests by category
+                const groupedInterests = groupInterestsByCategory(relevantInterests);
+                
+                // ✅ Format for display
+                let interestsDisplay = '';
+                if (relevantInterests.length === 0) {
+                    interestsDisplay = 'No relevant interests';
+                } else {
+                    const parts = [];
+                    for (const [category, items] of Object.entries(groupedInterests)) {
+                        if (items.length > 0) {
+                            const categoryLabel = category.charAt(0).toUpperCase() + category.slice(1);
+                            parts.push(`${categoryLabel}: ${items.join(', ')}`);
+                        }
+                    }
+                    interestsDisplay = parts.join(' | ');
+                }
+
                 return {
                     id: prospect.user_id,
-                    email: sanitizeEmail(prospect.username),
+                    email: email,  // ✅ This is the username/email
+                    username: prospect.username,
                     location: sanitizeLocation(prospect.location || 'Location not specified'),
                     interest: searchTerm,
                     interests: interests,
+                    relevantInterests: relevantInterests,
+                    groupedInterests: groupedInterests,
+                    interestsDisplay: interestsDisplay,
                     phone_number: sanitizePhone(prospect.phone_number),
                     isSameLocation: prospect.location && 
                                 prospect.location.toLowerCase() === sellerLocation.toLowerCase()
@@ -5003,7 +5709,6 @@ function SocialAIMarketingEngine() {
                 setShowSafetyWarning(true);
             }
 
-            // Save to cache
             setSearchCache(prev => ({
                 ...prev,
                 [cacheKey]: formattedProspects
@@ -5011,7 +5716,6 @@ function SocialAIMarketingEngine() {
             
             setProspects(formattedProspects);
 
-            // Log the search
             if (formattedProspects.length > 0) {
                 try {
                     await supabase
@@ -5121,6 +5825,9 @@ function SocialAIMarketingEngine() {
                 localStorage.removeItem(`straun_chosen_mode_${user.id}`);
                 localStorage.removeItem('straun_profileComplete');
                 localStorage.removeItem('straun_profileData');
+
+                // ✅ CLEAR SEARCH PERSISTENCE
+                clearSearchResults();
             }
             
 
@@ -5138,6 +5845,9 @@ function SocialAIMarketingEngine() {
             setCurrentPage(0);
             setHasMore(true);
             setSearchCache({});
+            setContactedIds([]);
+            setRestoredSearch(false);
+            setSearchExpired(false);
             
             safeNavigate('/');
         } catch (error) {
@@ -7416,11 +8126,27 @@ function SocialAIMarketingEngine() {
                                         ) : (
                                             <div className="prospects-grid">
                                                 {prospects.map((p, index) => (
-                                                    <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`}>
+                                                    <div key={p.id || index} className={`prospect-card ${p.isSameLocation ? 'same-location' : ''}`} style={{ position: 'relative' }}>
                                                         <div className="prospect-card-header">
                                                             <div className="prospect-avatar">
                                                                 {p.email ? p.email.charAt(0).toUpperCase() : '?'}
                                                             </div>
+
+                                                            {/* ✅ CIRCLE INDICATOR - BLUE or GREEN */}
+                                                            <div style={{
+                                                                position: 'absolute',
+                                                                top: '10px',
+                                                                right: '10px',
+                                                                width: '14px',
+                                                                height: '14px',
+                                                                borderRadius: '50%',
+                                                                background: contactedIds.includes(p.id) ? '#3B82F6' : '#22C55E',
+                                                                boxShadow: '0 0 8px rgba(0,0,0,0.3)',
+                                                                border: '2px solid white',
+                                                                zIndex: 5,
+                                                                transition: 'all 0.3s ease'
+                                                            }} />
+                                                            
                                                             <div className="prospect-identity">
                                                                 <h4>Potential Customer</h4>
                                                                 <p className="prospect-email">{p.email || 'No email'}</p>
@@ -7443,6 +8169,47 @@ function SocialAIMarketingEngine() {
                                                             <div className="detail-item phone-detail">
                                                                 <span className="detail-label">📞 Phone:</span>
                                                                 <span className="detail-value">{p.phone_number || 'N/A'}</span>
+                                                            </div>
+
+                                                            {/* ✅ SMART INTERESTS DISPLAY - Grouped by category */}
+                                                            <div className="detail-item">
+                                                                <span className="detail-label">🎯 Relevant Interests:</span>
+                                                                <div className="detail-value" style={{ 
+                                                                    display: 'block', 
+                                                                    marginTop: '6px'
+                                                                }}>
+                                                                    {p.relevantInterests && p.relevantInterests.length > 0 ? (
+                                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                                            {Object.entries(p.groupedInterests || {}).map(([category, items]) => (
+                                                                                items.length > 0 && (
+                                                                                    <div key={category} style={{
+                                                                                        display: 'flex',
+                                                                                        alignItems: 'center',
+                                                                                        gap: '6px',
+                                                                                        padding: '4px 8px',
+                                                                                        backgroundColor: category === 'Other' ? '#f5f5f5' : '#f0f4ff',
+                                                                                        borderRadius: '6px',
+                                                                                        border: `1px solid ${category === 'Other' ? '#e0e0e0' : '#dce4f0'}`
+                                                                                    }}>
+                                                                                        <span style={{ 
+                                                                                            fontWeight: '600', 
+                                                                                            fontSize: '11px',
+                                                                                            color: category === 'Other' ? '#666' : '#667eea',
+                                                                                            minWidth: '60px'
+                                                                                        }}>
+                                                                                            {category === 'Other' ? '📌' : '📂'} {category}:
+                                                                                        </span>
+                                                                                        <span style={{ fontSize: '13px', color: '#333' }}>
+                                                                                            {items.join(', ')}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                )
+                                                                            ))}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span style={{ color: '#999', fontSize: '13px' }}>No relevant interests found</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                             <div className="detail-item">
                                                                 <span className="detail-label">🎯 Interested in:</span>
@@ -7638,7 +8405,7 @@ function SocialAIMarketingEngine() {
                                                             // Call handleProductClick to track with recommendation engine
                                                             handleProductClick(p);
                                                         }}
-                                                        style={{ cursor: 'pointer' }}
+                                                        style={{ cursor: 'pointer' , position: 'relative' }}
                                                     >
                                                         {index === 0 && <div className="best-deal-badge">🔥 Best Deal</div>}
                                                             
@@ -7657,6 +8424,38 @@ function SocialAIMarketingEngine() {
                                                                         allowImages={true}
                                                                     />
                                                                 </div>
+                                                            )}
+
+                                                            {/* ✅ CIRCLE INDICATOR - BLUE or GREEN */}
+                                                            {(() => {
+                                                                const id = p?.seller_id || p?.id;
+                                                                const isContacted = contactedIds.includes(id);
+                                                                return (
+                                                                    <div style={{
+                                                                        position: 'absolute',
+                                                                        top: '10px',
+                                                                        right: '10px',
+                                                                        width: '14px',
+                                                                        height: '14px',
+                                                                        borderRadius: '50%',
+                                                                        background: isContacted ? '#3B82F6' : '#22C55E', // Blue or Green
+                                                                        boxShadow: '0 0 8px rgba(0,0,0,0.3)',
+                                                                        border: '2px solid white',
+                                                                        zIndex: 5,
+                                                                        transition: 'all 0.3s ease',
+                                                                        animation: isContacted ? 'none' : 'pulse 2s infinite'
+                                                                    }} />
+                                                                );
+                                                            })()}
+                                                            
+                                                            {/* ✅ If not contacted, add subtle pulse animation */}
+                                                            {!contactedIds.includes(p?.seller_id || p?.id) && (
+                                                                <style>{`
+                                                                    @keyframes pulse {
+                                                                        0%, 100% { opacity: 1; transform: scale(1); }
+                                                                        50% { opacity: 0.7; transform: scale(1.1); }
+                                                                    }
+                                                                `}</style>
                                                             )}
                                                             
                                                             {p?.image_url ? (

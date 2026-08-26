@@ -398,14 +398,14 @@ OfflineBanner.displayName = 'OfflineBanner';
 
 // App.jsx - Updated ProtectedRoute with navigation reset
 const ProtectedRoute = React.memo(({ children }) => {
-  const { user, isAuthenticated, loading } = useAuthState();
+  const { user, isAuthenticated, loading, selectedMode } = useAuthState();
   const { resetNavigation } = useNavigation();
   const location = useLocation();
   const [checking, setChecking] = useState(true);
   const [sessionValid, setSessionValid] = useState(false);
   const checkAttempts = useRef(0);
   const maxCheckAttempts = 8;
-  const checkDone = useRef(false); // ✅ ADD THIS
+  const checkDone = useRef(false);
 
   useEffect(() => {
     // ✅ Prevent multiple checks
@@ -500,19 +500,35 @@ const ProtectedRoute = React.memo(({ children }) => {
     sessionValid,
     hasUser: !!user,
     authenticated,
-    path: location.pathname
+    path: location.pathname,
+    selectedMode
   });
 
-  if (location.pathname === '/' || location.pathname === '/seller-decision' || location.pathname === '/buyer-decision' ||location.pathname === '/buyer-form') {
+  // ✅ ALLOW ACCESS TO THESE PAGES (mode selection, setup, etc.)
+  const publicPaths = ['/', '/seller-decision', '/buyer-decision', '/buyer-form'];
+  if (publicPaths.includes(location.pathname)) {
+    console.log('[ProtectedRoute] ✅ Public path allowed:', location.pathname);
     return children;
   }
 
-  if (!authenticated) {
-    console.log('[ProtectedRoute] 🔒 Redirecting to login');
-    resetNavigation();
-    return <Navigate to="/" replace />;
+  // ✅ CRITICAL FIX: Allow /app even when mode is null (for mode selection UI)
+  if (location.pathname === '/app') {
+    // ✅ If authenticated, allow access to /app even with null mode
+    if (authenticated) {
+      console.log('[ProtectedRoute] ✅ App path allowed (mode:', selectedMode || 'null', ')');
+      return children;
+    }
   }
 
+  // ✅ Not authenticated - redirect to login
+  if (!authenticated) {
+    console.log('[ProtectedRoute] 🔒 Not authenticated, redirecting to login');
+    resetNavigation();
+    return <Navigate to="/login" replace />;
+  }
+
+  // ✅ For all other protected routes, allow access
+  console.log('[ProtectedRoute] ✅ Allowing access to:', location.pathname);
   return children;
 });
 
