@@ -426,39 +426,77 @@ select:focus {
     border-left: 4px solid var(--warning-color);
 }
 
+/* ✅ FIXED: Better button styles for buyer setup */
 .mode-indicator {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    margin: 1.5rem 0;
-    padding: 1rem;
-    background: var(--light-bg);
-    border-radius: var(--border-radius-md);
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
 }
 
 .mode-badge {
-    padding: 0.5rem 1rem;
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    padding: 4px 12px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 20px;
+    font-size: 13px;
     color: white;
-    border-radius: var(--border-radius-sm);
-    font-weight: 600;
-    font-size: 0.9rem;
 }
 
 .change-mode-button {
-    padding: 0.5rem 1rem;
-    background: transparent;
-    border: 2px solid var(--text-secondary);
-    color: var(--text-secondary);
-    border-radius: var(--border-radius-sm);
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    color: white;
     cursor: pointer;
-    font-weight: 500;
-    transition: all var(--transition-fast);
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
 }
 
 .change-mode-button:hover {
     background: var(--text-secondary);
     color: white;
+}
+
+/* ✅ FIXED: Better button styles for buyer setup */
+.mode-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+}
+
+.mode-badge {
+    padding: 4px 12px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 20px;
+    font-size: 13px;
+    color: white;
+}
+
+.change-mode-button {
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 20px;
+    color: white;
+    cursor: pointer;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
 }
 
 .existing-profile-info {

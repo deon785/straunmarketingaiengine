@@ -666,6 +666,94 @@ function SocialAIMarketingEngine() {
     category: '' // Optional: if you have categories
     });
 
+    // ✅ STRONG MODE EXPIRY CHECK - Runs on app load
+    useEffect(() => {
+        // Only run if user exists and has a selected mode
+        if (!user || !selectedMode) return;
+        
+        const isAdminUser = user.email === 'deonmahachi8@gmail.com';
+        if (isAdminUser) {
+            console.log('👑 Admin mode - NEVER expires');
+            return;
+        }
+        
+        const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
+        const MODE_EXPIRY_MS = 60 * 60 * 1000;
+        
+        if (!timestamp) {
+            console.log('⏰ No mode timestamp found - clearing mode');
+            setMode(null);
+            setIsProfileComplete(false);
+            localStorage.removeItem('straun_chosen_mode');
+            localStorage.removeItem('straun_profileComplete');
+            if (user?.id) {
+                localStorage.removeItem(`straun_userLocation_${user.id}`);
+            }
+            return;
+        }
+        
+        const age = Date.now() - parseInt(timestamp);
+        const isExpired = age >= MODE_EXPIRY_MS;
+        
+        if (isExpired) {
+            console.log(`⏰ Mode EXPIRED after ${Math.round(age / 60000)} minutes`);
+            
+            setMode(null);
+            setIsProfileComplete(false);
+            setShowSellerDecision(false);
+            setShowBuyerDecision(false);
+            setShowBuyerForm(false);
+            
+            localStorage.removeItem('straun_chosen_mode');
+            localStorage.removeItem('straun_selectedMode_timestamp');
+            localStorage.removeItem('straun_profileComplete');
+            localStorage.removeItem('straun_profileData');
+            
+            if (user?.id) {
+                localStorage.removeItem(`straun_userLocation_${user.id}`);
+                localStorage.removeItem(`straun_last_search_${user.id}`);
+            }
+            
+            setProductsFound([]);
+            setProspects([]);
+            setProductSearch('');
+            setAllProducts([]);
+            setRestoredSearch(false);
+            
+            if (location.pathname !== '/' && location.pathname !== '/app') {
+                navigate('/');
+            }
+            
+            // ✅ REPLACE showToastNotification with console.log + simple alert
+            console.log('⏰ Your session expired. Please select your mode again.');
+            // Simple fallback notification
+            try {
+                alert('⏰ Your session expired. Please select your mode again.');
+            } catch (e) {
+                // ignore if alert fails
+            }
+        } else {
+            const remainingMs = MODE_EXPIRY_MS - age;
+            const remainingMinutes = Math.floor(remainingMs / 60000);
+            console.log(`⏰ Mode expires in ${remainingMinutes} minutes`);
+        }
+    }, [user, selectedMode, setMode, navigate, location.pathname]);
+
+    // ✅ Save timestamp when mode is SET
+    useEffect(() => {
+        if (selectedMode && user) {
+            const isAdminUser = user.email === 'deonmahachi8@gmail.com';
+            if (!isAdminUser) {
+                localStorage.setItem('straun_selectedMode_timestamp', String(Date.now()));
+                localStorage.setItem('straun_chosen_mode', selectedMode);
+                if (user?.id) {
+                    localStorage.setItem(`straun_chosen_mode_${user.id}`, selectedMode);
+                }
+                console.log('⏰ Mode timestamp saved:', new Date().toISOString());
+            }
+        }
+    }, [selectedMode, user]);
+
     const activeFilterCount = useMemo(() => {
         return Object.values(filters).filter(val => 
             (typeof val === 'string' && val !== '' && val !== 'newest') || 
@@ -3839,54 +3927,67 @@ function SocialAIMarketingEngine() {
         }
     }, [user, isProfileComplete, selectedMode, restoredSearch, authLoading]);
 
-    // ⏰ CHECK SEARCH EXPIRY EVERY 30 SECONDS
+    // ⏰ STRONG SEARCH EXPIRY CHECK - Clears old data immediately
     useEffect(() => {
         if (!user?.id || !restoredSearch) return;
 
         const checkExpiry = () => {
             try {
-                const key = getSearchStorageKey();
-                if (!key) return;
+            const key = getSearchStorageKey();
+            if (!key) return;
+            
+            const raw = localStorage.getItem(key);
+            if (!raw) {
+                setRestoredSearch(false);
+                return;
+            }
+            
+            const data = JSON.parse(raw);
+            
+            // ✅ Check if data is valid
+            if (!data || !data.results || !Array.isArray(data.results)) {
+                console.log('⚠️ Invalid search data, clearing');
+                localStorage.removeItem(key);
+                setRestoredSearch(false);
+                return;
+            }
+            
+            const age = Date.now() - data.timestamp;
+            
+            // ✅ Expire after 20 minutes
+            if (age > SEARCH_EXPIRY_MS) {
+                console.log(`⏰ Search EXPIRED after ${Math.round(age / 60000)} minutes`);
+                localStorage.removeItem(key);
+                setSearchExpired(true);
+                setRestoredSearch(false);
                 
-                const raw = localStorage.getItem(key);
-                if (!raw) {
-                    // Search was cleared, reset state
-                    setRestoredSearch(false);
-                    return;
+                // Clear results
+                if (selectedMode === 'seller') {
+                setProspects([]);
+                } else {
+                setProductsFound([]);
                 }
                 
-                const data = JSON.parse(raw);
-                const age = Date.now() - data.timestamp;
-                
-                if (age > SEARCH_EXPIRY_MS) {
-                    console.log('⏰ Search expired!');
-                    localStorage.removeItem(key);
-                    setSearchExpired(true);
-                    setRestoredSearch(false);
-                    
-                    // Clear results
-                    if (selectedMode === 'seller') {
-                        setProspects([]);
-                    } else {
-                        setProductsFound([]);
-                    }
-                    
-                    showToastNotification('⏰ Search results expired after 20 minutes');
-                }
+                showToastNotification('⏰ Search results expired after 20 minutes');
+            } else {
+                // ✅ Log remaining time
+                const remainingMs = SEARCH_EXPIRY_MS - age;
+                const remainingMinutes = Math.round(remainingMs / 60000);
+                console.log(`⏰ Search expires in ${remainingMinutes} minutes`);
+            }
             } catch (e) {
-                // ✅ SILENT FAIL
-                console.warn('Expiry check failed:', e.message);
+            console.warn('Expiry check failed:', e.message);
             }
         };
 
         // Check immediately
         checkExpiry();
 
-        // Check every 30 seconds
-        const interval = setInterval(checkExpiry, 30000);
+        // Check every 15 seconds (more frequent)
+        const interval = setInterval(checkExpiry, 15000);
 
         return () => clearInterval(interval);
-    }, [user, restoredSearch, selectedMode]);
+    }, [user, restoredSearch, selectedMode, showToastNotification]);
 
     // 💾 SAVE SEARCH WHEN USER LEAVES THE PAGE
     useEffect(() => {
@@ -5742,28 +5843,25 @@ function SocialAIMarketingEngine() {
     }, [user, profileData, searchCache]);
 
     useEffect(() => {
-        // Listen for pull-to-refresh event
         const handlePullToRefresh = () => {
-            console.log('🔄 Pull-to-refresh triggered in SocialAIMarketingEngine');
+            console.log('🔄 Pull-to-refresh triggered');
             
-            if (selectedMode === 'seller' && productSearch.trim()) {
-            // Refresh prospects
-            findProspects(productSearch);
-            } else if (selectedMode === 'buyer' && productSearch.trim()) {
-            // Refresh products
-            findProducts(productSearch);
+            // ✅ ONLY refresh if there's a search term
+            if (productSearch && productSearch.trim().length >= 2) {
+            if (selectedMode === 'seller') {
+                findProspects(productSearch);
             } else if (selectedMode === 'buyer') {
-            // Refresh all products
-            fetchProducts();
+                findProducts(productSearch);
+            }
+            } else {
+            // ✅ If no search term, show message - DON'T load all products
+            showToastNotification('🔍 Enter a search term first');
             }
         };
         
         window.addEventListener('pull-to-refresh', handlePullToRefresh);
-        
-        return () => {
-            window.removeEventListener('pull-to-refresh', handlePullToRefresh);
-        };
-    }, [selectedMode, productSearch, findProspects, findProducts, fetchProducts]);
+        return () => window.removeEventListener('pull-to-refresh', handlePullToRefresh);
+    }, [selectedMode, productSearch, findProspects, findProducts, showToastNotification]);
 
     // ✅ Handle browser back/forward buttons
     useEffect(() => {
@@ -6191,6 +6289,7 @@ function SocialAIMarketingEngine() {
                         {/* ✅ ADD THE CHANGE MODE BUTTON HERE */}
                         <div className="mode-indicator">
                             <span className="mode-badge">Buyer Setup</span>
+                            
                             <button 
                                 onClick={() => {
                                     setShowBuyerForm(false);
@@ -6200,11 +6299,10 @@ function SocialAIMarketingEngine() {
                             >
                                 ← Back
                             </button>
-                            {/* ✅ ADD SWITCH TO SELLER BUTTON */}
+                            
                             <button 
                                 onClick={clearAndSwitchMode}
-                                className="change-mode-button"
-                                style={{ marginLeft: '10px' }}
+                                className="change-mode-button danger"
                             >
                                 Switch to Seller
                             </button>
