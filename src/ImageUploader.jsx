@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { supabase } from './lib/supabase';
-import imageCompression from 'browser-image-compression';
 
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
   let lastError;
@@ -45,9 +44,61 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
 
   // ✅ Check if device has enough memory
   const isLowMemoryDevice = useCallback(() => {
-    // @ts-ignore - deviceMemory is not standard but exists in some browsers
     return navigator.deviceMemory && navigator.deviceMemory < 4;
   }, []);
+
+  // ✅ COMPRESS IMAGE USING CANVAS (Built into browser - NO external library!)
+  const compressImage = useCallback((file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          // ✅ Determine max size based on device
+          const isMobileDevice = isMobile();
+          const isLowMemory = isLowMemoryDevice();
+          
+          let maxSize = 800;
+          let quality = 0.85;
+          
+          if (isMobileDevice) {
+            maxSize = isLowMemory ? 500 : 700;
+            quality = isLowMemory ? 0.6 : 0.75;
+          } else {
+            maxSize = 800;
+            quality = 0.85;
+          }
+          
+          // ✅ Resize image
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > height && width > maxSize) {
+            height = Math.round(height * (maxSize / width));
+            width = maxSize;
+          } else if (height > maxSize) {
+            width = Math.round(width * (maxSize / height));
+            height = maxSize;
+          }
+          
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // ✅ Convert to blob with quality
+          canvas.toBlob((blob) => {
+            resolve(blob);
+          }, 'image/jpeg', quality);
+        };
+        img.onerror = reject;
+      };
+      reader.onerror = reject;
+    });
+  }, [isMobile, isLowMemoryDevice]);
 
   const handleUpload = async (event) => {
     if (!navigator.onLine) {
@@ -70,8 +121,8 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
         return;
       }
 
-      // ✅ Validate file size (max 10MB for mobile, 20MB for desktop)
-      const maxSizeMB = isMobile() ? 10 : 20;
+      // ✅ Validate file size (max 20MB for all devices)
+      const maxSizeMB = 20;
       if (imageFile.size > maxSizeMB * 1024 * 1024) {
         throw new Error(`Image too large. Please select an image under ${maxSizeMB}MB.`);
       }
@@ -86,69 +137,28 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       console.log('📱 Mobile device:', isMobile());
       console.log('💾 Low memory device:', isLowMemoryDevice());
 
-      // ✅ COMPRESSION SETTINGS - MORE AGGRESSIVE FOR MOBILE
-      const isMobileDevice = isMobile();
-      const isLowMemory = isLowMemoryDevice();
+      // ✅ COMPRESS THE IMAGE
+      let uploadFile = imageFile;
       
-      let maxSizeMB;
-      let maxWidthOrHeight;
-      let initialQuality;
-      
-      if (isMobileDevice) {
-        maxSizeMB = isLowMemory ? 0.15 : 0.25;
-        maxWidthOrHeight = isLowMemory ? 400 : 600;
-        initialQuality = isLowMemory ? 0.5 : 0.6;
-      } else {
-        maxSizeMB = 0.5;
-        maxWidthOrHeight = 800;
-        initialQuality = 0.8;
-      }
-
-      console.log('📐 Compression settings:', { maxSizeMB, maxWidthOrHeight, initialQuality });
-
-      // ✅ TRY COMPRESSION WITH FALLBACK
-      let compressedFile;
-      try {
-        const options = {
-          maxSizeMB: maxSizeMB,
-          maxWidthOrHeight: maxWidthOrHeight,
-          useWebWorker: true,
-          initialQuality: initialQuality,
-          fileType: 'image/jpeg',
-          alwaysKeepResolution: false,
-          onProgress: (progress) => {
-            console.log(`Compression: ${progress}%`);
+      // ✅ Always compress if file > 500KB
+      if (imageFile.size > 500 * 1024) {
+        try {
+          console.log('🔄 Compressing image...');
+          const compressedBlob = await compressImage(imageFile);
+          uploadFile = new File([compressedBlob], imageFile.name, { type: 'image/jpeg' });
+          console.log('✅ Compressed size:', (uploadFile.size / 1024).toFixed(2), 'KB');
+          
+          // ✅ If still too large, compress more aggressively
+          if (uploadFile.size > 300 * 1024 && isMobile()) {
+            console.log('🔄 Still large, compressing further...');
+            const compressedBlob2 = await compressImage(uploadFile);
+            uploadFile = new File([compressedBlob2], imageFile.name, { type: 'image/jpeg' });
+            console.log('✅ Final compressed size:', (uploadFile.size / 1024).toFixed(2), 'KB');
           }
-        };
-        compressedFile = await imageCompression(imageFile, options);
-        console.log('✅ Compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
-      } catch (compressError) {
-        console.warn('⚠️ Primary compression failed, trying fallback...');
-        // ✅ FALLBACK: Even more aggressive
-        const fallbackOptions = {
-          maxSizeMB: isMobileDevice ? 0.1 : 0.3,
-          maxWidthOrHeight: isMobileDevice ? 350 : 600,
-          useWebWorker: true,
-          initialQuality: isMobileDevice ? 0.4 : 0.6,
-          fileType: 'image/jpeg',
-        };
-        compressedFile = await imageCompression(imageFile, fallbackOptions);
-        console.log('✅ Fallback compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
-      }
-
-      // ✅ If still too large, compress more
-      const maxKBMobile = 200;
-      if (isMobileDevice && compressedFile.size > maxKBMobile * 1024) {
-        console.log('⚠️ Still large for mobile, re-compressing...');
-        const recompressOptions = {
-          maxSizeMB: 0.1,
-          maxWidthOrHeight: 350,
-          useWebWorker: true,
-          initialQuality: 0.4,
-          fileType: 'image/jpeg',
-        };
-        compressedFile = await imageCompression(compressedFile, recompressOptions);
-        console.log('✅ Re-compressed size:', (compressedFile.size / 1024).toFixed(2), 'KB');
+        } catch (compressError) {
+          console.warn('⚠️ Compression failed, using original file:', compressError);
+          uploadFile = imageFile;
+        }
       }
 
       // Generate unique filename
@@ -156,13 +166,14 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
       const filePath = fileName;
 
-      // Start progress interval - slower for mobile
+      // Start progress interval
+      const isMobileDevice = isMobile();
       const progressInterval = isMobileDevice ? 300 : 150;
       progressIntervalRef.current = setInterval(() => {
         setUploadProgress(prev => Math.min(prev + (isMobileDevice ? 5 : 10), 90));
       }, progressInterval);
 
-      // ✅ Upload with retry and longer timeout for mobile
+      // ✅ Upload with retry and timeout
       const uploadTimeout = isMobileDevice ? 60000 : 30000;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), uploadTimeout);
@@ -170,7 +181,7 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       const { error: uploadError } = await fetchWithRetry(() => 
         supabase.storage
           .from('product-images')
-          .upload(filePath, compressedFile, {
+          .upload(filePath, uploadFile, {
             cacheControl: '31536000',
             upsert: false,
             contentType: 'image/jpeg',
@@ -212,7 +223,6 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
     } catch (error) {
       console.error('❌ Upload error:', error);
       
-      // ✅ Better error messages for mobile
       let errorMessage = error.message || 'Error uploading image';
       if (isMobile() && errorMessage.includes('memory')) {
         errorMessage = 'Your device may be low on memory. Try a smaller image or use a computer.';
@@ -366,7 +376,7 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
               fontSize: '10px',
               lineHeight: '1.2'
             }}>
-              JPEG, PNG, WebP • {isMobile() ? 'Max 10MB' : 'Max 20MB'}
+              JPEG, PNG, WebP • Max 20MB • Auto-compressed
             </p>
           </div>
         )}
@@ -394,4 +404,3 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
 };
 
 export default React.memo(ImageUploader);
-// force rebuild
