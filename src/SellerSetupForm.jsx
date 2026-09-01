@@ -352,6 +352,7 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
   }, [user, imageUrl, submitting, navigate, onProfileComplete, reset]);
 
   const handleReset = useCallback(() => {
+    // Reset form fields
     reset({
       name: '',
       location: existingData?.location || '',
@@ -359,8 +360,17 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       description: '',
       phone_number: existingData?.phone_number || '',
     });
+    
+    // ✅ Clear image
     setImageUrl('');
+    
+    // ✅ Clear ALL errors (including image upload errors)
     setError(null);
+    
+    // ✅ Also clear any image upload error state if needed
+    // The ImageUploader component handles its own errors internally
+    
+    console.log('🔄 Form reset - cleared all fields and errors');
   }, [reset, existingData]);
 
   // ============ STYLES ============
@@ -609,7 +619,11 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
           )}
           
           <div className="bg-blue-900/20 border-2 border-dashed border-blue-500 rounded-xl p-4 text-center">
-            <ImageUploader onUploadSuccess={(url) => setImageUrl(url)} />
+            <ImageUploader 
+              key={imageUrl || 'empty'}  // ✅ This forces re-render when image is cleared
+              onUploadSuccess={(url) => setImageUrl(url)} 
+              onUploadError={(err) => setError(err)}
+            />
             
             {imageUrl && (
               <div className="mt-4">

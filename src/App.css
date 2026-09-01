@@ -4428,6 +4428,22 @@ img {
     }
 }
 
+/* Mobile image upload improvements */
+@media (max-width: 768px) {
+  .image-upload-section {
+    padding: 10px;
+  }
+  
+  .image-upload-section .upload-area {
+    height: 100px !important;
+  }
+  
+  .image-upload-section .upload-area img {
+    width: 60px !important;
+    height: 60px !important;
+  }
+}
+
 /* For mobile responsiveness */
 @media (max-width: 768px) {
     .social-header.hidden .menu-button,
