@@ -90,9 +90,9 @@ const ImageUploader = ({ onUploadSuccess, onUploadError }) => {
       const isMobileDevice = isMobile();
       const isLowMemory = isLowMemoryDevice();
       
-      let maxSizeMB = 0.3; // Default target
-      let maxWidthOrHeight = 800;
-      let initialQuality = 0.75;
+      let maxSizeMB;
+      let maxWidthOrHeight;
+      let initialQuality;
       
       if (isMobileDevice) {
         maxSizeMB = isLowMemory ? 0.15 : 0.25;
