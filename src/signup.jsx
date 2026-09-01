@@ -660,10 +660,28 @@ const Auth = () => {
       errors.terms = 'You must agree to Terms of Service and Privacy Policy';
     }
     
+    // ✅ FIXED: Phone validation - EXACT lengths required
     if (isSignUp && phone) {
-      const cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
-      if (!/^[\+]?[1-9][\d]{0,15}$/.test(cleanedPhone)) {
-        errors.phone = 'Please enter a valid phone number';
+      // Remove all spaces, dashes, parentheses, dots
+      let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
+      // Remove leading + if present
+      let rawDigits = cleanedPhone.replace(/^\+/, '');
+      // Get only digits
+      const digitsOnly = rawDigits.replace(/\D/g, '');
+      
+      // Check if it's a local format (starts with 0)
+      const isLocalFormat = rawDigits.startsWith('0');
+      
+      if (isLocalFormat) {
+        // ✅ Local format (07...): MUST be exactly 10 digits (0 + 9 digits)
+        if (digitsOnly.length !== 10) {
+          errors.phone = 'Please enter a valid phone number (e.g., 0712345678)';
+        }
+      } else {
+        // ✅ International format (263...): MUST be exactly 12 digits (263 + 9 digits)
+        if (digitsOnly.length !== 12) {
+          errors.phone = 'Please enter a valid phone number (e.g., 263712345678)';
+        }
       }
     }
     
@@ -673,7 +691,31 @@ const Auth = () => {
   // ============ SIGN UP ============
   const handleSignUp = useCallback(async (values) => {
     const { email, password, phone } = values;
-    const cleanedPhone = phone ? phone.replace(/[\s\-\(\)\.]/g, '') : null;
+    
+    // ✅ FIXED: Clean phone number with exact length logic
+    let cleanedPhone = null;
+    if (phone) {
+      // Remove spaces, dashes, parentheses, dots
+      let raw = phone.replace(/[\s\-\(\)\.]/g, '');
+      // Remove leading +
+      raw = raw.replace(/^\+/, '');
+      // Get only digits
+      let digits = raw.replace(/\D/g, '');
+      
+      // If it starts with 0, it's local format (07...)
+      if (raw.startsWith('0')) {
+        // 0712345678 -> 263712345678
+        cleanedPhone = '263' + digits.substring(1);
+      } else {
+        // Already international format (263...)
+        cleanedPhone = digits;
+      }
+      
+      // ✅ Validate final length
+      if (cleanedPhone.length !== 12) {
+        console.warn('⚠️ Phone number should be 12 digits after formatting');
+      }
+    }
 
     try {
       setLoading(true);
@@ -724,18 +766,13 @@ const Auth = () => {
           });
 
           if (signInError) {
-            setMessage({
-              text: 'Account created! Please sign in.',
-              type: 'info',
-            });
-            setIsSignUp(false);
             bouncer.reset();
             setLoading(false);
             return;
           }
 
           // Store user
-          storeUserInLocalStorage(signInData);
+          storeUserInLocalStorage(authData);
           
           setMessage({
             text: 'Account created successfully!',
@@ -791,10 +828,6 @@ const Auth = () => {
           }
         } else {
           // Email confirmation required
-          setMessage({
-            text: '✅ Account created! Please check your email to verify.',
-            type: 'success',
-          });
           bouncer.reset();
           setLoading(false);
           setTimeout(() => {
@@ -808,7 +841,14 @@ const Auth = () => {
         text: error.message || 'Sign up failed. Please try again.',
         type: 'error',
       });
+
+      // ✅ Wait a moment then navigate to mode selection
+      setTimeout(() => {
+        navigate('/app', { replace: true });
+      }, 500);
+      
       setLoading(false);
+      return;
     }
   }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer]);
 
@@ -832,7 +872,10 @@ const Auth = () => {
       });
       
       bouncer.reset();
+      setLoading(false);
       
+      // ✅ FIXED: Let AuthContext handle the redirect based on profile/mode
+      // The AuthContext will check profile and mode expiry
       setTimeout(() => {
         navigate('/app', { replace: true });
       }, 500);

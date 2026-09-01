@@ -71,6 +71,37 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
     }
   }, []);
 
+  // ============ VALIDATION FUNCTIONS ============
+
+  // ✅ ADD THIS PHONE VALIDATION FUNCTION
+  const validatePhoneNumber = useCallback((phone) => {
+    if (!phone) return 'Phone number is required';
+    
+    // Remove spaces, dashes, parentheses, dots
+    let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
+    // Remove leading + if present
+    let rawDigits = cleanedPhone.replace(/^\+/, '');
+    // Get only digits
+    const digitsOnly = rawDigits.replace(/\D/g, '');
+    
+    // Check if it's a local format (starts with 0)
+    const isLocalFormat = rawDigits.startsWith('0');
+    
+    if (isLocalFormat) {
+      // Local format (07...): MUST be exactly 10 digits (0 + 9 digits)
+      if (digitsOnly.length !== 10) {
+        return 'Please enter a valid phone number (e.g., 0712345678)';
+      }
+    } else {
+      // International format (263...): MUST be exactly 12 digits (263 + 9 digits)
+      if (digitsOnly.length !== 12) {
+        return 'Please enter a valid phone number (e.g., 263712345678)';
+      }
+    }
+    
+    return true;
+  }, []);
+
   // ============ FETCH USER ============
   useEffect(() => {
     const getUser = async () => {
@@ -521,13 +552,10 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
             style={errors.phone_number ? inputErrorStyle : inputStyle}
             {...register('phone_number', {
               required: 'Phone number is required',
-              pattern: {
-                value: /^[\+]?[1-9][\d\s\-\(\)\.]{8,}$/,
-                message: 'Please enter a valid phone number'
-              }
+              validate: validatePhoneNumber
             })}
             disabled={submitting || userLoading}
-            placeholder="+263 712 345 678"
+            placeholder="0712345678 or 263712345678"
           />
           {errors.phone_number && (
             <p className="text-red-400 text-sm mt-1">{errors.phone_number.message}</p>

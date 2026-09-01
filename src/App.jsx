@@ -897,7 +897,7 @@ function App() {
       showDialog
     >
       <GlobalErrorHandler>
-        <Router>
+        
           <NavigationProvider>
             <RefreshPersistenceWrapper>
               <PullToRefreshWrapper>
@@ -966,7 +966,7 @@ function App() {
               </PullToRefreshWrapper>
             </RefreshPersistenceWrapper>
           </NavigationProvider>
-        </Router>
+        
       </GlobalErrorHandler>
     </Sentry.ErrorBoundary>
   );

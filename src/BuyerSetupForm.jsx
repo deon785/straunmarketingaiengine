@@ -57,6 +57,35 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
     const phoneValue = watch('phone_number', '');
     const usernameValue = watch('username', '');
 
+    // ============ PHONE VALIDATION FUNCTION ============
+    const validatePhoneNumber = useCallback((phone) => {
+        if (!phone) return 'Phone number is required';
+        
+        // Remove all spaces, dashes, parentheses, dots
+        let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
+        // Remove leading + if present
+        let rawDigits = cleanedPhone.replace(/^\+/, '');
+        // Get only digits
+        const digitsOnly = rawDigits.replace(/\D/g, '');
+        
+        // Check if it's a local format (starts with 0)
+        const isLocalFormat = rawDigits.startsWith('0');
+        
+        if (isLocalFormat) {
+            // ✅ Local format (07...): MUST be exactly 10 digits (0 + 9 digits)
+            if (digitsOnly.length !== 10) {
+            return 'Please enter a valid phone number (e.g., 0712345678)';
+            }
+        } else {
+            // ✅ International format (263...): MUST be exactly 12 digits (263 + 9 digits)
+            if (digitsOnly.length !== 12) {
+            return 'Please enter a valid phone number (e.g., 263712345678)';
+            }
+        }
+        
+        return true;
+    }, []);
+
     // ============ FETCH USER ============
     useEffect(() => {
         const getUser = async () => {
@@ -524,19 +553,16 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                                 className={errors.phone_number ? 'error' : ''}
                                 {...register('phone_number', {
                                     required: 'Phone number is required',
-                                    pattern: {
-                                        value: /^[\+]?[1-9][\d\s\-\(\)\.]{8,}$/,
-                                        message: 'Please enter a valid phone number'
-                                    }
+                                    validate: validatePhoneNumber
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
-                                placeholder="+263 712 345 678"
+                                placeholder="+263 712 345 678 or 071 234 5678"
                             />
                             {errors.phone_number && (
                                 <div className="field-error">{errors.phone_number.message}</div>
                             )}
                             <small className="text-gray-400 text-sm">
-                                Format: +country code followed by number
+                                Format: 0712345678 (10 digits) or 263712345678 (12 digits)
                             </small>
                         </div>
 

@@ -1,5 +1,45 @@
+// ============================================================
+// ✅ ONLY CLEAR SESSION - Keep mode data intact
+// ============================================================
+(function clearExpiredSession() {
+  try {
+    const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
+    const MODE_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+    
+    // ✅ Check if mode EXISTS and is EXPIRED
+    if (timestamp) {
+      const age = Date.now() - parseInt(timestamp);
+      if (age >= MODE_EXPIRY_MS) {
+        console.log('[Main] ⏰ Mode expired - clearing session');
+        
+        // ✅ ONLY delete session token
+        localStorage.removeItem('supabase.auth.token');
+        sessionStorage.removeItem('supabase.auth.token');
+        
+        // ✅ Keep mode data - don't delete it!
+        // straun_selectedMode, straun_selectedMode_timestamp, straun_selectedMode_user are KEPT
+        
+        console.log('[Main] ✅ Session cleared, mode data kept');
+      } else {
+        console.log('[Main] ✅ Mode is still active (', Math.round(age / 60000), 'minutes old)');
+        // ✅ Mode is active - DO NOT clear anything!
+      }
+    } else {
+      console.log('[Main] ⏰ No mode found - clearing session');
+      // No mode exists, clear session
+      localStorage.removeItem('supabase.auth.token');
+      sessionStorage.removeItem('supabase.auth.token');
+    }
+  } catch (e) {
+    // Silent fail
+  }
+})();
+// ============================================================
+
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
 import * as Sentry from "@sentry/react";
 import App from './App.jsx'; 
 import './index.css';
@@ -252,36 +292,38 @@ if (!rootElement) {
     
     root.render(
       <React.StrictMode>
-        <GlobalErrorHandler>
-          <AuthProvider>
+      <GlobalErrorHandler>
+        <BrowserRouter>                    {/* ✅ Router OUTSIDE everything */}
+          <AuthProvider>                   {/* ✅ AuthProvider INSIDE Router */}
             <LoadingProvider>
-              <App />
-              <Toaster 
-                position="top-right"
-                toastOptions={{
-                  duration: 5000,
-                  style: {
-                    background: '#333',
-                    color: '#fff',
-                  },
-                  success: {
-                    duration: 4000,
-                    iconTheme: {
-                      primary: '#4CAF50',
-                      secondary: '#fff',
+                <App />
+                <Toaster 
+                  position="top-right"
+                  toastOptions={{
+                    duration: 5000,
+                    style: {
+                      background: '#333',
+                      color: '#fff',
                     },
-                  },
-                  error: {
-                    duration: 6000,
-                    iconTheme: {
-                      primary: '#f44336',
-                      secondary: '#fff',
+                    success: {
+                      duration: 4000,
+                      iconTheme: {
+                        primary: '#4CAF50',
+                        secondary: '#fff',
+                      },
                     },
-                  },
-                }}
-              />
-            </LoadingProvider>
-          </AuthProvider>
+                    error: {
+                      duration: 6000,
+                      iconTheme: {
+                        primary: '#f44336',
+                        secondary: '#fff',
+                      },
+                    },
+                  }}
+                />
+              </LoadingProvider>
+            </AuthProvider>
+          </BrowserRouter>
         </GlobalErrorHandler>
       </React.StrictMode>
     );

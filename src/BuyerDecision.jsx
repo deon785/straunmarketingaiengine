@@ -469,7 +469,7 @@ const BuyerDecision = ({
                 type="tel"
                 value={tempPhone}
                 onChange={(e) => setTempPhone(e.target.value)}
-                placeholder="e.g., 0771234567 or +263771234567"
+                placeholder="e.g., 077 123 4567 or +263 771 234 567"
                 style={{
                   width: '100%',
                   padding: '12px',
