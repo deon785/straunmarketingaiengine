@@ -11,7 +11,7 @@ export const NavigationProvider = ({ children }) => {
 
   // Track location changes
   useEffect(() => {
-    console.log('[Navigation] Location changed:', location.pathname);
+    console.log('🔵 [NavigationContext] Location changed to:', location.pathname);
     
     // Skip tracking for auth pages
     const skipPaths = ['/', '/reset-password', '/privacy', '/terms', '/help'];

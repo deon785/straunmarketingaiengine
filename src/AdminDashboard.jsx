@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from './lib/supabase';
 import { userMonitor } from './userBehaviorMonitor';
+import { useAuthState } from './AuthContext.jsx';
 import AdminErrorAnalytics from './AdminErrorAnalytics';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import {
@@ -17,7 +18,6 @@ import {
   Filler
 } from 'chart.js';
 
-// Register ChartJS components
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -89,6 +89,20 @@ export function SuspiciousActivityMonitor() {
 }
 
 const AdminDashboard = () => {
+  const { user } = useAuthState();
+
+  console.log('👑👑👑 ADMIN DASHBOARD IS RENDERING 👑👑👑');
+
+  useEffect(() => {
+    console.log('👑 AdminDashboard - Current user:', user);
+    console.log('👑 AdminDashboard - User email:', user?.email);
+    console.log('👑 AdminDashboard - Is admin?', user?.email === 'deonmahachi8@gmail.com');
+    
+    if (user?.email === 'deonmahachi8@gmail.com') {
+        console.log('👑 Force staying on admin page');
+    }
+  }, [user]);
+
   const [stats, setStats] = useState({ 
     users: 0, 
     feedback: [], 
@@ -104,6 +118,9 @@ const AdminDashboard = () => {
   const [reports, setReports] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [userFilter, setUserFilter] = useState('all');
+  const [incompleteUsers, setIncompleteUsers] = useState([]);
+  const [authStats, setAuthStats] = useState({ auth_users: 0, profiles: 0, missing_profiles: 0 });
+  const [productsWithNoImages, setProductsWithNoImages] = useState([]);
   const [userSearch, setUserSearch] = useState('');
   const [realtimeData, setRealtimeData] = useState({
     onlineUsers: 0,
@@ -141,6 +158,7 @@ const AdminDashboard = () => {
         },
         () => {
           fetchDashboardData();
+          fetchIncompleteUsers();
         }
       )
       .subscribe();
@@ -167,61 +185,209 @@ const AdminDashboard = () => {
     };
   }, []);
 
+  const callAdminUsersFunction = useCallback(async (action, data = null) => {
+    try {
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-users`;
+      
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      if (!token) {
+        throw new Error('No authentication token available');
+      }
+      
+      let options = {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      };
+      
+      let url = functionUrl;
+      
+      if (action === 'list' || action === 'count') {
+        url = `${functionUrl}?action=${action}`;
+      } else if (action === 'delete') {
+        options = {
+          ...options,
+          method: 'POST',
+          body: JSON.stringify({ userId: data })
+        };
+      }
+      
+      console.log('📡 Calling Edge Function:', url);
+      
+      const response = await fetch(url, options);
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Function call failed');
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Error calling admin-users function:', error);
+      throw error;
+    }
+  }, []);
+
+  // In your AdminDashboard.jsx
+  const fetchAuthStatsSQL = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .rpc('get_user_stats');
+      
+      if (error) throw error;
+      
+      setAuthStats({
+        auth_users: data.auth_users || 0,
+        profiles: data.profiles || 0,
+        missing_profiles: data.missing_profiles || 0
+      });
+    } catch (error) {
+      console.error('Error fetching auth stats:', error);
+    }
+  }, []);
+
+   // Add function to fetch auth stats
+  const fetchAuthStats = useCallback(async () => {
+    try {
+      const result = await callAdminUsersFunction('count');
+      setAuthStats(result);
+      console.log('📊 Auth Stats from Edge Function:', result);
+    } catch (error) {
+      console.error('Error fetching auth stats:', error);
+      // ✅ Fallback to SQL if Edge Function fails
+      try {
+        const { data, error: sqlError } = await supabase.rpc('get_user_stats');
+        if (!sqlError && data) {
+          setAuthStats({
+            auth_users: data.auth_users || 0,
+            profiles: data.profiles || 0,
+            missing_profiles: data.missing_profiles || 0
+          });
+          console.log('📊 Auth Stats from SQL (fallback):', data);
+        }
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+      }
+    }
+  }, [callAdminUsersFunction]);
+
+  // Update fetchIncompleteUsers to use the Edge Function
+  const fetchIncompleteUsers = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      console.log('🔄 Fetching incomplete users...');
+      
+      const result = await callAdminUsersFunction('list');
+      
+      console.log('📊 Raw result:', result);
+      
+      if (!result.success || !result.users) {
+        console.error('Failed to fetch users:', result);
+        setIncompleteUsers([]);
+        return;
+      }
+      
+      console.log(`📊 Total users: ${result.total}`);
+      console.log(`📊 With profiles: ${result.with_profiles}`);
+      console.log(`📊 Without profiles: ${result.without_profiles}`);
+      
+      // Filter incomplete users
+      const incomplete = result.users.filter(user => {
+        // Users without profile are incomplete
+        if (!user.has_profile) return true;
+        
+        // Users with incomplete setup
+        const profile = user.profile;
+        if (!profile) return true;
+        
+        return !profile.is_seller && 
+              !profile.is_buyer && 
+              !profile.seller_setup_completed && 
+              !profile.buyer_setup_completed;
+      });
+      
+      console.log(`📊 Found ${incomplete.length} incomplete users`);
+      
+      // Format for display
+      const formattedUsers = incomplete.map(user => ({
+        user_id: user.id,
+        username: user.username || user.email || 'Unknown',
+        email: user.email || 'No email',
+        location: user.location || 'No profile',
+        phone_number: user.phone_number || 'No profile',
+        created_at: user.created_at || new Date().toISOString(),
+        has_profile: user.has_profile,
+        is_seller: user.is_seller || false,
+        is_buyer: user.is_buyer || false,
+        seller_setup_completed: user.seller_setup_completed || false,
+        buyer_setup_completed: user.buyer_setup_completed || false
+      }));
+      
+      // ✅ Force state update with new array
+      setIncompleteUsers([...formattedUsers]);
+      
+      console.log('✅ Incomplete users updated:', formattedUsers.length);
+      
+    } catch (error) {
+      console.error('Error fetching incomplete users:', error);
+      setIncompleteUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [callAdminUsersFunction]);
+
   const fetchDashboardData = useCallback(async () => {
     try {
-      // Get user count
       const { count: userCount } = await supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true });
 
-      // Get recent users - SIMPLE QUERY
       const { data: recentUsers } = await supabase
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(20);
 
-      // Get user activities
       const { data: userActivity } = await supabase
         .from('user_activities')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(50);
 
-      // Get feedback
       const { data: feedbackData } = await supabase
         .from('feedback')
         .select('*')
         .order('created_at', { ascending: false });
 
-      // Get products
       const { data: productsData } = await supabase
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
 
-      // Get inactive users - FIXED: use is_active = false
       const { data: bannedUsers } = await supabase
         .from('profiles')
         .select('*')
         .eq('is_active', false)
         .order('updated_at', { ascending: false });
 
-      // Get daily stats
       const { data: dailyStats } = await supabase
         .from('daily_stats')
         .select('*')
         .order('date', { ascending: false })
         .limit(30);
 
-      // Get top products
       const { data: topProducts } = await supabase
         .from('products')
         .select('*')
         .order('views', { ascending: false })
         .limit(10);
 
-      // Get active users (last 15 minutes)
       const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
       const { data: activeUsers } = await supabase
         .from('profiles')
@@ -272,10 +438,37 @@ const AdminDashboard = () => {
     }
   }, []);
 
+  const fetchProductsWithNoImages = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .is('image_url', null)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching products with no images:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching products with no images:', error);
+      return [];
+    }
+  }, []);
+
   useEffect(() => {
-    fetchDashboardData();
-    fetchReports();
-  }, [fetchDashboardData, fetchReports]);
+    const loadData = async () => {
+      await fetchDashboardData();
+      await fetchReports();
+      await fetchIncompleteUsers();
+      await fetchAuthStats();
+      const products = await fetchProductsWithNoImages();
+      setProductsWithNoImages(products);
+    };
+    loadData();
+  }, []);
 
   const getUserGrowthData = () => {
     const last7Days = stats.dailyStats.slice(0, 7).reverse();
@@ -410,6 +603,102 @@ const AdminDashboard = () => {
     }
   };
 
+  // ✅ IMPROVED: Delete user and all related data
+  const deleteUserCompletely = async (userId) => {
+    if (!window.confirm('⚠️ WARNING: This will permanently delete the user and ALL their data. Are you sure?')) {
+      return;
+    }
+
+    if (!window.confirm('⚠️ FINAL WARNING: This action CANNOT be undone! Delete user?')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const user = incompleteUsers.find(u => u.user_id === userId);
+      const userName = user?.username || userId;
+      
+      console.log(`🗑️ Deleting user: ${userName} (${userId})`);
+      
+      // ✅ Call Edge Function to delete
+      const result = await callAdminUsersFunction('delete', userId);
+      
+      if (result.success) {
+        alert(`✅ User "${userName}" and all related data deleted successfully!`);
+      } else if (result.partial) {
+        alert(`⚠️ Partially deleted: ${result.message || 'Some data may remain.'}`);
+      } else {
+        throw new Error(result.error || 'Deletion failed');
+      }
+      
+      // ✅ Wait for backend to process
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // ✅ Get fresh data from Edge Function
+      console.log('🔄 Fetching fresh data...');
+      
+      // 1. Get fresh auth stats
+      const freshStats = await callAdminUsersFunction('count');
+      console.log('📊 Fresh Stats:', freshStats);
+      
+      // 2. Get fresh user list
+      const freshUsers = await callAdminUsersFunction('list');
+      console.log('📊 Fresh Users:', freshUsers);
+      
+      // 3. Update state with fresh data
+      if (freshStats) {
+        setAuthStats({
+          auth_users: freshStats.auth_users || 0,
+          profiles: freshStats.profiles || 0,
+          missing_profiles: freshStats.missing_profiles || 0
+        });
+      }
+      
+      if (freshUsers.success && freshUsers.users) {
+        // Filter incomplete users
+        const incomplete = freshUsers.users.filter(user => {
+          if (!user.has_profile) return true;
+          const profile = user.profile;
+          if (!profile) return true;
+          return !profile.is_seller && 
+                !profile.is_buyer && 
+                !profile.seller_setup_completed && 
+                !profile.buyer_setup_completed;
+        });
+        
+        const formattedUsers = incomplete.map(user => ({
+          user_id: user.id,
+          username: user.username || user.email || 'Unknown',
+          email: user.email || 'No email',
+          location: user.location || 'No profile',
+          phone_number: user.phone_number || 'No profile',
+          created_at: user.created_at || new Date().toISOString(),
+          has_profile: user.has_profile,
+          is_seller: user.is_seller || false,
+          is_buyer: user.is_buyer || false,
+          seller_setup_completed: user.seller_setup_completed || false,
+          buyer_setup_completed: user.buyer_setup_completed || false
+        }));
+        
+        console.log(`📊 New incomplete users count: ${formattedUsers.length}`);
+        setIncompleteUsers(formattedUsers);
+      }
+      
+      // ✅ Also refresh dashboard data
+      await fetchDashboardData();
+      
+      console.log('✅ All data refreshed!');
+      
+    } catch (error) {
+      console.error('❌ Error deleting user:', error);
+      alert(`❌ Error: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   const handleResolveReport = async (reportId, action, reportedUserId) => {
     try {
       if (action === 'ban' && reportedUserId) {
@@ -434,6 +723,60 @@ const AdminDashboard = () => {
     } catch (error) {
       console.error('Error in handleResolveReport:', error);
       alert('An unexpected error occurred.');
+    }
+  };
+
+  const deleteProductWithNoImage = async (productId) => {
+    if (!window.confirm('Delete this product (no image)?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', productId);
+
+      if (error) throw error;
+
+      const updatedProducts = await fetchProductsWithNoImages();
+      setProductsWithNoImages(updatedProducts);
+      await fetchDashboardData();
+
+      alert('✅ Product deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      alert('❌ Error deleting product');
+    }
+  };
+
+  const deleteAllProductsWithNoImages = async () => {
+    if (!window.confirm('⚠️ Delete ALL products that have no images?')) return;
+    if (!window.confirm('⚠️ FINAL WARNING: This will delete ALL products without images. Are you sure?')) return;
+
+    try {
+      const products = await fetchProductsWithNoImages();
+      if (products.length === 0) {
+        alert('No products without images found.');
+        return;
+      }
+
+      let deleted = 0;
+      for (const product of products) {
+        const { error } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', product.id);
+
+        if (!error) deleted++;
+      }
+
+      const updatedProducts = await fetchProductsWithNoImages();
+      setProductsWithNoImages(updatedProducts);
+      await fetchDashboardData();
+
+      alert(`✅ Deleted ${deleted} products without images.`);
+    } catch (error) {
+      console.error('Error deleting products:', error);
+      alert('❌ Error deleting products');
     }
   };
 
@@ -541,6 +884,15 @@ const AdminDashboard = () => {
             </div>
             <span style={{ fontSize: '14px', color: '#6b7280' }}>
               📊 {stats.userActivity.length} Activities Today
+            </span>
+            <span style={{ fontSize: '14px', color: '#6b7280' }}>
+              👤 Auth Users: {authStats.auth_users}
+            </span>
+            <span style={{ fontSize: '14px', color: '#6b7280' }}>
+              📊 Profiles: {authStats.profiles}
+            </span>
+            <span style={{ fontSize: '14px', color: '#f59e0b' }}>
+              ⚠️ Missing Profiles: {authStats.missing_profiles}
             </span>
           </div>
         </div>
@@ -1577,6 +1929,7 @@ const AdminDashboard = () => {
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Seller</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Price</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Views</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Image</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Date</th>
                   <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Actions</th>
                 </tr>
@@ -1584,7 +1937,7 @@ const AdminDashboard = () => {
               <tbody>
                 {stats.products.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                    <td colSpan="7" style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
                       No products found
                     </td>
                   </tr>
@@ -1627,6 +1980,13 @@ const AdminDashboard = () => {
                       </td>
                       <td style={{ padding: '12px', color: '#111827', fontWeight: 'bold' }}>${product.price}</td>
                       <td style={{ padding: '12px', color: '#111827' }}>{product.views || 0}</td>
+                      <td style={{ padding: '12px', color: '#111827' }}>
+                        {product.image_url ? (
+                          <span style={{ color: '#16a34a' }}>✅ Has Image</span>
+                        ) : (
+                          <span style={{ color: '#dc2626' }}>❌ No Image</span>
+                        )}
+                      </td>
                       <td style={{ padding: '12px', color: '#111827' }}>{new Date(product.created_at).toLocaleDateString()}</td>
                       <td style={{ padding: '12px' }}>
                         <div style={{ display: 'flex', gap: '5px' }}>
@@ -1831,7 +2191,6 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      {/* CSS Animations */}
       <style>{`
         @keyframes pulse {
           0% { opacity: 1; }
@@ -1842,7 +2201,6 @@ const AdminDashboard = () => {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
-        /* Scrollbar styling */
         ::-webkit-scrollbar {
           width: 6px;
           height: 6px;
@@ -1859,6 +2217,214 @@ const AdminDashboard = () => {
           background: #9ca3af;
         }
       `}</style>
+
+      {/* INCOMPLETE USERS SECTION */}
+      <div style={{
+        background: 'white',
+        padding: '20px',
+        borderRadius: '12px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        marginTop: '30px'
+      }}>
+        <h2 style={{ color: '#111827', margin: '0 0 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '15px' }}>
+          <span>⚠️ Incomplete Users ({incompleteUsers.length})</span>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={async () => {
+                console.log('🔄 Manual refresh triggered...');
+                setLoading(true);
+                await fetchIncompleteUsers();
+                await fetchAuthStats();
+                setLoading(false);
+                console.log('✅ Manual refresh complete!');
+              }}
+              style={{
+                padding: '6px 14px',
+                background: '#2563eb',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              🔄 Refresh List
+            </button>
+            <span style={{ fontSize: '14px', color: '#f59e0b', fontWeight: 'normal' }}>
+              {incompleteUsers.length === 0 ? '✅ All users complete!' : 'Users needing setup'}
+            </span>
+          </div>
+        </h2>
+
+        {incompleteUsers.length === 0 ? (
+          <p style={{ color: '#16a34a', textAlign: 'center', padding: '20px' }}>
+            ✅ No incomplete users found
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#fef3c7' }}>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>User Info</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Created</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {incompleteUsers.map((user, index) => (
+                  <tr key={user.user_id} style={{
+                    borderBottom: '1px solid #e5e7eb',
+                    background: index % 2 === 0 ? 'white' : '#fef3c7'
+                  }}>
+                    <td style={{ padding: '12px', color: '#111827' }}>
+                      <div>
+                        <strong>{user.username || 'No username'}</strong>
+                        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                          ID: {user.user_id.substring(0, 12)}...
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                          📍 {user.location || 'No location'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                          📞 {user.phone_number || 'No phone'}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px', color: '#111827', fontSize: '13px' }}>
+                      {new Date(user.created_at).toLocaleDateString()}
+                      <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                        {new Date(user.created_at).toLocaleTimeString()}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <button
+                        onClick={() => deleteUserCompletely(user.user_id)}
+                        style={{
+                          padding: '8px 16px',
+                          background: '#dc2626',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
+                      >
+                        🗑️ Delete User
+                      </button>
+                      <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
+                        Deletes all user data
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* PRODUCTS WITH NO IMAGES SECTION */}
+      <div style={{
+        background: 'white',
+        padding: '20px',
+        borderRadius: '12px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        marginTop: '30px'
+      }}>
+        <h2 style={{ color: '#111827', margin: '0 0 20px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '15px' }}>
+          <span>🖼️ Products Without Images ({productsWithNoImages.length})</span>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {productsWithNoImages.length > 0 && (
+              <button
+                onClick={deleteAllProductsWithNoImages}
+                style={{
+                  padding: '8px 16px',
+                  background: '#dc2626',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
+              >
+                🗑️ Delete All
+              </button>
+            )}
+          </div>
+        </h2>
+
+        {productsWithNoImages.length === 0 ? (
+          <p style={{ color: '#16a34a', textAlign: 'center', padding: '20px' }}>
+            ✅ All products have images
+          </p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ background: '#fee2e2' }}>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Product</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Price</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Seller</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Created</th>
+                  <th style={{ padding: '12px', textAlign: 'left', borderBottom: '2px solid #e5e7eb', color: '#111827', fontWeight: '600', fontSize: '12px', textTransform: 'uppercase' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productsWithNoImages.map((product, index) => (
+                  <tr key={product.id} style={{
+                    borderBottom: '1px solid #e5e7eb',
+                    background: index % 2 === 0 ? 'white' : '#fee2e2'
+                  }}>
+                    <td style={{ padding: '12px', color: '#111827' }}>
+                      <strong>{product.name}</strong>
+                      <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                        {product.description ? product.description.substring(0, 50) + '...' : 'No description'}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px', color: '#111827', fontWeight: 'bold' }}>
+                      ${product.price}
+                    </td>
+                    <td style={{ padding: '12px', color: '#111827', fontSize: '13px' }}>
+                      {product.seller_id?.substring(0, 8) || 'Unknown'}
+                    </td>
+                    <td style={{ padding: '12px', color: '#111827', fontSize: '13px' }}>
+                      {new Date(product.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <button
+                        onClick={() => deleteProductWithNoImage(product.id)}
+                        style={{
+                          padding: '6px 14px',
+                          background: '#dc2626',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '600'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

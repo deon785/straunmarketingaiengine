@@ -408,7 +408,8 @@ const ProtectedRoute = React.memo(({ children }) => {
   const checkDone = useRef(false);
 
   useEffect(() => {
-    // ✅ Prevent multiple checks
+    console.log('🔵 [ProtectedRoute] useEffect RUNNING for path:', location.pathname);
+    
     if (checkDone.current) {
       console.log('[ProtectedRoute] Already checked, skipping');
       return;
@@ -445,10 +446,9 @@ const ProtectedRoute = React.memo(({ children }) => {
         }
         
         if (session) {
-          console.log('[ProtectedRoute] ✅ Valid session found');
+          console.log('🟢 [ProtectedRoute] ✅ Valid session found - WILL NOT REDIRECT');
           setSessionValid(true);
           setChecking(false);
-          resetNavigation();
           checkDone.current = true;
           return;
         }
@@ -488,14 +488,14 @@ const ProtectedRoute = React.memo(({ children }) => {
     };
   }, [loading, user, resetNavigation]);
 
-  // Show loader while checking
   if (checking) {
+    console.log('🟡 [ProtectedRoute] CHECKING - showing loader for path:', location.pathname);
     return <FullPageLoader />;
   }
 
   const authenticated = isAuthenticated || sessionValid || !!user;
   
-  console.log('[ProtectedRoute] Auth check:', {
+  console.log('🔵 [ProtectedRoute] Auth check:', {
     isAuthenticated,
     sessionValid,
     hasUser: !!user,
@@ -504,31 +504,30 @@ const ProtectedRoute = React.memo(({ children }) => {
     selectedMode
   });
 
-  // ✅ ALLOW ACCESS TO THESE PAGES (mode selection, setup, etc.)
-  const publicPaths = ['/', '/seller-decision', '/buyer-decision', '/buyer-form'];
+  // ✅ ALLOW ACCESS TO PUBLIC PAGES
+  const publicPaths = ['/', '/seller-decision', '/buyer-decision', '/buyer-form' , '/admin'];
   if (publicPaths.includes(location.pathname)) {
-    console.log('[ProtectedRoute] ✅ Public path allowed:', location.pathname);
+    console.log('🟢 [ProtectedRoute] ✅ Public path allowed (NO REDIRECT):', location.pathname);
     return children;
   }
 
-  // ✅ CRITICAL FIX: Allow /app even when mode is null (for mode selection UI)
+  // ✅ CRITICAL FIX: Allow /app even when mode is null
   if (location.pathname === '/app') {
-    // ✅ If authenticated, allow access to /app even with null mode
     if (authenticated) {
-      console.log('[ProtectedRoute] ✅ App path allowed (mode:', selectedMode || 'null', ')');
+      console.log('🟢 [ProtectedRoute] ✅ App path allowed (NO REDIRECT) (mode:', selectedMode || 'null', ')');
       return children;
     }
   }
 
   // ✅ Not authenticated - redirect to login
   if (!authenticated) {
-    console.log('[ProtectedRoute] 🔒 Not authenticated, redirecting to login');
+    console.log('🔴 [ProtectedRoute] 🔒 Not authenticated, REDIRECTING to login from path:', location.pathname);
     resetNavigation();
     return <Navigate to="/login" replace />;
   }
 
   // ✅ For all other protected routes, allow access
-  console.log('[ProtectedRoute] ✅ Allowing access to:', location.pathname);
+  console.log('🟢 [ProtectedRoute] ✅ Allowing access (NO REDIRECT) to:', location.pathname);
   return children;
 });
 
@@ -945,7 +944,7 @@ function App() {
                           <Route path="/help" element={<HelpCenter />} />
                           <Route path="/saved-searches" element={<SavedSearchesManager />} />
                           <Route path="/reset-password" element={<ResetPassword />} />
-                          <Route path="/admin" element={<SimpleAdmin />} />
+                          <Route path="/admin" element={<AdminDashboard />} />
                           
                           <Route path="*" element={<SafeNavigate to="/" replace />} />
                         </Routes>

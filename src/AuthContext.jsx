@@ -81,6 +81,12 @@ export const AuthProvider = ({ children }) => {
    // ✅ Add this useEffect to navigate after sign in
   useEffect(() => {
     if (user && isAuthenticated) {
+      // ⛔ SKIP REDIRECT IF ON ADMIN PAGE
+      if (window.location.pathname === '/admin') {
+        console.log('[Auth] 👑 On admin page - SKIPPING redirect');
+        return;
+      }
+      
       // Check if mode is active
       const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
       const savedMode = localStorage.getItem('straun_selectedMode');
@@ -89,6 +95,7 @@ export const AuthProvider = ({ children }) => {
         const age = Date.now() - parseInt(timestamp);
         if (age < MODE_EXPIRY_MS) {
           // Mode active - go to app
+          console.log('[Auth] ✅ Mode active, redirecting to /app');
           navigate('/app', { replace: true });
         }
         // Mode expired - stay on current page (mode selection)

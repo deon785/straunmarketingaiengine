@@ -20,7 +20,7 @@ import { SmartRateLimiter } from './smartRateLimiter.js';
 import ReportButton from './ReportButton.jsx';
 
 import { UserActivityTracker } from './userActivityTracker.js';
-import SimpleAdmin from './SimpleAdmin.jsx';
+import AdminDashboard from './AdminDashboard.jsx';
 import ToolsPanel from './ToolsPanel.jsx';
 import { fscrub } from 'fpoint';
 
@@ -937,9 +937,15 @@ function SocialAIMarketingEngine() {
         return localStorage.getItem(`interest_reminder_${user?.id}`) === 'true';
     });
 
-    // ✅ Save current location (page + mode)
+    // ✅ Save current location - FIXED to avoid saving /app as redirect target
     const saveUserLocation = useCallback(() => {
-        if (!user || !user.id) return; // ✅ Must have user
+        if (!user || !user.id) return;
+        
+        // ✅ DON'T save location if on /app or / (to avoid redirect loops)
+        if (location.pathname === '/app' || location.pathname === '/') {
+            console.log('💾 Skipping location save for root/app page');
+            return;
+        }
         
         const locationData = {
             path: location.pathname,
@@ -947,12 +953,11 @@ function SocialAIMarketingEngine() {
             timestamp: Date.now()
         };
         
-        // ✅ Store with user ID in the key
         const storageKey = `straun_userLocation_${user.id}`;
         localStorage.setItem(storageKey, JSON.stringify(locationData));
         
-        console.log('💾 Saved location for user:', user.id);
-    }, [selectedMode, location.pathname, user]);
+        console.log('💾 Saved location for user:', user.id, 'path:', location.pathname);
+    }, [location.pathname, user]);
 
     const loadMoreProducts = async () => {
         setLoading(true);
@@ -3303,8 +3308,16 @@ function SocialAIMarketingEngine() {
         }
     }, [location.pathname, user, selectedMode, saveUserLocation]);
 
-    // ✅ Restore location on app load - WITH EXPIRY CHECK
+    // ✅ RESTORE LOCATION ON APP LOAD - FIXED TO PREVENT INFINITE LOOPS
     useEffect(() => {
+        // ✅ GUARD: Skip for admin page
+        if (location.pathname === '/admin') {
+            console.log('🟢 [Location Restore] On admin page - SKIPPING');
+            return;
+        }
+
+        console.log('🔵 [Location Restore] RUNNING for path:', location.pathname);
+        
         // ✅ Wait for auth to finish loading
         if (authLoading) {
             console.log('[Location] Auth still loading, waiting...');
@@ -3316,7 +3329,7 @@ function SocialAIMarketingEngine() {
             return;
         }
         
-        // ✅ If mode is null, just show mode selection (don't navigate away from /app)
+        // ✅ If mode is null, show mode selection
         if (!selectedMode) {
             console.log('⏰ Mode is null - showing mode selection');
             setMode(null);
@@ -3324,46 +3337,57 @@ function SocialAIMarketingEngine() {
             setShowSellerDecision(false);
             setShowBuyerDecision(false);
             
-            // Clear location data
             const storageKey = `straun_userLocation_${user.id}`;
             localStorage.removeItem(storageKey);
-            localStorage.removeItem(`straun_chosen_mode_${user.id}`);
             
-            // ✅ If we're on /app, stay there (mode selection UI will show)
-            // ✅ If we're on root, stay there (mode selection UI will show)
-            // ✅ Only navigate if we're on some other page
             if (location.pathname !== '/' && location.pathname !== '/app') {
                 console.log('[Location] Navigating to home for mode selection');
                 navigate('/');
-            } else {
-                console.log('[Location] Staying on current page for mode selection');
             }
             return;
         }
         
-        // ✅ If mode exists, try to restore location (but only if within 1 hour)
+        // ✅ CRITICAL FIX: If we're already on /app or /, DON'T redirect
+        const isAppOrRoot = location.pathname === '/app' || location.pathname === '/';
+        
+        // ✅ If mode exists, try to restore location
         const storageKey = `straun_userLocation_${user.id}`;
         const saved = localStorage.getItem(storageKey);
         
         if (saved) {
             try {
                 const data = JSON.parse(saved);
-                const ONE_HOUR = 60 * 60 * 1000;
+                console.log('🔵 [Location Restore] Found saved location:', data);
                 
-                // ✅ Admin: No expiry check
-                // ✅ Regular user: Check 1 hour expiry
+                const ONE_HOUR = 60 * 60 * 1000;
                 const isAdminUser = user.email === 'deonmahachi8@gmail.com';
                 const isExpired = Date.now() - data.timestamp >= ONE_HOUR;
                 
                 if (isAdminUser || !isExpired) {
                     console.log('🔄 Found valid saved location for user:', user.id, isAdminUser ? '(Admin - no expiry)' : '');
                     
-                    if (data.path && data.path !== '/' && data.path !== '/login') {
+                    // ✅ FIX: Only redirect if:
+                    // 1. Saved path exists
+                    // 2. Saved path is NOT the current path
+                    // 3. Saved path is NOT '/' or '/app' (to avoid loop)
+                    // 4. Saved path is NOT '/admin' (admin handled separately)
+                    const savedPath = data.path;
+                    const currentPath = location.pathname;
+                    
+                    if (savedPath && 
+                        savedPath !== currentPath && 
+                        savedPath !== '/app' && 
+                        savedPath !== '/' && 
+                        savedPath !== '/admin') {
+                        
+                        console.log('🔴 [Location Restore] WILL REDIRECT to:', savedPath);
                         setTimeout(() => {
-                            navigate(data.path);
+                            navigate(savedPath);
                         }, 100);
+                    } else {
+                        // ✅ If we're already on /app or /, just stay
+                        console.log('🟢 [Location Restore] Already on correct page - NO REDIRECT');
                     }
-                    return;
                 } else {
                     localStorage.removeItem(storageKey);
                     console.log('⏰ Location expired for regular user');
@@ -3372,6 +3396,8 @@ function SocialAIMarketingEngine() {
                 console.error('Error restoring location:', e);
                 localStorage.removeItem(storageKey);
             }
+        } else {
+            console.log('🔵 [Location Restore] No saved location found');
         }
     }, [user, selectedMode, setMode, navigate, location.pathname, authLoading]);
 
@@ -3673,25 +3699,41 @@ function SocialAIMarketingEngine() {
     // Add this useEffect to check admin status
     useEffect(() => {
         const checkAdminStatus = async () => {
-            if (!user) return;
+            if (!user) {
+                setIsAdmin(false);
+                return;
+            }
             
             try {
-                const { data: { user: authUser } } = await supabase.auth.getUser();
+                // ✅ Check multiple ways to determine admin
+                const email = user.email?.toLowerCase();
+                const isAdminUser = email === 'deonmahachi8@gmail.com';
                 
-                // Check if email matches admin email
-                const isAdminUser = authUser?.email === 'deonmahachi8@gmail.com';
-                setIsAdmin(isAdminUser);
+                // Also check user metadata
+                const isAdminFromMetadata = user.user_metadata?.is_admin === true || 
+                                        user.app_metadata?.is_admin === true;
                 
-                if (isAdminUser) {
-                    console.log('✅ Admin user detected:', authUser.email);
+                const adminStatus = isAdminUser || isAdminFromMetadata;
+                
+                console.log('👑 Admin check - Email:', email);
+                console.log('👑 Admin check - Result:', adminStatus);
+                console.log('👑 Admin check - User object:', user);
+                
+                setIsAdmin(adminStatus);
+                
+                if (adminStatus) {
+                    console.log('✅ Admin user confirmed:', user.email);
                 }
             } catch (error) {
                 console.error('Error checking admin status:', error);
+                setIsAdmin(false);
             }
         };
         
         if (user) {
             checkAdminStatus();
+        } else {
+            setIsAdmin(false);
         }
     }, [user]);
 
@@ -5980,11 +6022,6 @@ function SocialAIMarketingEngine() {
         );
     }
 
-    const isAdminRoute = window.location.pathname === '/admin';
-    if (isAdminRoute) {
-        return <SimpleAdmin />;
-    }
-
     const ChatSystem = ({ currentUserId, otherUserId, otherUserName, productId, productName, onClose }) => {
         return (
             <div style={{ padding: '20px' }}>
@@ -7303,12 +7340,12 @@ function SocialAIMarketingEngine() {
                             AI
                         </span>
                         
-                        {/* 👑 CLICKABLE CROWN ICON FOR ADMIN */}
-                        {isAdmin && (
+                        {/* 👑 CLICKABLE CROWN ICON FOR ADMIN - FIXED */}
+                        {isAdmin === true && (
                             <button
                                 onClick={() => {
                                     console.log('👑 Admin crown clicked - navigating to admin dashboard');
-                                    navigate('/admin');
+                                    window.location.href = '/admin';
                                 }}
                                 title="Admin Dashboard"
                                 style={{
@@ -7323,13 +7360,17 @@ function SocialAIMarketingEngine() {
                                     animation: 'crownGlow 2s ease-in-out infinite',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center'
+                                    justifyContent: 'center',
+                                    color: '#FFD700', // Gold color
+                                    textShadow: '0 0 10px rgba(255,215,0,0.3)'
                                 }}
                                 onMouseEnter={(e) => {
                                     e.currentTarget.style.transform = 'scale(1.1)';
+                                    e.currentTarget.style.textShadow = '0 0 20px rgba(255,215,0,0.6)';
                                 }}
                                 onMouseLeave={(e) => {
                                     e.currentTarget.style.transform = 'scale(1)';
+                                    e.currentTarget.style.textShadow = '0 0 10px rgba(255,215,0,0.3)';
                                 }}
                             >
                                 👑
