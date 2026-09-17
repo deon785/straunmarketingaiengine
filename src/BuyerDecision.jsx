@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthActions } from './AuthContext';
 import { supabase } from './lib/supabase';
 
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
@@ -34,6 +35,7 @@ const BuyerDecision = ({
   const [checking, setChecking] = useState(false); // ✅ Set to false initially
 
   const navigate = useNavigate();
+  const { setMode } = useAuthActions();
 
   const safeNavigate = (path) => {
     try {
@@ -49,6 +51,10 @@ const BuyerDecision = ({
     }
   };
 
+  const pendingInterest = typeof window !== 'undefined' 
+    ? localStorage.getItem('straun_pending_interest') 
+    : null;
+
   // ✅ Simply use existingData from parent - NO FETCH NEEDED
   useEffect(() => {
     if (existingData) {
@@ -59,9 +65,19 @@ const BuyerDecision = ({
 
   // ✅ HANDLE ADD INTERESTS
   const handleAddInterests = () => {
+    // If parent passed onAddInterests (used inside SocialAIMarketingEngine), use it
     if (onAddInterests) {
-      onAddInterests();
+        onAddInterests();
+        return;
     }
+    
+    // ✅ Standalone mode: navigate to buyer form
+    console.log('🚀 Buyer: navigating to buyer form');
+    setMode('buyer');  // Set mode now, so if they come back they're in buyer mode
+    
+    setTimeout(() => {
+        safeNavigate('/buyer-form');
+    }, 100);
   };
 
   // ✅ HANDLE SKIP - Simplified
@@ -112,13 +128,24 @@ const BuyerDecision = ({
         return;
       }
       
-      // ✅ Call parent callback
+      // ✅ Set mode FIRST, then navigate
+      console.log('🚀 Buyer skip: setting buyer mode and navigating to /app');
+      setMode('buyer');
+
+      // ✅ CRITICAL: Mark profile complete in localStorage
+      localStorage.setItem('straun_profileComplete', 'true');
+      console.log('✅ Set straun_profileComplete = true');
+
+      // If parent passed onSkip (used inside SocialAIMarketingEngine), let it handle
       if (onSkip) {
-        onSkip();
+          setTimeout(() => {
+              onSkip();
+          }, 100);
       } else {
-        safeNavigate('/app');
-      }
-      
+          setTimeout(() => {
+              safeNavigate('/app');
+          }, 150);
+      } 
     } catch (err) {
       console.error('[BuyerDecision] Skip error:', err);
       setError('Failed to skip. Please try again.');
@@ -185,14 +212,23 @@ const BuyerDecision = ({
       }
       
       setShowLocationModal(false);
-      
-      // ✅ Call parent callback
+
+      // ✅ Set mode FIRST
+      console.log('🚀 Buyer save: setting buyer mode and navigating to /app');
+      setMode('buyer');
+
+      // ✅ CRITICAL: Mark profile complete
+      localStorage.setItem('straun_profileComplete', 'true');
+
       if (onSkip) {
-        onSkip();
+          setTimeout(() => {
+              onSkip();
+          }, 100);
       } else {
-        safeNavigate('/app');
-      }
-      
+          setTimeout(() => {
+              safeNavigate('/app');
+          }, 150);
+      }     
     } catch (err) {
       console.error('[BuyerDecision] Save error:', err);
       setError('Failed to save information. Please check your connection.');
@@ -317,13 +353,31 @@ const BuyerDecision = ({
 
           <div style={{ marginBottom: '24px', textAlign: 'center' }}>
             <p style={{ color: '#718096', fontSize: '14px', lineHeight: '1.5' }}>
-              Adding interests helps sellers find you with relevant products.<br />
-              You can always add or update them later from your dashboard.
+                Adding interests helps sellers find you with relevant products.<br />
+                You can always add or update them later from your dashboard.
             </p>
+            
+            {/* ✅ NEW: Show pending interest hint */}
+            {pendingInterest && (
+                <div style={{
+                    background: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    marginTop: '12px',
+                    fontSize: '13px',
+                    color: '#1e40af',
+                    textAlign: 'left'
+                }}>
+                    💡 <strong>Tip:</strong> You were looking at <strong>"{pendingInterest}"</strong>
+                    {' '}— we'll remember that when you add interests!
+                </div>
+            )}
+            
             {profileData?.location && profileData?.phone_number && (
-              <p style={{ color: '#16a34a', fontSize: '12px', marginTop: '10px' }}>
-                ✓ Your profile is complete (Location and Phone saved)
-              </p>
+                <p style={{ color: '#16a34a', fontSize: '12px', marginTop: '10px' }}>
+                    ✓ Your profile is complete (Location and Phone saved)
+                </p>
             )}
           </div>
 
@@ -394,21 +448,23 @@ const BuyerDecision = ({
           {/* Back button */}
           <button
             onClick={() => {
-              navigate('/');
+              // ✅ Safe fallback - since mode selection no longer exists, go home
+              console.log('[BuyerDecision] Back clicked - returning to homepage');
+              safeNavigate('/');
             }}
             style={{
-              marginTop: '20px',
-              width: '100%',
-              background: 'none',
-              border: 'none',
-              color: '#666',
-              cursor: 'pointer',
-              fontSize: '13px',
-              textDecoration: 'underline',
-              padding: '8px'
+                marginTop: '20px',
+                width: '100%',
+                background: 'none',
+                border: 'none',
+                color: '#666',
+                cursor: 'pointer',
+                fontSize: '13px',
+                textDecoration: 'underline',
+                padding: '8px'
             }}
           >
-            ← Back to mode selection
+            ← Back to Home
           </button>
         </div>
       </div>

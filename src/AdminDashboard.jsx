@@ -730,13 +730,20 @@ const AdminDashboard = () => {
     if (!window.confirm('Delete this product (no image)?')) return;
 
     try {
+      setLoading(true);
+      
       const { error } = await supabase
         .from('products')
         .delete()
         .eq('id', productId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error deleting product:', error);
+        alert(`❌ Error: ${error.message}`);
+        return;
+      }
 
+      // Refresh the list
       const updatedProducts = await fetchProductsWithNoImages();
       setProductsWithNoImages(updatedProducts);
       await fetchDashboardData();
@@ -744,7 +751,9 @@ const AdminDashboard = () => {
       alert('✅ Product deleted successfully!');
     } catch (error) {
       console.error('Error deleting product:', error);
-      alert('❌ Error deleting product');
+      alert(`❌ Error: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -753,6 +762,8 @@ const AdminDashboard = () => {
     if (!window.confirm('⚠️ FINAL WARNING: This will delete ALL products without images. Are you sure?')) return;
 
     try {
+      setLoading(true);
+      
       const products = await fetchProductsWithNoImages();
       if (products.length === 0) {
         alert('No products without images found.');
@@ -760,23 +771,33 @@ const AdminDashboard = () => {
       }
 
       let deleted = 0;
+      let errors = 0;
+      
       for (const product of products) {
         const { error } = await supabase
           .from('products')
           .delete()
           .eq('id', product.id);
 
-        if (!error) deleted++;
+        if (error) {
+          console.error(`Error deleting product ${product.id}:`, error);
+          errors++;
+        } else {
+          deleted++;
+        }
       }
 
+      // Refresh the list
       const updatedProducts = await fetchProductsWithNoImages();
       setProductsWithNoImages(updatedProducts);
       await fetchDashboardData();
 
-      alert(`✅ Deleted ${deleted} products without images.`);
+      alert(`✅ Deleted ${deleted} products without images. ${errors > 0 ? `⚠️ ${errors} failed.` : ''}`);
     } catch (error) {
       console.error('Error deleting products:', error);
-      alert('❌ Error deleting products');
+      alert(`❌ Error: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 

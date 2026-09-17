@@ -1,6 +1,6 @@
 // signup.jsx - COMPLETE CORRECTED VERSION
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useBouncer } from './hooks/useBouncer';
 import './Signup.css';
 import { Link } from 'react-router-dom'; 
@@ -60,7 +60,6 @@ const EmailInput = React.memo(({ inputRef, disabled }) => {
           name="email"
           ref={inputRef}
           disabled={disabled}
-          placeholder="your.email@example.com"
           autoComplete="email"
           className="form-input"
           style={{
@@ -213,7 +212,6 @@ const PhoneInput = React.memo(({ inputRef, disabled }) => {
           name="phone"
           ref={inputRef}
           disabled={disabled}
-          placeholder="+263 123 456 789"
           autoComplete="off"
           className="form-input"
           style={{
@@ -484,6 +482,9 @@ const Auth = () => {
   
   const navigate = useNavigate();
   const { resetNavigation } = useNavigation();
+  const [searchParams] = useSearchParams(); 
+  const intent = searchParams.get('intent');
+  const isFreshLogin = searchParams.get('fresh') === 'true';
   const retryCountRef = useRef(0);
 
   // 🚪 BOUNCER
@@ -806,21 +807,31 @@ const Auth = () => {
 
           // ✅ Now navigate with a slight delay to ensure state propagation
           if (authReady) {
-            console.log('🚀 Navigating to /app');
-            // Small delay to ensure React state updates
+            console.log('🚀 Navigating based on intent:', intent);
             setTimeout(() => {
-              navigate('/app', { replace: true });
+              if (intent === 'buyer') {
+                navigate('/buyer-decision', { replace: true });
+              } else if (intent === 'seller') {
+                navigate('/seller-decision', { replace: true });
+              } else {
+                navigate('/app', { replace: true });
+              }
             }, 300);
+
           } else {
             console.warn('⚠️ Auth not ready after polling, using fallback');
             // Fallback: try to navigate anyway
             setTimeout(() => {
-              // Force check session one more time
               supabase.auth.getSession().then(({ data: { session } }) => {
                 if (session) {
-                  navigate('/app', { replace: true });
+                  if (intent === 'buyer') {
+                    navigate('/buyer-decision', { replace: true });
+                  } else if (intent === 'seller') {
+                    navigate('/seller-decision', { replace: true });
+                  } else {
+                    navigate('/app', { replace: true });
+                  }
                 } else {
-                  // Last resort - navigate to seller decision directly
                   navigate('/seller-decision', { replace: true });
                 }
               });
@@ -876,10 +887,19 @@ const Auth = () => {
       
       // ✅ FIXED: Let AuthContext handle the redirect based on profile/mode
       // The AuthContext will check profile and mode expiry
+      // ✅ REDIRECT BASED ON INTENT
       setTimeout(() => {
-        navigate('/app', { replace: true });
+        if (intent === 'buyer') {
+          console.log('🚀 Sign in: Redirecting to buyer decision');
+          navigate('/buyer-decision', { replace: true });
+        } else if (intent === 'seller') {
+          console.log('🚀 Sign in: Redirecting to seller decision');
+          navigate('/seller-decision', { replace: true });
+        } else {
+          console.log('🚀 Sign in: Redirecting to app');
+          navigate('/app', { replace: true });
+        }
       }, 500);
-      
     } catch (error) {
       console.error('Sign in error:', error);
       
@@ -897,7 +917,7 @@ const Auth = () => {
     } finally {
       setLoading(false);
     }
-  }, [storeUserInLocalStorage, navigate, bouncer]);
+  }, [storeUserInLocalStorage, navigate, bouncer, intent]);
 
   // ============ FORM SUBMIT ============
   const handleSubmit = useCallback(async (e) => {
@@ -936,7 +956,7 @@ const Auth = () => {
       setMessage({ text: error.message || 'Action failed', type: 'error' });
       setLoading(false);
     }
-  }, [isSignUp, validateForm, handleSignUp, handleSignIn, bouncer]);
+  }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer, intent]);
 
   // ============ FORM SWITCH ============
   const handleFormSwitch = useCallback(() => {
@@ -1009,6 +1029,52 @@ const Auth = () => {
       console.log('📢 Referral code detected:', ref);
     }
   }, []);
+
+  // ✅ If user is already logged in, redirect based on intent
+  useEffect(() => {
+    // Don't run if user is in reset password mode
+    if (sessionStorage.getItem('passwordResetMode') === 'true') return;
+    
+    // ✅ CRITICAL: Don't skip login if user explicitly clicked "Log In"
+    if (isFreshLogin) {
+        console.log('🔒 Fresh login requested - showing login form');
+        return;
+    }
+
+    const checkExistingSession = async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+            console.log('🔓 No existing session - showing login form');
+            return;
+        }
+
+        console.log('✅ Existing session found - skipping login');
+        
+        // ✅ Determine where to redirect after login
+        const getPostLoginPath = () => {
+            // 1. If there's an intent from the homepage, use it
+            if (intent === 'buyer') return '/buyer-decision';
+            if (intent === 'seller') return '/seller-decision';
+            
+            // 2. If there's an active mode, go to /app
+            const savedMode = localStorage.getItem('straun_selectedMode');
+            const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
+            const MODE_EXPIRY_MS = 60 * 60 * 1000;
+            
+            if (savedMode && timestamp) {
+                const age = Date.now() - parseInt(timestamp);
+                if (age < MODE_EXPIRY_MS) {
+                    return '/app';
+                }
+            }
+            
+            // 3. Default: show mode selection
+            return '/mode-selection';
+        };
+    };
+
+    checkExistingSession();
+  }, [isFreshLogin, intent, navigate]);
 
   // ============ RENDER ============
   return (

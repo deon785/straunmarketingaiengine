@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { supabase } from './lib/supabase';
+import { useAuthActions } from './AuthContext';
 import DOMPurify from 'dompurify';
 
 // ✅ fetchWithRetry helper
@@ -21,6 +22,7 @@ const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
 
 const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) => {
     const navigate = useNavigate();
+    const { setMode } = useAuthActions();
     const [user, setUser] = useState(null);
     const [userLoading, setUserLoading] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,6 +87,21 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
         
         return true;
     }, []);
+
+    // ✅ Check for pending interest from deal clicks (PRE-FILL the form)
+    useEffect(() => {
+        const pendingInterest = localStorage.getItem('straun_pending_interest');
+        
+        if (pendingInterest) {
+            console.log('🎯 Pre-filling interest from deal:', pendingInterest);
+            
+            // Pre-fill the interests field using react-hook-form's setValue
+            setValue('interests', pendingInterest);
+            
+            // ✅ Clear it so it doesn't persist forever
+            localStorage.removeItem('straun_pending_interest');
+        }
+    }, [setValue]);
 
     // ============ FETCH USER ============
     useEffect(() => {
@@ -302,13 +319,27 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                 interests: finalSanitizedData.interests
             });
             
-            onProfileComplete({
-                location: finalSanitizedData.location,
-                phone_number: finalSanitizedData.phone_number,
-                username: finalSanitizedData.username,
-                interests: combinedInterests
-            });
+            // ✅ Safe callback - handles both parent and standalone cases
+            if (typeof onProfileComplete === 'function') {
+                onProfileComplete({
+                    location: finalSanitizedData.location,
+                    phone_number: finalSanitizedData.phone_number,
+                    username: finalSanitizedData.username,
+                    interests: combinedInterests
+                });
+            } else {
+                console.log('✅ BuyerSetupForm: no parent callback, using standalone flow');
+                
+                // ✅ Standalone: navigate to /app ourselves
+                setTimeout(() => {
+                    navigate('/app');
+                }, 500);
+            }
 
+            // ✅ Set mode + profile complete (both standalone and nested)
+            setMode('buyer');
+            localStorage.setItem('straun_profileComplete', 'true');
+            console.log('✅ BuyerSetupForm: mode + profileComplete set');
         } catch (err) {
             console.error('❌ Profile Submission Error:', err);
             setError(err.message || 'Error setting up profile. Please try again.');
@@ -537,7 +568,6 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                                     }
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
-                                placeholder="e.g., Harare, Zimbabwe"
                             />
                             {errors.location && (
                                 <div className="field-error">{errors.location.message}</div>
@@ -556,7 +586,6 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                                     validate: validatePhoneNumber
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
-                                placeholder="+263 712 345 678 or 071 234 5678"
                             />
                             {errors.phone_number && (
                                 <div className="field-error">{errors.phone_number.message}</div>

@@ -6,10 +6,118 @@ import ReferralProgram from './ReferralProgram';
 import ChatList from './ChatList';
 import PriceAlertDashboard from './PriceAlertDashboard';
 import WishlistManager from './WishlistManager';
+import { useAuthState } from './AuthContext';
+import TopNavigationBar from './TopNavigationBar';
 
-const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSocial }) => {
+// ============================================
+// DESIGN TOKENS
+// ============================================
+const T = {
+    bg: '#0d0d10',
+    cardBg: '#ffffff',
+    cardText: '#09090b',
+    cardMuted: '#6b7280',
+    softBg: '#f3f4f6',
+    softText: '#1f2937',
+    softMuted: '#6b7280',
+    darkSurface: '#1a1a20',
+    red: '#ef4444',
+    accent: '#7c3aed',
+    textOnDark: '#ffffff',
+    textOnDarkMuted: 'rgba(255,255,255,0.55)',
+    border: 'rgba(255,255,255,0.06)',
+    radius: '16px',
+};
+
+const HEXAGON_PATTERN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.01'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")";
+
+// ============================================
+// STAT CARD COMPONENT
+// ============================================
+const StatCard = ({ icon, label, value, badge, highlight, locked }) => {
+    if (locked) {
+        return (
+            <div style={{
+                background: T.darkSurface,
+                border: '1.5px dashed rgba(255,255,255,0.15)',
+                borderRadius: T.radius,
+                padding: '32px 20px',
+                textAlign: 'center',
+                position: 'relative',
+            }}>
+                <div style={{ position: 'absolute', top: '14px', right: '14px', fontSize: '14px', opacity: 0.5 }}>🔒</div>
+                <div style={{ fontSize: '32px', marginBottom: '16px' }}>{icon}</div>
+                <div style={{ fontSize: '38px', fontWeight: '900', color: 'rgba(255,255,255,0.3)', letterSpacing: '-1.5px', lineHeight: 1, marginBottom: '8px' }}>
+                    {value}
+                </div>
+                <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.5)', fontWeight: '500' }}>{label}</div>
+            </div>
+        );
+    }
+
+    if (highlight) {
+        return (
+            <div style={{
+                background: 'linear-gradient(135deg, #ffffff, #f4f0ff)',
+                border: '1.5px solid #a855f7',
+                borderRadius: T.radius,
+                padding: '32px 20px',
+                textAlign: 'center',
+            }}>
+                <div style={{ fontSize: '32px', marginBottom: '16px' }}>{icon}</div>
+                <div style={{ fontSize: '38px', fontWeight: '900', color: '#09090b', letterSpacing: '-1.5px', lineHeight: 1, marginBottom: '8px' }}>
+                    {value}
+                </div>
+                <div style={{ fontSize: '13px', color: T.cardMuted, fontWeight: '500' }}>{label}</div>
+            </div>
+        );
+    }
+
+    return (
+        <div style={{
+            background: T.cardBg,
+            borderRadius: T.radius,
+            padding: '32px 20px',
+            textAlign: 'center',
+            position: 'relative',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+        }}>
+            <div style={{ fontSize: '32px', marginBottom: '16px' }}>{icon}</div>
+            <div style={{ fontSize: '38px', fontWeight: '900', color: '#09090b', letterSpacing: '-1.5px', lineHeight: 1, marginBottom: '8px' }}>
+                {value}
+            </div>
+            <div style={{ fontSize: '13px', color: T.cardMuted, fontWeight: '500' }}>
+                {label}
+                {badge > 0 && (
+                    <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: T.red,
+                        color: 'white',
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        minWidth: '18px',
+                        height: '18px',
+                        padding: '0 5px',
+                        borderRadius: '10px',
+                        marginLeft: '6px',
+                    }}>{badge}</span>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: propUserEmail, selectedMode, onBackToSocial, unreadNotifications = 0, onNotificationsClick}) => {
     const navigate = useNavigate();
     const location = useLocation();
+    const { user: authUser } = useAuthState();
+    
+    // ✅ Fallback: use prop OR auth context
+    const userId = propUserId || authUser?.id;
+    const userName = propUserName || authUser?.email?.split('@')[0] || 'User';
+    const userEmail = propUserEmail || authUser?.email;
     const [activeTab, setActiveTab] = useState('overview');
     const [stats, setStats] = useState({
         profileViews: 0,
@@ -45,6 +153,13 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
 
     const [claimedDeals, setClaimedDeals] = useState([]);
     const [showClaimedDeals, setShowClaimedDeals] = useState(false);
+    const [profileData, setProfileData] = useState(null);
+    const [error, setError] = useState('');
+
+    const showToastNotification = (msg) => {
+        // Simple console toast — swap for your real toast system if you have one
+        console.log('[Toast]', msg);
+    };
 
     // Handle browser back button
     useEffect(() => {
@@ -63,12 +178,23 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     }, [location.pathname]);
 
     useEffect(() => {
-        loadDashboardData();
+        // ✅ Only load when we actually have a userId
+        if (userId) {
+            loadDashboardData();
+            loadProfileData();
+        }
     }, [userId, selectedMode]);
 
     const loadDashboardData = async () => {
-        setLoading(true);
+        // ✅ GUARD: Don't fire queries without a valid userId
+        if (!userId || userId === 'undefined') {
+            console.warn('[Dashboard] No userId — skipping data fetch');
+            setLoading(false);
+            return;
+        }
         
+        setLoading(true);
+      
         try {
             const { data: referrals } = await supabase
                 .from('referrals')
@@ -275,6 +401,21 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         }
     };
 
+    const loadProfileData = async () => {
+        if (!userId) return;
+        try {
+            const { data } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('user_id', userId)
+                .maybeSingle();
+            setProfileData(data || { interests: [] });
+        } catch (e) {
+            console.error('[loadProfileData] Error:', e);
+            setProfileData({ interests: [] });
+        }
+    };
+
     const getGreeting = () => {
         const hour = new Date().getHours();
         if (hour < 12) return 'Good Morning';
@@ -337,6 +478,22 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
             setStats(prev => ({ ...prev, savedSearchesCount: prev.savedSearchesCount - 1 }));
         }
     };
+
+     const renderTopBar = () => (
+        <TopNavigationBar
+            user={authUser || { email: userEmail }}
+            selectedMode={selectedMode}
+            profileData={profileData}
+            loading={false}
+            onSwitchMode={() => navigate('/app')}
+            onSignOut={() => navigate('/login')}
+            onSettingsClick={() => navigate('/app')}
+            isAdmin={false}
+            isHidden={false}
+            unreadNotifications={unreadNotifications}
+            onNotificationsClick={onNotificationsClick || (() => navigate('/notifications'))}
+        />
+    );
 
     // ✅ Add interest
     const addInterest = async () => {
@@ -414,10 +571,150 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         if (onBackToSocial) {
             onBackToSocial();
             setTimeout(() => {
-                window.location.href = `/app?q=${encodeURIComponent(searchTerm)}`;
+                navigate(`/app?q=${encodeURIComponent(searchTerm)}`);
             }, 100);
         }
     };
+
+     // ============================================
+    // SHARED PAGE STYLES
+    // ============================================
+    const pageWrapper = {
+        minHeight: '100vh',
+        background: T.bg,
+        color: T.textOnDark,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    };
+    const containerStyle = {
+        maxWidth: '1200px',
+        margin: '0 auto',
+        padding: '24px',
+    };
+    const btnPrimary = {
+        background: '#ffffff',
+        color: '#09090b',
+        border: 'none',
+        padding: '12px 20px',
+        borderRadius: '10px',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        fontFamily: 'inherit',
+    };
+    const btnSecondary = {
+        background: 'transparent',
+        color: '#ffffff',
+        border: '1.5px solid rgba(255,255,255,0.15)',
+        padding: '12px 20px',
+        borderRadius: '10px',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        fontFamily: 'inherit',
+    };
+    const backBtn = {
+        background: 'transparent',
+        color: '#ffffff',
+        border: '1.5px solid rgba(255,255,255,0.15)',
+        padding: '10px 18px',
+        borderRadius: '10px',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginBottom: '20px',
+        fontFamily: 'inherit',
+    };
+    const gridStyle = {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+        gap: '16px',
+        marginBottom: '28px',
+    };
+    const sectionWhite = {
+        background: '#ffffff',
+        borderRadius: T.radius,
+        padding: '28px 32px',
+        marginBottom: '20px',
+        color: '#09090b',
+    };
+    const sectionSoft = {
+        background: T.softBg,
+        borderRadius: T.radius,
+        padding: '28px 32px',
+        marginBottom: '20px',
+        color: '#09090b',
+    };
+    const sectionTitle = {
+        fontSize: '20px',
+        fontWeight: '800',
+        color: '#0d0d10',
+        marginBottom: '20px',
+        letterSpacing: '-0.3px',
+    };
+    const welcomeHeaderStyle = {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        flexWrap: 'wrap',
+        gap: '16px',
+        marginBottom: '28px',
+        paddingBottom: '24px',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+    };
+    const greetingStyle = {
+        fontSize: '38px',
+        fontWeight: '900',
+        letterSpacing: '-1.5px',
+        margin: '0 0 6px 0',
+        color: '#ffffff',
+        lineHeight: 1.1,
+    };
+    const welcomeTextStyle = {
+        fontSize: '15px',
+        color: 'rgba(255,255,255,0.5)',
+        margin: 0,
+        fontWeight: '500',
+    };
+    const referralBadgeStyle = {
+        background: '#ffffff',
+        color: '#09090b',
+        padding: '10px 18px',
+        borderRadius: '24px',
+        fontSize: '13px',
+        fontWeight: '800',
+    };
+    const tabsRowStyle = {
+        display: 'flex',
+        gap: '8px',
+        marginBottom: '28px',
+        overflowX: 'auto',
+        paddingBottom: '4px',
+    };
+    const loadingWrap = {
+        textAlign: 'center',
+        paddingTop: '80px',
+    };
+    const spinner = {
+        width: '40px',
+        height: '40px',
+        border: '3px solid rgba(255,255,255,0.15)',
+        borderTop: '3px solid #a855f7',
+        borderRadius: '50%',
+        margin: '0 auto 16px',
+        animation: 'spin 1s linear infinite',
+    };
+
+    const spinKeyframes = <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>;
+
 
     if (selectedChat) {
         return (
@@ -472,6 +769,111 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
         );
     }
 
+    // ✅ GUEST MODE: Show limited dashboard for non-logged-in users
+    if (!userId) {
+        return (
+            <div style={styles.container }>
+                {/* Top nav bar */}
+                <div style={styles.topNavBar}>
+                    <button 
+                        onClick={() => navigate('/')} 
+                        style={styles.navButtonSecondary}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(124, 58, 237, 0.15)';
+                            e.currentTarget.style.borderColor = '#9333ea';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+                        }}
+                    >
+                        🏠 Home
+                    </button>
+                    <button 
+                        onClick={() => navigate('/app')} 
+                        style={styles.navButtonPrimary}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 6px 20px rgba(124, 58, 237, 0.4)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 2px 10px rgba(124, 58, 237, 0.2)';
+                        }}
+                    >
+                        ← Back to Search
+                    </button>
+                </div>
+                <div style={styles.welcomeHeader}>
+                    <div style={styles.referralBadge}>
+                        🎁 {userReferralCount} Referrals
+                    </div>
+                </div>
+
+                {/* Public Preview Cards */}
+                <div style={styles.statsGrid}>
+                    <StatCard icon="🔥" label="Daily Deals" value="12" highlight={true} />
+                    <StatCard icon="🛒" label="Active Products" value="100+" highlight={true} />
+                    <StatCard icon="💬" label="Sellers Online" value="24" highlight={true} />
+                    <StatCard icon="🎯" label="Your Interests" value="?" locked={true} />
+                    <StatCard icon="❤️" label="Your Wishlist" value="?" locked={true} />
+                    <StatCard icon="📦" label="Your Orders" value="?" locked={true} />
+                </div>
+
+                {/* Sign-In Prompt */}
+                <div style={{
+                    background: 'var(--card-bg)',
+                    border: '2px dashed var(--secondary-color)',
+                    borderRadius: '16px',
+                    padding: '40px 20px',
+                    textAlign: 'center',
+                    marginTop: '30px'
+                }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔓</div>
+                    <h3 style={{ margin: '0 0 12px 0', color: 'var(--text-primary)', fontSize: '22px' }}>
+                        Unlock Your Full Dashboard
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)', maxWidth: '500px', margin: '0 auto 24px', lineHeight: 1.6 }}>
+                        Sign up to track your wishlist, orders, saved searches, price alerts, referrals, and more!
+                    </p>
+                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        <button
+                            onClick={() => navigate('/login?intent=buyer')}
+                            style={{
+                                padding: '12px 32px',
+                                background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: 'bold',
+                                fontSize: '15px',
+                                cursor: 'pointer',
+                                boxShadow: 'var(--shadow-md)'
+                            }}
+                        >
+                            🚀 Sign Up Free
+                        </button>
+                        <button
+                            onClick={() => navigate('/login?fresh=true')}
+                            style={{
+                                padding: '12px 32px',
+                                background: 'var(--light-bg)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '8px',
+                                fontWeight: 'bold',
+                                fontSize: '15px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Log In
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (loading) {
         return (
             <div style={styles.loadingContainer}>
@@ -483,16 +885,50 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
 
     return (
         <div style={styles.container}>
-            {/* Top navigation bar with back button */}
+            {/* Top navigation bar */}
+            {renderTopBar()}
+
+            {/* Home + Back to Search row (Home first) */}
             <div style={styles.topNavBar}>
-                <button 
-                    onClick={onBackToSocial || (() => navigate('/app'))} 
-                    style={styles.backNavButton}
-                >
-                    ← Back to Search
-                </button>
-                <div style={styles.navSpacer}></div>
-            </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                        onClick={() => navigate('/')}
+                        style={styles.navButtonSecondary}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(124, 58, 237, 0.15)';
+                            e.currentTarget.style.borderColor = '#9333ea';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)';
+                        }}
+                    >
+                        🏠 Home
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (onBackToSocial) {
+                                onBackToSocial();
+                            } else {
+                                navigate('/app');
+                            }
+                        }}
+                        style={styles.navButtonPrimary}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)';
+                            e.currentTarget.style.boxShadow = '0 6px 20px rgba(124, 58, 237, 0.4)';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 2px 10px rgba(124, 58, 237, 0.2)';
+                        }}
+                    >
+                        ← Back to Search
+                    </button>
+                </div>
+            <div style={styles.navSpacer}></div>
+        </div>
+                            
 
             {activeTab !== 'overview' && (
                 <button onClick={handleBack} style={styles.backButtonTop}>
@@ -560,7 +996,9 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
                                 <p style={styles.noActivity}>No recent activity yet. Start searching for products!</p>
                             ) : (
                                 <div style={styles.activityList}>
-                                    {recentActivity.map((activity, index) => (
+                                    {recentActivity
+                                        .filter(a => a.activity_type !== 'page_view')
+                                        .map((activity, index) => (
                                         <div key={activity.id || index} style={styles.activityItem}>
                                             <span style={styles.activityIcon}>
                                                 {activity.activity_type === 'search' || activity.activity_type === 'view' ? '👀' :
@@ -1095,22 +1533,17 @@ const UserDashboard = ({ userId, userName, userEmail, selectedMode, onBackToSoci
     );
 };
 
-const StatCard = ({ icon, label, value, badge }) => (
-    <div style={styles.statCard}>
-        <div style={styles.statIcon}>{icon}</div>
-        <div style={styles.statValue}>{value}</div>
-        <div style={styles.statLabel}>
-            {label}
-            {badge > 0 && <span style={styles.statBadge}>{badge}</span>}
-        </div>
-    </div>
-);
-
 const styles = {
     container: {
         maxWidth: '1200px',
         margin: '0 auto',
-        padding: '20px'
+        padding: '20px',
+        backgroundColor: '#0d0d10',
+        backgroundImage: HEXAGON_PATTERN,
+        backgroundSize: '28px 49px',
+        backgroundRepeat: 'repeat',
+        backgroundAttachment: 'fixed',
+        minHeight: '100vh'
     },
     backButtonTop: {
         background: 'var(--light-bg)',
@@ -1198,6 +1631,35 @@ const styles = {
     tabContent: {
         minHeight: '400px'
     },
+    navButtonPrimary: {
+        background: 'linear-gradient(135deg, var(--primary-color), var(--secondary-color))',
+        color: 'white',
+        border: 'none',
+        padding: '8px 16px',
+        borderRadius: '8px',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        transition: 'all 0.2s ease',
+        boxShadow: 'var(--shadow-sm)'
+    },
+    navButtonSecondary: {
+        background: 'var(--light-bg)',
+        color: 'var(--text-primary)',
+        border: '1px solid var(--border-color)',
+        padding: '8px 16px',
+        borderRadius: '8px',
+        fontSize: '14px',
+        fontWeight: '600',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        transition: 'all 0.2s ease'
+    },
     statsGrid: {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
@@ -1213,6 +1675,15 @@ const styles = {
         border: '1px solid var(--border-color)',
         position: 'relative'
     },
+    statCardHighlight: {
+        background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(114, 9, 183, 0.05))',
+        border: '1px solid var(--secondary-color)',
+    },
+    statCardLocked: {
+        background: 'var(--light-bg)',
+        border: '1px dashed var(--border-color)',
+        opacity: 0.6
+    },
     statIcon: {
         fontSize: '32px',
         marginBottom: '10px'
@@ -1222,6 +1693,15 @@ const styles = {
         fontWeight: 'bold',
         color: 'var(--primary-color)',
         marginBottom: '5px'
+    },
+    statValueHighlight: {
+        background: 'linear-gradient(135deg, #a855f7, #7c3aed)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text'
+    },
+    statValueLocked: {
+        color: 'var(--text-light)'
     },
     statLabel: {
         fontSize: '13px',
@@ -1529,11 +2009,8 @@ const styles = {
         marginBottom: '20px',
         paddingBottom: '10px',
         borderBottom: '1px solid var(--border-color)',
-        position: 'sticky',
-        top: '70px',
-        background: 'var(--card-bg)',
-        zIndex: 100,
-        backdropFilter: 'blur(10px)'
+        position: 'relative',
+        background: 'var(--card-bg)'
     },
     backNavButton: {
         background: 'transparent',

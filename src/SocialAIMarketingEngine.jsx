@@ -36,6 +36,9 @@ import ChatList from './ChatList';
 import ChatSystem from './ChatSystem.jsx';
 import PriceAlertDashboard from './PriceAlertDashboard';
 
+// ========== HEXAGON PATTERN (same as UserDashboard) ==========
+const HEXAGON_PATTERN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.01'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")";
+
 // Safe notification check
 const isNotificationSupported = () => {
     return typeof Notification !== 'undefined' && 
@@ -463,7 +466,6 @@ function SocialAIMarketingEngine() {
     const [showChat, setShowChat] = useState(false);
     const [showChatList, setShowChatList] = useState(false);
     const [selectedChat, setSelectedChat] = useState(null);
-    const [showDashboard, setShowDashboard] = useState(false);
     const [showDailyDeals, setShowDailyDeals] = useState(false);
     const [userReferralCount, setUserReferralCount] = useState(0);
 
@@ -474,6 +476,7 @@ function SocialAIMarketingEngine() {
     const [showLocationModal, setShowLocationModal] = useState(false);
     const [tempLocation, setTempLocation] = useState('');
     const [tempPhone, setTempPhone] = useState('');
+    const isFreshLoadRef = useRef(true);
 
     const [limits, setLimits] = useState({
         CONTACT: { remaining: 50, total: 50 },
@@ -960,6 +963,12 @@ function SocialAIMarketingEngine() {
     }, [location.pathname, user]);
 
     const loadMoreProducts = async () => {
+        // ✅ Don't load more if no search term
+        if (!productSearch.trim()) {
+            console.log('No search term - skipping load more');
+            return;
+        }
+        
         setLoading(true);
         try {
             const from = currentPage * ITEMS_PER_PAGE;
@@ -1031,9 +1040,7 @@ function SocialAIMarketingEngine() {
         
         switch(action) {
             case 'home':
-                // Close all modals and return to main view
                 setShowWishlist(false);
-                setShowDashboard(false);
                 setShowDailyDeals(false);
                 setShowReferralProgram(false);
                 setShowPriceAlerts(false);
@@ -1042,9 +1049,7 @@ function SocialAIMarketingEngine() {
                 setShowChatList(false);
                 setShowChat(false);
                 setShowSettings(false);
-                setProductSearch('');  // Clear search
-                // Scroll to top
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                navigate('/');
                 break;
                 
             case 'search':
@@ -1064,12 +1069,12 @@ function SocialAIMarketingEngine() {
                     productsFound: productsFound,
                     searchLoading: searchLoading
                 });
-                window.history.pushState({ showWishlist: true }, '', '#wishlist');
+                navigate('/app', { state: { showWishlist: true } });
                 setShowWishlist(true);
                 break;
                 
             case 'dashboard':
-                setShowDashboard(true);
+                navigate('/dashboard', { state: { selectedMode } });
                 break;
                 
             case 'deals':
@@ -2234,17 +2239,17 @@ function SocialAIMarketingEngine() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        padding: '8px',
+                        padding: '6px',
                         background: isOpen ? '#667eea' : '#2d2d2d',
                         color: isOpen ? 'white' : '#e0e0e0',
                         border: isOpen ? '2px solid #667eea' : '2px solid #444',
                         borderRadius: '10px',
                         cursor: 'pointer',
-                        fontSize: '24px',  /* ← Increased from 18px to 24px for bigger icon */
+                        fontSize: '18px',  /* ← Increased from 18px to 24px for bigger icon */
                         transition: 'all 0.2s ease',
-                        width: '48px',     /* ← Slightly wider */
-                        height: '48px',    /* ← Slightly taller */
-                        minWidth: '48px',
+                        width: '38px',     /* ← Slightly wider */
+                        height: '38px',    /* ← Slightly taller */
+                        minWidth: '38px',
                         position: 'relative'
                     }}
                     title="Filter Products"
@@ -3873,6 +3878,15 @@ function SocialAIMarketingEngine() {
         }
     };
 
+    useEffect(() => {
+        // After 1.5 seconds, mark as no longer fresh
+        // This gives time for the "restore from visibility change" to not trigger
+        const timer = setTimeout(() => {
+            isFreshLoadRef.current = false;
+        }, 1500);
+        return () => clearTimeout(timer);
+    }, []);
+
     // 🔄 RESTORE SEARCH ON PAGE LOAD - IMPROVED VERSION (ERROR-PROOF)
     useEffect(() => {
         // ✅ GUARD: Must have user, profile complete, and not already restored
@@ -3889,6 +3903,23 @@ function SocialAIMarketingEngine() {
         // ✅ Only restore when page is visible (returning from WhatsApp)
         if (document.visibilityState !== 'visible') {
             console.log('[Search Restore] Page not visible, waiting...');
+            return;
+        }
+
+        if (isFreshLoadRef.current) {
+            console.log('[Search Restore] Fresh load detected — skipping restore, clearing old search');
+            
+            // ✅ Also clear productSearch + results so refresh is truly fresh
+            setProductSearch('');
+            setProductsFound([]);
+            setProspects([]);
+            
+            // ✅ Clear localStorage for this user's last search
+            try {
+                const key = getSearchStorageKey();
+                if (key) localStorage.removeItem(key);
+            } catch (e) {}
+            
             return;
         }
 
@@ -5001,6 +5032,9 @@ function SocialAIMarketingEngine() {
             // ✅ Clear mode using AuthContext
             setMode(null);  // This clears it from AuthContext AND localStorage
             setIsProfileComplete(false);
+            // ✅ Clear the flag so the new mode triggers a fresh setup
+            localStorage.removeItem('straun_profileComplete');
+            console.log('🗑️ handleSwitchMode: cleared straun_profileComplete');
             setProfileData(null);
             setProductsFound([]);
             setProspects([]);
@@ -5187,10 +5221,22 @@ function SocialAIMarketingEngine() {
                         .select()
                         .single();
 
-                    if (productError) {
+                    // ✅ SILENT SKIP: If duplicate, just continue like nothing happened
+                    const isDuplicate = productError && (
+                        productError.code === '23505' ||
+                        productError.message?.includes('duplicate key') ||
+                        productError.message?.includes('products_unique_seller_product')
+                    );
+
+                    if (isDuplicate) {
+                        console.log('ℹ️ Duplicate product skipped silently (already listed)');
+                        // Don't throw — silently continue as if it saved
+                    } else if (productError) {
                         console.error("❌ Error saving product:", productError);
+                        throw new Error(productError.message || 'Failed to save product');
                     } else {
                         console.log("✅ Product saved, checking for buyer matches...");
+
                         
                         // 🔔 REAL-TIME MATCH NOTIFICATION: Notify matching buyers
                         try {
@@ -5260,6 +5306,9 @@ function SocialAIMarketingEngine() {
 
                 setProfileData(savedProfileData);
                 setIsProfileComplete(true);
+                // ✅ CRITICAL: Persist to localStorage so a page refresh doesn't lose this
+                localStorage.setItem('straun_profileComplete', 'true');
+                console.log('✅ handleProfileComplete: set straun_profileComplete in localStorage');
                 setShowSellerDecision(false);
                 setShowBuyerDecision(false);
                 setShowBuyerForm(false); // ✅ Close buyer form
@@ -5298,6 +5347,15 @@ function SocialAIMarketingEngine() {
             clearTimeout(searchTimeoutRef.current);
             searchTimeoutRef.current = null;
         }
+
+        // Clear previous results COMPLETELY
+        setProductsFound([]);
+        setProspects([]);
+        setSimilarProducts([]);
+        setShowSimilarProducts(false);
+        setCurrentPage(0);
+        setHasMore(true);
+        setSearchCache({}); // ✅ Clear cache so old results don't show
 
          // ✅ Track search count for buyers (for interest reminder)
         if (selectedMode === 'buyer') {
@@ -5347,7 +5405,7 @@ function SocialAIMarketingEngine() {
             params.set('q', sanitizedSearch);
             params.delete('page');
             
-            window.history.pushState({}, '', `${location.pathname}?${params.toString()}`);
+            navigate(`${location.pathname}?${params.toString()}`, { replace: true });
             
             setSearchParams(prev => ({
                 ...prev,
@@ -5455,8 +5513,12 @@ function SocialAIMarketingEngine() {
             return;
         }
 
-        setShowSafetyWarning(false);
+        setProductsFound([]);
+        setSimilarProducts([]);
         setShowSimilarProducts(false);
+        setShowSafetyWarning(false);
+        setCurrentPage(0);
+        setHasMore(true);
 
         const cacheKey = searchTerm.toLowerCase().trim();
         if (searchCache[cacheKey] && !useFilters) {
@@ -6057,99 +6119,22 @@ function SocialAIMarketingEngine() {
         );
     };
 
-    // --- SHOW MODE SELECTION IF NO MODE SELECTED ---
+    // --- SHOW MODE SELECTION IF NO MODE SELECTED ---  
     if (!selectedMode) {
-        const hasProfileData = profileData?.location && profileData?.phone_number;
-        const existingMode = profileData?.is_seller ? 'seller' : 
-                            profileData?.is_buyer ? 'buyer' : null;
+        console.log('⏰ [Social] No mode selected - redirecting to /mode-selection');
+        
+        // Use window.location for reliability
+        if (typeof window !== 'undefined') {
+            setTimeout(() => {
+                navigate('/mode-selection');
+            }, 100);
+        }
         
         return (
-          <div className="mode-selection-page">
-            <div className="app-container">
-                <div className="mode-selection-screen">
-                    
-                    <div className="mode-selection-header">
-
-                        <h1 className="mode-selection-title">Welcome to Straun Marketing AI Engine</h1>
-                        <p className="mode-selection-subtitle">
-                            {existingMode 
-                                ? `You were previously using ${existingMode === 'seller' ? 'Seller' : 'Buyer'} mode. Choose how you want to continue:`
-                                : 'First, tell us how you want to use the platform:'}
-                        </p>
-                        <p className="mode-selection-required">
-                            <strong>Important:</strong> You must complete the setup form for your chosen mode before proceeding.
-                        </p>
-                    </div>
-                    
-                    <div className="mode-selection-cards">
-                        <div className="mode-card seller-mode-card">
-                            <div className="mode-card-icon">🛒</div>
-                            <h2 className="mode-card-title">I'm a Seller</h2>
-                            <p className="mode-card-description">
-                                List your products and find customers who are interested in what you're selling.
-                            </p>
-                            <button 
-                                onClick={() => clearAndSetMode('seller')}
-                                className="mode-card-button"
-                            >
-                                {existingMode === 'seller' ? 'Continue as Seller' : 'Choose Seller Mode'}
-                            </button>
-                            <div className="mode-requirements">
-                                <p><strong>Required for Seller Setup:</strong></p>
-                                <ul className="mode-features">
-                                    <li>Your location</li>
-                                    <li>Phone number</li>
-                                    <li>At least one product to sell</li>
-                                </ul>
-                            </div>
-                            {hasProfileData && (
-                                <div className="profile-status">
-                                    <p className="profile-complete-note">
-                                        ✓ Your profile information will be pre-filled
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                        
-                        <div className="mode-card buyer-mode-card">
-                            <div className="mode-card-icon">🔍</div>
-                            <h2 className="mode-card-title">I'm a Buyer</h2>
-                            <p className="mode-card-description">
-                                Find products you're looking for and connect with sellers in your area.
-                            </p>
-                            <button 
-                                onClick={() => clearAndSetMode('buyer')}
-                                className="mode-card-button"
-                            >
-                                {existingMode === 'buyer' ? 'Continue as Buyer' : 'Choose Buyer Mode'}
-                            </button>
-                            <div className="mode-requirements">
-                                <p><strong>Required for Buyer Setup:</strong></p>
-                                <ul className="mode-features">
-                                    <li>Your location</li>
-                                    <li>Phone number</li>
-                                    <li>Products you're interested in</li>
-                                </ul>
-                            </div>
-                            {hasProfileData && (
-                                <div className="profile-status">
-                                    <p className="profile-complete-note">
-                                        ✓ Your profile information will be pre-filled
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                    
-                    <div className="mode-selection-footer">
-                        <p className="mode-note">
-                            <strong>Note:</strong> You will be required to complete a setup form for your chosen mode.
-                            Existing profile data will be pre-filled where available.
-                        </p>
-                    </div>
-                </div>
+            <div className="loading-container">
+                <div className="loading-spinner"></div>
+                <p>Redirecting to mode selection...</p>
             </div>
-         </div>
         );
     }
 
@@ -6724,429 +6709,6 @@ function SocialAIMarketingEngine() {
         );
     };
 
-    // ============================================
-    // ENHANCED FULL-SCREEN DASHBOARD COMPONENT
-    // ============================================
-
-    const UserDashboard = ({ userId, userName, userEmail, selectedMode, onClose, pushEnabled, onEnablePush, pushLoading }) => {
-        const [activeTab, setActiveTab] = useState('overview');
-        const [notificationSettings, setNotificationSettings] = useState({
-            pushEnabled: pushEnabled || false,
-            emailNotifications: true,
-            matchAlerts: true,
-            priceDropAlerts: true,
-            messageAlerts: true
-        });
-
-        const handleTogglePush = async () => {
-            if (onEnablePush) {
-                const result = await onEnablePush();
-                if (result) {
-                    setNotificationSettings(prev => ({ ...prev, pushEnabled: true }));
-                }
-            } else {
-                setNotificationSettings(prev => ({ ...prev, pushEnabled: !prev.pushEnabled }));
-            }
-        };
-
-        const testPushNotification = async () => {
-            if (!('serviceWorker' in navigator)) {
-                alert('Push notifications not supported');
-                return;
-            }
-            
-            try {
-                const registration = await navigator.serviceWorker.ready;
-                await registration.showNotification('Test Notification', {
-                    body: '✅ Push notifications are working!',
-                    icon: '/pwa-192x192.png',
-                    badge: '/pwa-192x192.png',
-                    vibrate: [200, 100, 200],
-                    data: { url: '/' }
-                });
-                alert('Test notification sent! Check your notifications.');
-            } catch (error) {
-                console.error('Test notification failed:', error);
-                alert('Failed to send test notification. Make sure notifications are enabled.');
-            }
-        };
-
-        return (
-            <div className="fullscreen-dashboard" style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: '#1e1e1e',  // Match social page background
-                zIndex: 20000,
-                overflow: 'auto',
-                animation: 'fadeIn 0.3s ease'
-            }}>
-                {/* Dashboard Header - Match social page gradient */}
-                <div style={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white',
-                    padding: '20px',
-                    position: 'sticky',
-                    top: 0,
-                    zIndex: 100
-                }}>
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        maxWidth: '1200px',
-                        margin: '0 auto'
-                    }}>
-                        <div>
-                            <h1 style={{ margin: 0, fontSize: '24px' }}>📊 Dashboard</h1>
-                            <p style={{ margin: '5px 0 0', opacity: 0.9, fontSize: '14px' }}>
-                                Welcome back, {userName}!
-                            </p>
-                        </div>
-                        <button
-                            onClick={onClose}
-                            style={{
-                                background: 'rgba(255,255,255,0.2)',
-                                border: 'none',
-                                color: 'white',
-                                fontSize: '24px',
-                                width: '40px',
-                                height: '40px',
-                                borderRadius: '50%',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center'
-                            }}
-                        >
-                            ×
-                        </button>
-                    </div>
-                </div>
-
-                {/* Dashboard Content */}
-                <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
-                    {/* Tab Navigation */}
-                    <div style={{
-                        display: 'flex',
-                        gap: '10px',
-                        marginBottom: '20px',
-                        borderBottom: '2px solid #e0e0e0',
-                        paddingBottom: '10px',
-                        flexWrap: 'wrap'
-                    }}>
-                        {[
-                            { id: 'overview', icon: '📊', label: 'Overview' },
-                            { id: 'features', icon: '🎯', label: 'Features & Tools' },
-                            { id: 'settings', icon: '⚙️', label: 'Settings' }
-                        ].map(tab => (
-                            <button
-                                key={tab.id}
-                                onClick={() => setActiveTab(tab.id)}
-                                style={{
-                                    padding: '10px 20px',
-                                    background: activeTab === tab.id ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'transparent',
-                                    color: activeTab === tab.id ? 'white' : '#666',
-                                    border: 'none',
-                                    borderRadius: '10px',
-                                    cursor: 'pointer',
-                                    fontWeight: 'bold',
-                                    fontSize: '14px',
-                                    transition: 'all 0.3s ease'
-                                }}
-                            >
-                                {tab.icon} {tab.label}
-                            </button>
-                        ))}
-                    </div>
-
-                    {/* Overview Tab */}
-                    {activeTab === 'overview' && (
-                        <div>
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                                gap: '15px',
-                                marginBottom: '25px'
-                            }}>
-                                <StatCard icon="👀" label="Profile Views" value={156} />
-                                <StatCard icon="❤️" label="Product Saves" value={23} />
-                                <StatCard icon="💬" label="Messages" value={12} unread={3} />
-                                <StatCard icon="⭐" label="Rating" value="4.8" />
-                            </div>
-
-                            <ActivityFeed events={[
-                                "Someone viewed your iPhone listing",
-                                "Price dropped on saved item",
-                                "New match for 'Headphones'"
-                            ]} />
-
-                            <Insights tips={[
-                                "Listings with photos get 3x more views",
-                                "Respond within 5 minutes for best results",
-                                "Add detailed descriptions to build trust"
-                            ]} />
-                        </div>
-                    )}
-
-                    {/* Features & Tools Tab - When clicked, closes dashboard and opens feature */}
-                    {activeTab === 'features' && (
-                        <div>
-                            <h3 style={{ marginBottom: '20px', color: '#333' }}>🎯 Quick Actions</h3>
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                                gap: '15px',
-                                marginBottom: '30px'
-                            }}>
-                                
-                                <QuickActionCard 
-                                    icon="🔍" 
-                                    title="Saved Searches" 
-                                    description="View your saved searches"
-                                    onClick={() => {
-                                        onClose();
-                                        fetchSavedSearches();  // Load saved searches
-                                        setShowSavedSearches(true);
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="💬" 
-                                    title="Messages" 
-                                    description="Chat with buyers/sellers"
-                                    onClick={() => {
-                                        onClose();
-                                        setShowChatList(true);
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="🔥" 
-                                    title="Daily Deals" 
-                                    description="Check today's hot deals"
-                                    onClick={() => {
-                                        onClose();
-                                        setShowDailyDeals(true);
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="💰" 
-                                    title="Price Alerts" 
-                                    description="Manage your price alerts"
-                                    onClick={() => {
-                                        onClose();
-                                        setShowPriceAlerts(true);
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="🎁" 
-                                    title="Referral Program" 
-                                    description="Invite friends & earn rewards"
-                                    onClick={() => {
-                                        onClose();  // Close dashboard
-                                        setShowReferralProgram(true);  // Show referral component
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="❤️" 
-                                    title="Wishlist" 
-                                    description="View your saved items"
-                                    onClick={() => {
-                                        // Store current state before showing wishlist
-                                        setPreviousSearchState({
-                                            productSearch: productSearch,
-                                            prospects: prospects,
-                                            productsFound: productsFound,
-                                            searchLoading: searchLoading
-                                        });
-                                        
-                                        // Close the dashboard
-                                        onClose();
-                                        
-                                        // Use setTimeout to ensure dashboard closes before showing wishlist
-                                        setTimeout(() => {
-                                            window.history.pushState({ showWishlist: true }, '', '#wishlist');
-                                            setShowWishlist(true);
-                                        }, 50);
-                                    }}
-                                />
-                                <QuickActionCard 
-                                    icon="🎯" 
-                                    title="More Features" 
-                                    description="Access advanced tools"
-                                    onClick={() => {
-                                        onClose();
-                                        setShowToolsPanel(true);
-                                    }}
-                                />
-                            </div>
-
-                            <div style={{
-                                background: 'linear-gradient(135deg, #667eea15 0%, #764ba215 100%)',
-                                borderRadius: '12px',
-                                padding: '20px',
-                                marginTop: '20px'
-                            }}>
-                                <h4 style={{ margin: '0 0 10px 0', color: '#667eea' }}>
-                                    📌 Current Mode: {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
-                                </h4>
-                                <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>
-                                    {selectedMode === 'seller' 
-                                        ? "You're in Seller Mode. List products and find customers interested in what you're selling."
-                                        : "You're in Buyer Mode. Search for products and connect with sellers in your area."}
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Settings Tab */}
-                    {activeTab === 'settings' && (
-                        <div>
-                            <h3 style={{ marginBottom: '20px', color: '#333' }}>⚙️ Notification Settings</h3>
-                            
-                            <div style={{
-                                background: 'white',
-                                borderRadius: '12px',
-                                padding: '20px',
-                                marginBottom: '20px',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
-                                    <div>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                            <span style={{ fontSize: '28px' }}>🔔</span>
-                                            <div>
-                                                <h4 style={{ margin: 0 }}>Push Notifications</h4>
-                                                <p style={{ margin: '5px 0 0', fontSize: '13px', color: '#666' }}>
-                                                    Receive alerts like WhatsApp even when you're not using the app
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <button
-                                            onClick={handleTogglePush}
-                                            disabled={pushLoading}
-                                            style={{
-                                                padding: '12px 24px',
-                                                background: notificationSettings.pushEnabled 
-                                                    ? 'linear-gradient(135deg, #4CAF50, #45a049)' 
-                                                    : 'linear-gradient(135deg, #667eea, #764ba2)',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '25px',
-                                                cursor: pushLoading ? 'not-allowed' : 'pointer',
-                                                fontWeight: 'bold',
-                                                fontSize: '14px',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '8px'
-                                            }}
-                                        >
-                                            {pushLoading ? (
-                                                <span>⏳ Enabling...</span>
-                                            ) : notificationSettings.pushEnabled ? (
-                                                <span>✅ Enabled</span>
-                                            ) : (
-                                                <span>🔔 Enable Notifications</span>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {notificationSettings.pushEnabled && (
-                                    <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px solid #eee' }}>
-                                        <h5 style={{ margin: '0 0 10px 0' }}>Test Notifications</h5>
-                                        <button
-                                            onClick={testPushNotification}
-                                            style={{
-                                                padding: '10px 20px',
-                                                background: '#2196F3',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '8px',
-                                                cursor: 'pointer',
-                                                fontSize: '14px'
-                                            }}
-                                        >
-                                            📱 Send Test Notification
-                                        </button>
-                                        <p style={{ fontSize: '12px', color: '#666', marginTop: '10px' }}>
-                                            You'll receive notifications for: New matches, Price drops, Messages, Daily deals
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div style={{
-                                background: 'white',
-                                borderRadius: '12px',
-                                padding: '20px',
-                                marginBottom: '20px',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}>
-                                <h4 style={{ margin: '0 0 15px 0' }}>Notification Preferences</h4>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                                        <input type="checkbox" checked={notificationSettings.matchAlerts} 
-                                            onChange={(e) => setNotificationSettings(prev => ({...prev, matchAlerts: e.target.checked}))} />
-                                        <span>🔍 New Match Alerts</span>
-                                    </label>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                                        <input type="checkbox" checked={notificationSettings.priceDropAlerts} 
-                                            onChange={(e) => setNotificationSettings(prev => ({...prev, priceDropAlerts: e.target.checked}))} />
-                                        <span>💰 Price Drop Alerts</span>
-                                    </label>
-                                    <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                                        <input type="checkbox" checked={notificationSettings.messageAlerts} 
-                                            onChange={(e) => setNotificationSettings(prev => ({...prev, messageAlerts: e.target.checked}))} />
-                                        <span>💬 Message Alerts</span>
-                                    </label>
-                                </div>
-                            </div>
-
-                            <div style={{
-                                background: 'white',
-                                borderRadius: '12px',
-                                padding: '20px',
-                                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                            }}>
-                                <h4 style={{ margin: '0 0 15px 0' }}>Account Information</h4>
-                                <p><strong>Email:</strong> {userEmail}</p>
-                                <p><strong>Mode:</strong> {selectedMode === 'seller' ? 'Seller' : 'Buyer'}</p>
-                                <button
-                                    onClick={() => {
-                                        onClose();
-                                        setShowSettings(true);
-                                    }}
-                                    style={{
-                                        marginTop: '10px',
-                                        padding: '10px 20px',
-                                        background: '#667eea',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Edit Profile Settings
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <style>{`
-                    @keyframes fadeIn {
-                        from { opacity: 0; }
-                        to { opacity: 1; }
-                    }
-                `}</style>
-            </div>
-        );
-    };
-
     // Quick Action Card Component
     const QuickActionCard = ({ icon, title, description, onClick, color }) => {
         return (
@@ -7179,7 +6741,17 @@ function SocialAIMarketingEngine() {
 
     // --- MAIN INTERFACE ---
     return (
-        <div className="social-media-page"> 
+        <div 
+            className="social-media-page"
+            style={{
+                backgroundColor: '#0d0d10',
+                backgroundImage: HEXAGON_PATTERN,
+                backgroundSize: '28px 49px',
+                backgroundRepeat: 'repeat',
+                backgroundAttachment: 'fixed',
+                minHeight: '100vh'
+            }}
+        > 
 
             {/* Mobile Sidebar Navigation */}
             <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
@@ -7196,11 +6768,17 @@ function SocialAIMarketingEngine() {
                 </div>
                 
                 <nav className="mobile-nav-items">
-                    <button onClick={() => { handleNavigation('home'); toggleMobileMenu(); }}>
+                    <button onClick={() => { 
+                        toggleMobileMenu();
+                        navigate('/'); 
+                    }}>
                         🏠 Home
                     </button>
 
-                    <button onClick={() => { handleNavigation('dashboard'); toggleMobileMenu(); }}>
+                    <button onClick={() => { 
+                        toggleMobileMenu();
+                        navigate('/dashboard', { state: { selectedMode } }); 
+                    }}>
                         📊 Dashboard
                     </button>
                     
@@ -7248,6 +6826,7 @@ function SocialAIMarketingEngine() {
         )}  
 
        <div className="page-wrapper">
+        {location.pathname === '/app' && (
             <header className="social-header" style={{
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 padding: '12px 20px',
@@ -7345,7 +6924,7 @@ function SocialAIMarketingEngine() {
                             <button
                                 onClick={() => {
                                     console.log('👑 Admin crown clicked - navigating to admin dashboard');
-                                    window.location.href = '/admin';
+                                    navigate('/mode-selection'); //replaced this , window.location.href = '/admin';
                                 }}
                                 title="Admin Dashboard"
                                 style={{
@@ -7382,8 +6961,8 @@ function SocialAIMarketingEngine() {
                 {/* Empty spacer for balance */}
                 <div style={{ width: '38px' }}></div>
             </header>
-
-        <div className="navbar-spacer"></div>
+            
+        )}
              
         <div className={`main-content-wrapper ${isNavCollapsed ? 'nav-collapsed' : ''} ${isNavbarHidden ? 'has-hidden-nav' : ''}`}>
             <div className="app-container">
@@ -7510,9 +7089,9 @@ function SocialAIMarketingEngine() {
                 {/* ===== FLOATING BUTTONS - PROPER ORDER ===== */}
                 
                 {/* 1. DASHBOARD BUTTON - Top (Highest) */}
-                {!showWishlist && !showToolsPanel && !showDashboard && (
+                {!showWishlist && !showToolsPanel && (
                     <button
-                        onClick={() => setShowDashboard(true)}
+                        onClick={() => navigate('/dashboard', { state: { selectedMode } })}
                         style={{
                             position: 'fixed',
                             bottom: '135px',
@@ -7571,19 +7150,6 @@ function SocialAIMarketingEngine() {
                         }}
                     />
                 </div>
-
-                {showDashboard && (
-                    <UserDashboard 
-                        userId={user?.id}
-                        userName={userName}
-                        userEmail={user?.email}
-                        selectedMode={selectedMode}
-                        onClose={() => setShowDashboard(false)}
-                        pushEnabled={pushEnabled}
-                        onEnablePush={subscribeToPush}
-                        pushLoading={pushLoading}
-                    />
-                )}
   
                 <main className="social-main-content">
                     <div className="search-section-card">

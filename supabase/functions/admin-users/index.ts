@@ -1,27 +1,31 @@
 // supabase/functions/admin-users/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
-// ✅ FIXED: Use specific origin instead of wildcard
+// ✅ Add all allowed origins
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
+  'http://localhost:3000',
+  'https://straunmarketingaiengine.vercel.app',
   'https://straun-ai.vercel.app',
+  'https://straunmarketingaiengine.vercel.app',
   'https://your-production-domain.com'
 ];
 
 function getCorsHeaders(origin: string) {
-  // Check if the origin is allowed
+  // Check if the origin is allowed, if not use the first one as fallback
   const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, Accept',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
   }
 }
 
 Deno.serve(async (req) => {
+  // Get the origin from the request
   const origin = req.headers.get('origin') || 'http://localhost:5173';
   const corsHeaders = getCorsHeaders(origin);
 
@@ -57,7 +61,7 @@ Deno.serve(async (req) => {
     })
 
     // ============================================
-    // GET USER COUNT (GET /admin-users?action=count)
+    // GET USER COUNT
     // ============================================
     if (method === 'GET' && url.searchParams.get('action') === 'count') {
       console.log('📊 Getting user count...');
@@ -95,13 +99,12 @@ Deno.serve(async (req) => {
     }
 
     // ============================================
-    // GET ALL USERS (GET /admin-users?action=list)
+    // GET ALL USERS
     // ============================================
     if (method === 'GET' && url.searchParams.get('action') === 'list') {
       console.log('📋 Fetching all auth users...');
       
       try {
-        // Get all auth users
         const { data: users, error } = await supabaseAdmin.auth.admin.listUsers({
           perPage: 100,
           page: 1
@@ -117,7 +120,6 @@ Deno.serve(async (req) => {
         
         console.log(`✅ Found ${users?.users?.length || 0} users from auth`);
         
-        // Get all profiles
         const { data: profiles, error: profileError } = await supabaseAdmin
           .from('profiles')
           .select('user_id, is_seller, is_buyer, seller_setup_completed, buyer_setup_completed, location, phone_number, username');
@@ -126,7 +128,6 @@ Deno.serve(async (req) => {
           console.warn('Could not fetch profiles:', profileError);
         }
         
-        // Create a map of profiles by user_id
         const profileMap = {};
         if (profiles) {
           profiles.forEach(p => {
@@ -134,7 +135,6 @@ Deno.serve(async (req) => {
           });
         }
         
-        // Build user list
         const usersWithProfiles = (users?.users || []).map(authUser => {
           try {
             const profile = profileMap[authUser.id] || null;
@@ -210,7 +210,7 @@ Deno.serve(async (req) => {
     }
 
     // ============================================
-    // DELETE USER (POST /admin-users)
+    // DELETE USER - IMPROVED
     // ============================================
     if (method === 'POST') {
       try {
@@ -225,40 +225,93 @@ Deno.serve(async (req) => {
         
         console.log(`🗑️ Deleting user: ${userId}`);
         
-        // Delete from all related tables
+        // 1. Delete from all related tables - with better error handling
         const tables = [
-          'products', 'notifications', 'saved_items', 'feedback',
-          'user_activities', 'searches', 'saved_searches', 'search_alerts',
-          'price_alerts', 'reports', 'push_subscriptions'
+          'products', 
+          'notifications', 
+          'saved_items', 
+          'feedback',
+          'user_activities', 
+          'searches', 
+          'saved_searches', 
+          'search_alerts',
+          'price_alerts', 
+          'reports', 
+          'push_subscriptions'
         ];
+        
+        const deleteResults = {};
+        let hasErrors = false;
         
         for (const table of tables) {
           try {
-            await supabaseAdmin
+            const { error } = await supabaseAdmin
               .from(table)
               .delete()
               .or(`user_id.eq.${userId},sender_id.eq.${userId},seller_id.eq.${userId},buyer_id.eq.${userId},reporter_id.eq.${userId},reported_user_id.eq.${userId}`);
+            
+            if (error) {
+              console.warn(`⚠️ Could not delete from ${table}:`, error.message);
+              deleteResults[table] = { success: false, error: error.message };
+              hasErrors = true;
+            } else {
+              console.log(`✅ Deleted from ${table}`);
+              deleteResults[table] = { success: true };
+            }
           } catch (err) {
-            console.warn(`⚠️ Could not delete from ${table}:`, err.message);
+            console.warn(`⚠️ Error deleting from ${table}:`, err.message);
+            deleteResults[table] = { success: false, error: err.message };
+            hasErrors = true;
           }
         }
         
-        // Delete profile
+        // 2. Delete the profile
         try {
-          await supabaseAdmin.from('profiles').delete().eq('user_id', userId);
+          const { error } = await supabaseAdmin
+            .from('profiles')
+            .delete()
+            .eq('user_id', userId);
+          
+          if (error) {
+            console.warn('⚠️ Could not delete profile:', error.message);
+            deleteResults.profiles = { success: false, error: error.message };
+            hasErrors = true;
+          } else {
+            console.log('✅ Profile deleted');
+            deleteResults.profiles = { success: true };
+          }
         } catch (err) {
-          console.warn('⚠️ Could not delete profile:', err.message);
+          deleteResults.profiles = { success: false, error: err.message };
+          hasErrors = true;
         }
         
-        // Delete auth user
-        const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-        
-        if (authError) {
+        // 3. Delete the auth user
+        try {
+          const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+          
+          if (authError) {
+            console.error('❌ Auth deletion failed:', authError);
+            return new Response(
+              JSON.stringify({ 
+                success: false, 
+                error: authError.message,
+                partial: true,
+                deleteResults,
+                message: 'User data partially deleted. Auth user needs manual removal.'
+              }),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 207 }
+            );
+          }
+          console.log('✅ Auth user deleted successfully');
+        } catch (authErr) {
+          console.error('❌ Auth deletion error:', authErr);
           return new Response(
             JSON.stringify({ 
               success: false, 
-              error: authError.message,
-              partial: true
+              error: authErr.message,
+              partial: true,
+              deleteResults,
+              message: 'User data partially deleted. Auth user needs manual removal.'
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 207 }
           );
@@ -267,7 +320,8 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({ 
             success: true, 
-            message: 'User deleted successfully'
+            message: 'User deleted successfully',
+            deleteResults
           }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
         );
@@ -281,7 +335,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ error: 'Use ?action=count or ?action=list' }),
+      JSON.stringify({ error: 'Use ?action=count, ?action=list, or POST with userId' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     );
 

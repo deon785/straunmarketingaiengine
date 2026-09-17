@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthActions } from './AuthContext';
 import { supabase } from './lib/supabase';
 import './SellerDecision.css';
 
@@ -28,6 +29,7 @@ const SellerDecision = () => {
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const navigate = useNavigate();
+  const { setMode } = useAuthActions();
 
   const safeNavigate = (path) => {
     try {
@@ -164,6 +166,7 @@ const SellerDecision = () => {
       }
       
       await completeSkip(user.id);
+      localStorage.setItem('straun_profileComplete', 'true');
       
     } catch (err) {
       console.error('[SellerDecision] Skip error:', err);
@@ -192,8 +195,15 @@ const SellerDecision = () => {
         setLoading(false);
         return;
       }
-      
-      safeNavigate('/app');
+
+      // ✅ Set mode to seller BEFORE navigating to /app
+      console.log('🚀 Setting seller mode and navigating to /app');
+      setMode('seller');
+
+      // Small delay to let AuthContext save the mode
+      setTimeout(() => {
+          safeNavigate('/app');
+      }, 150);
       
     } catch (err) {
       console.error('[SellerDecision] Complete skip error:', err);
@@ -254,14 +264,22 @@ const SellerDecision = () => {
       );
       
       if (updateError) {
-        console.error('[SellerDecision] Save error:', updateError);
-        setError('Failed to save information. Please try again.');
-        setLoading(false);
-        return;
+          console.error('[SellerDecision] Save error:', updateError);
+          setError('Failed to save information. Please try again.');
+          setLoading(false);
+          return;
       }
-      
+
+      // ✅ Set mode to seller BEFORE navigating
+      console.log('🚀 Setting seller mode and navigating to /app');
+      setMode('seller');
+
       setShowLocationModal(false);
-      safeNavigate('/app');
+      localStorage.setItem('straun_profileComplete', 'true');
+
+      setTimeout(() => {
+          safeNavigate('/app');
+      }, 150);
       
     } catch (err) {
       console.error('[SellerDecision] Save error:', err);
@@ -489,7 +507,11 @@ const SellerDecision = () => {
           </div>
 
           <button
-            onClick={onBack}
+            onClick={() => {
+              // ✅ Safe fallback - since mode selection no longer exists, go home
+              console.log('[SellerDecision] Back clicked - returning to homepage');
+              safeNavigate('/');
+            }}
             style={{
                 marginTop: '20px',
                 width: '100%',
@@ -502,8 +524,8 @@ const SellerDecision = () => {
                 padding: '8px'
             }}
           >
-            ← Back to mode selection
-        </button>
+            ← Back to Home
+          </button>
         </div>
       </div>
 

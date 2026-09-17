@@ -8,6 +8,7 @@ import * as Sentry from "@sentry/react";
 import ReactGA from "react-ga4";
 import { toast } from 'react-hot-toast';
 import SocialAIMarketingEngine from './SocialAIMarketingEngine.jsx';
+import Homepage from './Homepage.jsx';
 import NotificationDetail from './NotificationDetail.jsx';
 
 // ✅ ONLY import what's needed
@@ -20,6 +21,7 @@ import { GlobalErrorHandler } from './GlobalErrorHandler.jsx';
 import { NavigationProvider } from './NavigationContext.jsx';
 import Auth from './signup.jsx';
 import BuyerSetupForm from './BuyerSetupForm.jsx';
+import SellerSetupForm from './SellerSetupForm.jsx';
 
 // --- LAZY LOAD ---
 const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
@@ -34,6 +36,9 @@ const CookieBanner = lazy(() => import('./CookieBanner.jsx'));
 const PushNotificationHandler = lazy(() => import('./PushNotificationHandler.jsx'));
 const SellerDecision = lazy(() => import('./SellerDecision.jsx'));
 const BuyerDecision = lazy(() => import('./BuyerDecision.jsx'));
+const DealsPage = lazy(() => import('./DealsPage.jsx'));
+const ModeSelection = lazy(() => import('./ModeSelection.jsx'));
+const UserDashboard = lazy(() => import('./UserDashboard.jsx'));
 
 // Helper function
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
@@ -913,10 +918,15 @@ function App() {
                       {/* ✅ WRAP ALL ROUTES WITH ErrorBoundary */}
                       <ComponentErrorBoundary>
                         <Routes>
-                          <Route path="/" element={<Auth />} />
+                          <Route path="/" element={<Homepage />} />
+                          <Route path="/login" element={<Auth />} />
                           <Route path="/seller-decision" element={<MemoizedSellerDecision />} />
                           <Route path="/buyer-decision" element={<MemoizedBuyerDecision />} />
                           <Route path="/buyer-form" element={<BuyerSetupForm />} />
+                          <Route path="/seller-form" element={<SellerSetupForm />} />
+                          <Route path="/deals" element={<DealsPage />} />
+                          <Route path="/mode-selection" element={<ModeSelection />} />
+                          <Route path="/dashboard" element={<UserDashboard />} />
 
                           <Route 
                             path="/notification/:notificationId" 

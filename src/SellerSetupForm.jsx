@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { supabase } from './lib/supabase';
 import DOMPurify from 'dompurify';
 import ReactGA from "react-ga4";
+import { useAuthActions } from './AuthContext';
 import ImageUploader from './ImageUploader';
 
 // ✅ fetchWithRetry helper
@@ -23,6 +24,7 @@ const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
 
 const SellerSetupForm = ({ onProfileComplete, existingData }) => {
   const navigate = useNavigate();
+  const { setMode } = useAuthActions();
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
@@ -325,18 +327,26 @@ const SellerSetupForm = ({ onProfileComplete, existingData }) => {
       });
       setImageUrl('');
       
-      onProfileComplete({
-        location: finalSanitizedData.location,
-        phone_number: finalSanitizedData.phone_number,
-        product_listed: finalSanitizedData.name,
-        price: finalSanitizedData.price,
-        description: finalSanitizedData.description,
-        image_url: imageUrl
-      });
+      // ✅ Call parent if provided; otherwise navigate ourselves
+      if (typeof onProfileComplete === 'function') {
+          onProfileComplete({
+              location: finalSanitizedData.location,
+              phone_number: finalSanitizedData.phone_number,
+              product_listed: finalSanitizedData.name,
+              price: finalSanitizedData.price,
+              description: finalSanitizedData.description,
+              image_url: imageUrl
+          });
+      } else {
+          console.log('🚀 SellerSetupForm: navigating to /app (standalone)');
+          setTimeout(() => {
+              navigate('/app');
+          }, 1000);
+      }
 
-      setTimeout(() => {
-        navigate('/app');
-      }, 1000);
+      console.log('🚀 SellerSetupForm: setting seller mode + profileComplete');
+      setMode('seller');
+      localStorage.setItem('straun_profileComplete', 'true');
 
     } catch (err) {
       console.error('❌ Full Error Details:', err);

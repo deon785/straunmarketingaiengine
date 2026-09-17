@@ -272,8 +272,8 @@ const PriceAlertDashboard = ({ userId }) => {
                     borderRadius: '12px'
                 }}>
                     <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔔</div>
-                    <h3>No Price Alerts Yet</h3>
-                    <p style={{ color: '#666' }}>
+                    <h3 style={{ color: '#333' }}>No Price Alerts Yet</h3>
+                    <p style={{ color: '#333' }}>
                         Set price alerts on products you're interested in.
                         We'll notify you when prices drop!
                     </p>

@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { 
-  faHeart,
-  faChevronDown,
-  faChevronUp,
-  faBars,
-  faTimes,
-  faCrown
-} from '@fortawesome/free-solid-svg-icons';
 
 const TopNavigationBar = ({ 
   user, 
@@ -18,394 +9,548 @@ const TopNavigationBar = ({
   onSwitchMode, 
   onSignOut,
   onSettingsClick,
-  isCollapsed = false,
-  onToggleCollapse,
   isAdmin = false,
-  isHidden = false, 
+  isHidden = false,
+  unreadNotifications = 3,
+  onNotificationsClick,
   appName = "Straun Marketing AI Engine"
 }) => {
-  const [isVisible, setIsVisible] = useState(true);
-  const [internalCollapsed, setInternalCollapsed] = useState(isCollapsed);
-  const navRef = useRef(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
+  const drawerRef = useRef(null);
 
-  // Sync with external isCollapsed prop
+  // Close drawer on route change
   useEffect(() => {
-    setInternalCollapsed(isCollapsed);
-  }, [isCollapsed]);
+    setMenuOpen(false);
+  }, [window.location.pathname]);
 
-  // Handle collapse toggle
-  const handleToggleCollapse = () => {
-    setInternalCollapsed(!internalCollapsed);
-    if (onToggleCollapse) {
-      onToggleCollapse();
+  // Close drawer on escape key
+  useEffect(() => {
+    const handleEsc = (e) => {
+      if (e.key === 'Escape' && menuOpen) setMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [menuOpen]);
+
+  // Lock body scroll when drawer is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [menuOpen]);
+
+  if (isHidden) return null;
+
+  const userInitial = user?.email?.charAt(0)?.toUpperCase() || 'U';
+  const userFirstName = user?.email?.split('@')[0] || 'User';
+  const userEmail = user?.email || 'Unknown User';
+  const modeLabel = selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode';
+
+  // ============================================
+  // HANDLERS
+  // ============================================
+  const handleMenuToggle = () => setMenuOpen(prev => !prev);
+  const handleCloseMenu = () => setMenuOpen(false);
+
+  const handleSettings = () => {
+    handleCloseMenu();
+    if (onSettingsClick) onSettingsClick();
+  };
+
+  const handleSwitchMode = () => {
+    handleCloseMenu();
+    if (onSwitchMode) onSwitchMode();
+  };
+
+  const handleSignOut = () => {
+    handleCloseMenu();
+    if (onSignOut) onSignOut();
+  };
+
+  const handleAdminClick = () => {
+    handleCloseMenu();
+    navigate('/admin');
+  };
+
+  const handleWishlistClick = () => {
+    handleCloseMenu();
+    navigate('/wishlist');
+  };
+
+  const handleNotifications = () => {
+    if (onNotificationsClick) {
+      onNotificationsClick();
+    } else {
+      navigate('/notifications');
     }
   };
 
-  // Handle hide button click
-  const handleHideNav = () => {
-    setIsVisible(false);
-    if (onToggleCollapse) {
-      onToggleCollapse();
-    }
-  };
-
-  if (isHidden) {
-    return null;
-  }
-
-  // Collapsed view
-  if (internalCollapsed || !isVisible) {
-    return (
-      <div 
-        className="collapsed-nav" 
-        ref={navRef}
+  // ============================================
+  // RENDER
+  // ============================================
+  return (
+    <>
+      {/* ============ TOP BAR ============ */}
+      <header
+        className="social-header"
         style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          padding: '8px 16px',
+          padding: '12px 20px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 1000,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-          transition: 'all 0.3s ease'
+          boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
         }}
       >
-        <button 
-          onClick={handleToggleCollapse}
-          className="menu-toggle-button"
-          title="Show Full Navigation"
+        {/* LEFT: Hamburger */}
+        <button
+          onClick={handleMenuToggle}
+          aria-label="Menu"
           style={{
-            background: 'rgba(255, 255, 255, 0.3)',
-            border: '1px solid rgba(255, 255, 255, 0.5)',
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
             color: 'white',
-            padding: '8px 16px',
-            borderRadius: '20px',
+            fontSize: '20px',
+            width: '38px',
+            height: '38px',
+            borderRadius: '10px',
             cursor: 'pointer',
-            fontSize: '14px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s ease',
+            flexShrink: 0
+          }}
+        >
+          ☰
+        </button>
+
+        {/* CENTER: Logo + Brand */}
+        <div
+          style={{
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            backdropFilter: 'blur(10px)',
-            fontWeight: '600'
+            flex: 1,
+            justifyContent: 'center'
           }}
         >
-          <FontAwesomeIcon icon={faBars} />
-          <span className="button-text">Menu</span>
-        </button>
-        
-        {isAdmin && (
-          <button
-            onClick={() => navigate('/admin')}
-            className="admin-button-collapsed"
-            title="Admin Dashboard"
+          {/* Logo Circle */}
+          <div
             style={{
-              background: 'rgba(255, 255, 255, 0.2)',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              color: 'white',
-              padding: '6px 12px',
-              borderRadius: '20px',
-              cursor: 'pointer',
-              fontSize: '14px',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              border: '2px solid rgba(255,255,255,0.25)',
+              background: 'rgba(255,255,255,0.1)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '6px',
-              marginRight: '10px',
-              backdropFilter: 'blur(10px)',
-              transition: 'all 0.3s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.4)';
-              e.currentTarget.style.transform = 'scale(1.1)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
-              e.currentTarget.style.transform = 'scale(1)';
+              flexShrink: 0
             }}
           >
-            <FontAwesomeIcon icon={faCrown} size="sm" />
-          </button>
-        )}
-        
-        <div className="collapsed-info" style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px'
-        }}>
-          <span className="user-email-small" style={{
-            color: 'white',
-            fontSize: '14px',
-            fontWeight: '500'
-          }}>
-            {user?.email?.split('@')[0] || 'User'}
-          </span>
-          <span className={`mode-tag-small ${selectedMode}`} style={{
-            background: selectedMode === 'seller' ? '#f39c12' : '#2ecc71',
-            color: 'white',
-            padding: '4px 10px',
-            borderRadius: '20px',
-            fontSize: '11px',
-            fontWeight: 'bold'
-          }}>
-            {selectedMode === 'seller' ? 'SELLER' : 'BUYER'}
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  // FULL NAVBAR VIEW
-  return (
-    <header 
-      className="social-header"
-      style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: '12px 20px',
-        color: 'white',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-        transition: 'all 0.3s ease'
-      }}
-      ref={navRef}
-    >
-      <div className="header-content" style={{
-        maxWidth: '1400px',
-        margin: '0 auto'
-      }}>
-        <div className="header-top-row" style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '15px',
-          flexWrap: 'wrap',
-          gap: '10px'
-        }}>
-          <div>
-            <h1 className="social-title" style={{
-              fontSize: '20px',
-              margin: 0,
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              flexWrap: 'wrap'
-            }}>
-              {appName}
-              <span className="user-mode" style={{
-                fontSize: '12px',
-                background: 'rgba(255,255,255,0.2)',
-                padding: '4px 10px',
-                borderRadius: '20px',
-                fontWeight: 'normal'
-              }}>
-                {selectedMode === 'seller' ? 'Seller Mode' : 'Buyer Mode'}
-              </span>
-            </h1>
+            <img
+              src="/Straun-logo.png"
+              alt="Straun Logo"
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                display: 'block'
+              }}
+              onError={(e) => {
+                // Fallback to emoji if image fails
+                e.target.style.display = 'none';
+                e.target.parentElement.innerHTML = '<span style="font-size: 20px;">🦅</span>';
+              }}
+            />
           </div>
-          
-          <div className="header-actions" style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px'
-          }}>
+
+          {/* Brand Name + AI pill */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '6px'
+            }}
+          >
+            <span
+              style={{
+                fontSize: '20px',
+                fontWeight: '700',
+                color: 'white',
+                letterSpacing: '-0.3px'
+              }}
+            >
+              Straun
+            </span>
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: '500',
+                color: 'rgba(255,255,255,0.85)',
+                background: 'rgba(255,255,255,0.2)',
+                padding: '2px 8px',
+                borderRadius: '20px',
+                letterSpacing: '0.3px'
+              }}
+            >
+              AI
+            </span>
+
+            {/* Admin crown (if admin) */}
             {isAdmin && (
               <button
-                onClick={() => navigate('/admin')}
-                className="admin-button"
+                onClick={handleAdminClick}
                 title="Admin Dashboard"
                 style={{
-                  background: 'rgba(255, 255, 255, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.5)',
-                  color: 'white',
-                  backdropFilter: 'blur(10px)',
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  fontWeight: 'bold',
-                  fontSize: '14px',
+                  background: 'none',
+                  border: 'none',
                   cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                  boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
-                  transition: 'all 0.3s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.4)';
-                  e.currentTarget.style.transform = 'scale(1.05)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
-                  e.currentTarget.style.transform = 'scale(1)';
+                  fontSize: '18px',
+                  marginLeft: '4px',
+                  padding: '4px',
+                  filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))',
+                  transition: 'all 0.2s ease',
+                  color: '#FFD700',
+                  textShadow: '0 0 10px rgba(255,215,0,0.3)'
                 }}
               >
-                <FontAwesomeIcon icon={faCrown} size="sm" />
-                <span className="admin-text">Admin</span>
+                👑
               </button>
             )}
-            
-            <Link 
-              to="/wishlist" 
-              title="My Wishlist" 
-              className="wishlist-link"
-              style={{
-                background: 'rgba(255, 255, 255, 0.2)',
-                padding: '8px 12px',
-                borderRadius: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: 'white',
-                textDecoration: 'none'
-              }}
-            >
-              <FontAwesomeIcon icon={faHeart} size="lg" color="#ff4d4d" />
-              <span>Wishlist</span>
-            </Link>
-
-            <button 
-              onClick={handleHideNav}
-              className="close-nav-button"
-              title="Collapse Navigation"
-              style={{
-                background: 'rgba(255, 255, 255, 0.2)',
-                border: '1px solid rgba(255, 255, 255, 0.3)',
-                color: 'white',
-                padding: '8px 12px',
-                borderRadius: '20px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <FontAwesomeIcon icon={faTimes} />
-              <span className="button-text">Collapse</span>
-            </button>
           </div>
         </div>
-        
-        <div className="user-controls">
-          <div className="user-info-card" style={{
+
+        {/* RIGHT: Notification bell */}
+        <button
+          onClick={handleNotifications}
+          aria-label="Notifications"
+          style={{
+            background: 'rgba(255,255,255,0.15)',
+            border: 'none',
+            color: 'white',
+            fontSize: '18px',
+            width: '38px',
+            height: '38px',
+            borderRadius: '50%',
+            cursor: 'pointer',
             display: 'flex',
-            justifyContent: 'space-between',
             alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '15px',
-            background: 'rgba(255,255,255,0.1)',
-            borderRadius: '12px',
-            padding: '12px 20px'
-          }}>
-            <div className="user-basic-info" style={{
+            justifyContent: 'center',
+            position: 'relative',
+            transition: 'all 0.2s ease',
+            flexShrink: 0
+          }}
+        >
+          🔔
+          {unreadNotifications > 0 && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '-2px',
+                right: '-2px',
+                background: '#ef4444',
+                color: 'white',
+                fontSize: '10px',
+                fontWeight: '700',
+                minWidth: '18px',
+                height: '18px',
+                padding: '0 5px',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '2px solid #667eea'
+              }}
+            >
+              {unreadNotifications > 9 ? '9+' : unreadNotifications}
+            </span>
+          )}
+        </button>
+      </header>
+
+      {/* ============ HAMBURGER DRAWER OVERLAY ============ */}
+      {menuOpen && (
+        <div
+          onClick={handleCloseMenu}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.6)',
+            zIndex: 1999,
+            animation: 'fadeIn 0.2s ease'
+          }}
+        />
+      )}
+
+      {/* ============ HAMBURGER DRAWER ============ */}
+      <div
+        ref={drawerRef}
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: menuOpen ? 0 : '-300px',
+          width: '280px',
+          height: '100vh',
+          background: '#17171f',
+          zIndex: 2000,
+          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: menuOpen ? '4px 0 24px rgba(0,0,0,0.5)' : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Drawer header (purple) */}
+        <div
+          style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            padding: '20px',
+            color: 'white',
+            position: 'relative'
+          }}
+        >
+          <button
+            onClick={handleCloseMenu}
+            style={{
+              position: 'absolute',
+              top: '12px',
+              right: '12px',
+              background: 'rgba(255,255,255,0.15)',
+              border: 'none',
+              color: 'white',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '16px'
+            }}
+          >
+            ✕
+          </button>
+
+          <div
+            style={{
               display: 'flex',
               alignItems: 'center',
               gap: '12px'
-            }}>
-              <div className="user-avatar" style={{
-                width: '40px',
-                height: '40px',
+            }}
+          >
+            <div
+              style={{
+                width: '48px',
+                height: '48px',
                 borderRadius: '50%',
-                background: 'rgba(255,255,255,0.3)',
+                background: 'rgba(255,255,255,0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 'bold',
-                fontSize: '18px'
-              }}>
-                {user?.email?.charAt(0)?.toUpperCase() || 'U'}
-              </div>
-              <div className="user-details">
-                <div className="user-email" style={{
-                  fontWeight: 'bold',
-                  fontSize: '14px'
-                }}>
-                  {user?.email || 'Unknown User'}
-                </div>
-              </div>
+                fontSize: '20px',
+                flexShrink: 0
+              }}
+            >
+              {userInitial}
             </div>
-            <div className="user-mode-info">
-              <div className="user-actions" style={{
-                display: 'flex',
-                gap: '10px',
-                alignItems: 'center',
-                flexWrap: 'wrap'
-              }}>
-                <button 
-                  onClick={onSettingsClick}
-                  className="settings-button"
-                  style={{
-                    background: 'rgba(255,255,255,0.2)',
-                    border: 'none',
-                    color: 'white',
-                    padding: '8px 16px',
-                    borderRadius: '20px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.3s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
-                >
-                  ⚙️ Settings
-                </button>
-
-                <button 
-                  onClick={onSwitchMode}
-                  className="switch-mode-button"
-                  style={{
-                    background: 'rgba(255,255,255,0.2)',
-                    border: 'none',
-                    color: 'white',
-                    padding: '8px 16px',
-                    borderRadius: '20px',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.3s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.3)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.2)'}
-                >
-                  Switch Mode
-                </button>
-                
-                <button 
-                  onClick={onSignOut}
-                  className="signout-button"
-                  disabled={loading}
-                  style={{
-                    background: 'rgba(220, 53, 69, 0.8)',
-                    border: 'none',
-                    color: 'white',
-                    padding: '8px 16px',
-                    borderRadius: '20px',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    transition: 'all 0.3s ease',
-                    opacity: loading ? 0.6 : 1
-                  }}
-                  onMouseEnter={(e) => !loading && (e.currentTarget.style.background = 'rgba(220, 53, 69, 1)')}
-                  onMouseLeave={(e) => !loading && (e.currentTarget.style.background = 'rgba(220, 53, 69, 0.8)')}
-                >
-                  {loading ? 'Signing Out...' : 'Sign Out'}
-                </button>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div
+                style={{
+                  fontWeight: '700',
+                  fontSize: '15px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {userFirstName}
+              </div>
+              <div
+                style={{
+                  fontSize: '12px',
+                  opacity: 0.85,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {userEmail}
+              </div>
+              <div
+                style={{
+                  fontSize: '10px',
+                  fontWeight: '700',
+                  textTransform: 'uppercase',
+                  marginTop: '4px',
+                  letterSpacing: '0.5px',
+                  color: '#a5f3fc'
+                }}
+              >
+                {modeLabel}
               </div>
             </div>
           </div>
         </div>
+
+        {/* Drawer menu items */}
+        <nav
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '12px 0',
+            display: 'flex',
+            flexDirection: 'column'
+          }}
+        >
+          <MenuItem
+            icon="🏠"
+            label="Home"
+            onClick={() => { handleCloseMenu(); navigate('/app'); }}
+          />
+          <MenuItem
+            icon="📊"
+            label="Dashboard"
+            onClick={() => { handleCloseMenu(); navigate('/dashboard'); }}
+          />
+          <MenuItem
+            icon="❤️"
+            label="Wishlist"
+            onClick={handleWishlistClick}
+          />
+          <MenuItem
+            icon="🔥"
+            label="Daily Deals"
+            onClick={() => { handleCloseMenu(); navigate('/deals'); }}
+          />
+
+          <Divider />
+
+          <MenuItem
+            icon="⚙️"
+            label="Settings"
+            onClick={handleSettings}
+          />
+          <MenuItem
+            icon="🔄"
+            label="Switch Mode"
+            onClick={handleSwitchMode}
+          />
+
+          {isAdmin && (
+            <>
+              <Divider />
+              <MenuItem
+                icon="👑"
+                label="Admin Dashboard"
+                onClick={handleAdminClick}
+                accent="#FFD700"
+              />
+            </>
+          )}
+
+          <Divider />
+
+          <MenuItem
+            icon="🚪"
+            label={loading ? 'Signing Out...' : 'Sign Out'}
+            onClick={handleSignOut}
+            disabled={loading}
+            danger
+          />
+        </nav>
+
+        {/* Drawer footer */}
+        <div
+          style={{
+            padding: '16px 20px',
+            borderTop: '1px solid #24242e',
+            fontSize: '11px',
+            color: '#71717a',
+            textAlign: 'center'
+          }}
+        >
+          Straun Marketing AI © 2026
+        </div>
       </div>
-    </header>
+
+      {/* ============ ANIMATION KEYFRAMES ============ */}
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+      `}</style>
+    </>
   );
 };
 
-// Default props for better resilience
+// ============================================
+// SUB-COMPONENTS
+// ============================================
+
+const MenuItem = ({ icon, label, onClick, disabled = false, danger = false, accent = null }) => {
+  const [hovered, setHovered] = useState(false);
+
+  const baseColor = danger ? '#ef4444' : accent || '#e4e4e7';
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '14px',
+        width: '100%',
+        padding: '14px 20px',
+        background: hovered ? 'rgba(168, 85, 247, 0.1)' : 'transparent',
+        color: disabled ? '#52525b' : baseColor,
+        border: 'none',
+        textAlign: 'left',
+        fontSize: '15px',
+        fontWeight: '600',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'all 0.15s ease',
+        opacity: disabled ? 0.5 : 1,
+        fontFamily: 'inherit',
+        paddingLeft: hovered ? '26px' : '20px'
+      }}
+    >
+      <span style={{ fontSize: '18px', width: '24px', display: 'flex', justifyContent: 'center' }}>
+        {icon}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
+};
+
+const Divider = () => (
+  <div
+    style={{
+      height: '1px',
+      background: '#24242e',
+      margin: '8px 20px'
+    }}
+  />
+);
+
+// Default props
 TopNavigationBar.defaultProps = {
   user: null,
   selectedMode: 'buyer',
@@ -414,10 +559,10 @@ TopNavigationBar.defaultProps = {
   onSwitchMode: () => {},
   onSignOut: () => {},
   onSettingsClick: () => {},
-  isCollapsed: false,
-  onToggleCollapse: () => {},
   isAdmin: false,
   isHidden: false,
+  unreadNotifications: 0,
+  onNotificationsClick: null,
   appName: 'Straun Marketing AI Engine'
 };
 
