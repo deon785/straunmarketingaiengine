@@ -15,7 +15,7 @@ const NotificationsList = () => {
 
   const referrer = location.state?.referrer || '/app';
 
-  // ✅ Fetch notifications - Using ONLY existing columns
+  // ✅ Fetch notifications
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) {
       setNotifications([]);
@@ -50,12 +50,15 @@ const NotificationsList = () => {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // ✅ Real-time subscription
+  // ✅ Real-time subscription (FIXED for React Strict Mode)
   useEffect(() => {
     if (!user?.id) return;
 
+    // 1. Generate a unique channel name using timestamp to prevent Strict Mode collisions
+    const channelId = `notifications-${user.id}-${Date.now()}`;
+    
     const channel = supabase
-      .channel(`notifications-${user.id}`)
+      .channel(channelId)
       .on(
         'postgres_changes',
         {
@@ -83,9 +86,14 @@ const NotificationsList = () => {
           fetchNotifications();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`✅ Realtime connected for channel: ${channelId}`);
+        }
+      });
 
     return () => {
+      // 2. Ensure we fully remove the channel on unmount to prevent leaks
       supabase.removeChannel(channel);
     };
   }, [user?.id, fetchNotifications]);
@@ -126,15 +134,9 @@ const NotificationsList = () => {
           <button
             onClick={handleGoBack}
             style={{
-              background: 'none',
-              border: 'none',
-              color: '#007bff',
-              fontSize: '16px',
-              cursor: 'pointer',
-              padding: '8px 12px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
+              background: 'none', border: 'none', color: '#007bff',
+              fontSize: '16px', cursor: 'pointer', padding: '8px 12px',
+              display: 'flex', alignItems: 'center', gap: '8px'
             }}
           >
             ← Back
@@ -150,13 +152,9 @@ const NotificationsList = () => {
           <button
             onClick={fetchNotifications}
             style={{
-              marginTop: '16px',
-              padding: '8px 16px',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer'
+              marginTop: '16px', padding: '8px 16px',
+              backgroundColor: '#007bff', color: 'white',
+              border: 'none', borderRadius: '6px', cursor: 'pointer'
             }}
           >
             🔄 Refresh
@@ -173,37 +171,23 @@ const NotificationsList = () => {
         <button
           onClick={handleGoBack}
           style={{
-            background: 'none',
-            border: 'none',
-            color: '#007bff',
-            fontSize: '16px',
-            cursor: 'pointer',
-            padding: '8px 12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
+            background: 'none', border: 'none', color: '#007bff',
+            fontSize: '16px', cursor: 'pointer', padding: '8px 12px',
+            display: 'flex', alignItems: 'center', gap: '8px'
           }}
         >
           ← Back
         </button>
       </div>
 
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '16px'
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 style={{ margin: 0 }}>📬 Notifications ({notifications.length})</h2>
         <button
           onClick={fetchNotifications}
           style={{
-            padding: '6px 12px',
-            backgroundColor: 'transparent',
-            border: '1px solid #6c757d',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '12px'
+            padding: '6px 12px', backgroundColor: 'transparent',
+            border: '1px solid #6c757d', borderRadius: '6px',
+            cursor: 'pointer', fontSize: '12px'
           }}
         >
           🔄 Refresh
@@ -211,13 +195,7 @@ const NotificationsList = () => {
       </div>
 
       {error && (
-        <div style={{
-          background: '#fee2e2',
-          color: '#dc2626',
-          padding: '12px',
-          borderRadius: '8px',
-          marginBottom: '16px'
-        }}>
+        <div style={{ background: '#fee2e2', color: '#dc2626', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
           ⚠️ {error}
         </div>
       )}
@@ -227,14 +205,9 @@ const NotificationsList = () => {
           key={notification.id}
           onClick={() => handleNotificationClick(notification)}
           style={{
-            padding: '16px',
-            marginBottom: '10px',
-            borderRadius: '10px',
-            backgroundColor: '#f8f9fa',
-            cursor: 'pointer',
-            border: '1px solid #e9ecef',
-            transition: 'all 0.2s',
-            position: 'relative'
+            padding: '16px', marginBottom: '10px', borderRadius: '10px',
+            backgroundColor: '#b4b4b4', cursor: 'pointer', border: '1px solid #e9ecef',
+            transition: 'all 0.2s', position: 'relative'
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = '#e9ecef';
@@ -254,31 +227,22 @@ const NotificationsList = () => {
             </div>
             
             <div style={{ flex: 1 }}>
-              <div style={{ 
-                fontWeight: '500', 
-                marginBottom: '4px', 
-                fontSize: '15px',
-                color: '#333'
-              }}>
+              <div style={{ fontWeight: '500', marginBottom: '4px', fontSize: '15px', color: '#333' }}>
                 {notification.message || 'New notification'}
               </div>
               <div style={{ fontSize: '12px', color: '#adb5bd' }}>
                 {new Date(notification.created_at).toLocaleString()}
               </div>
               {notification.buyer_phone && (
-                <div style={{ fontSize: '12px', color: '#25D366', marginTop: '4px' }}>
+                <div style={{ fontSize: '12px', color: '#000000', marginTop: '4px' }}>
                   📱 Phone: {notification.buyer_phone}
                 </div>
               )}
             </div>
             
             <div style={{
-              width: '10px',
-              height: '10px',
-              borderRadius: '50%',
-              backgroundColor: '#007bff',
-              flexShrink: 0,
-              marginTop: '6px',
+              width: '10px', height: '10px', borderRadius: '50%',
+              backgroundColor: '#007bff', flexShrink: 0, marginTop: '6px',
               animation: 'pulse 2s infinite'
             }} />
           </div>
@@ -286,26 +250,13 @@ const NotificationsList = () => {
       ))}
 
       <style>{`
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.4; }
-          100% { opacity: 1; }
-        }
-        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
         .loading-spinner {
-          width: 40px;
-          height: 40px;
-          border: 4px solid #e9ecef;
-          border-top: 4px solid #007bff;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin: 0 auto;
+          width: 40px; height: 40px; border: 4px solid #e9ecef;
+          border-top: 4px solid #007bff; border-radius: 50%;
+          animation: spin 1s linear infinite; margin: 0 auto;
         }
-        
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

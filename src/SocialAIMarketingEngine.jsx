@@ -36,28 +36,11 @@ import ChatList from './ChatList';
 import ChatSystem from './ChatSystem.jsx';
 import PriceAlertDashboard from './PriceAlertDashboard';
 
-// ========== HEXAGON PATTERN (same as UserDashboard) ==========
-const HEXAGON_PATTERN = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.01'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")";
-
 // Safe notification check
 const isNotificationSupported = () => {
     return typeof Notification !== 'undefined' && 
            typeof Notification.requestPermission === 'function' &&
            typeof window !== 'undefined';
-};
-
-const safeRequestNotificationPermission = async () => {
-    if (!isNotificationSupported()) {
-        console.log('Notifications not supported in this environment');
-        return 'unsupported';
-    }
-    
-    try {
-        return await Notification.requestPermission();
-    } catch (error) {
-        console.error('Error requesting notification permission:', error);
-        return 'error';
-    }
 };
 
 // ========== SAFE DATA ACCESS HELPERS ==========
@@ -422,6 +405,7 @@ function SocialAIMarketingEngine() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [showNotifications, setShowNotifications] = useState(false);
     const [zoomedImage, setZoomedImage] = useState(null);
+    const [contactProduct, setContactProduct] = useState(null);
 
     const [isNavCollapsed, setIsNavCollapsed] = useState(false);
     const [showWishlist, setShowWishlist] = useState(false);
@@ -1201,34 +1185,67 @@ function SocialAIMarketingEngine() {
     }, [user, selectedMode]);
 
     const PushEnableButton = () => {
+        // Track permission reactively so button disappears after decision
+        const [permission, setPermission] = useState(
+            typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+        );
+
+        // Re-check when window regains focus (user may have changed it in browser settings)
+        useEffect(() => {
+            const onFocus = () => {
+            if (typeof Notification !== 'undefined') setPermission(Notification.permission);
+            };
+            window.addEventListener('focus', onFocus);
+            return () => window.removeEventListener('focus', onFocus);
+        }, []);
+
         const handleEnable = async () => {
-            // Check if Notification API exists
             if (typeof Notification === 'undefined') {
-                alert("Notifications are not supported in this environment.");
-                return;
+            alert("Notifications are not supported in this environment.");
+            return;
             }
-            
+
+            // 🚫 Never re-ask if already decided
+            if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+            setPermission(Notification.permission);
+            return;
+            }
+
             try {
-                // Ask browser for permission
-                const permission = await Notification.requestPermission();
-                
-                if (permission === 'granted') {
-                    if (typeof subscribeToPush === 'function') {
-                        await subscribeToPush();
-                    }
-                    alert("Notifications enabled! You'll receive updates like WhatsApp.");
-                } else {
-                    alert("You denied notifications. Please enable them in browser settings to get updates.");
-                }
-            } catch (error) {
-                console.error("Error enabling notifications:", error);
-                alert("Could not enable notifications. Please try again.");
+            // ✅ ONLY place in the whole app that calls requestPermission() — and it's a user gesture
+            const result = await Notification.requestPermission();
+            setPermission(result);
+
+            if (result === 'granted') {
+                await subscribeToPush();
+            } else if (result === 'denied') {
+                alert("You blocked notifications. You can enable them in your browser settings.");
+            }
+            // result === 'default' means user dismissed — do nothing, don't nag.
+            } catch (err) {
+            console.error("Error enabling notifications:", err);
+            alert("Could not enable notifications. Please try again.");
             }
         };
 
+        // 🔕 Already granted → show status, no button
+        if (permission === 'granted') {
+            return <span className="push-status">🔔 Notifications enabled</span>;
+        }
+
+        // 🔕 Already denied → show instructions, no button
+        if (permission === 'denied') {
+            return (
+            <span className="push-status">
+                🔕 Notifications blocked — enable in browser settings
+            </span>
+            );
+        }
+
+        // 🟢 Only show the button if the user has never decided
         return (
             <button onClick={handleEnable} className="push-btn">
-                🔔 Enable Push Notifications
+            🔔 Enable Push Notifications
             </button>
         );
     };
@@ -1240,42 +1257,46 @@ function SocialAIMarketingEngine() {
             return;
         }
 
+        // ✅ Only proceed if permission already granted. NEVER ask here.
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+            console.log('[Push] Permission not granted — skipping auto-setup.');
+            return;
+        }
+
         try {
             const registration = await navigator.serviceWorker.register('/sw.js');
-            console.log('[Push] SW registered');
-            
-            const permission = await Notification.requestPermission();
-            
-            if (permission === 'granted') {
-                // ✅ For Vite - use import.meta.env
-                const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-                
-                if (!VAPID_PUBLIC_KEY) {
-                    console.error('[Push] Missing VAPID public key in env');
-                    return;
-                }
-                
-                const subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: VAPID_PUBLIC_KEY
-                });
-                
-                await supabase.from('push_subscriptions').insert([{
-                    user_id: user.id,
-                    subscription: subscription,
-                    device_info: navigator.userAgent
-                }]);
-                
-                console.log('[Push] Subscription saved');
+
+            let subscription = await registration.pushManager.getSubscription();
+            if (!subscription) {
+            const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+            if (!VAPID_PUBLIC_KEY) {
+                console.error('[Push] Missing VAPID public key');
+                return;
             }
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: VAPID_PUBLIC_KEY,
+            });
+            }
+
+            await supabase.from('push_subscriptions').upsert(
+            [{
+                user_id: user.id,
+                subscription,
+                device_info: navigator.userAgent,
+            }],
+            { onConflict: 'user_id' }
+            );
+
+            console.log('[Push] Subscription saved');
         } catch (error) {
             console.error('[Push] Setup failed:', error);
-            Sentry.captureMessage('Push notification setup failed', { 
-                level: 'warning',
-                extra: { error: error.message }
+            Sentry.captureMessage('Push notification setup failed', {
+            level: 'warning',
+            extra: { error: error.message },
             });
         }
-    };
+        };
 
     // Subscribe to push notifications using Supabase Edge Function
     const subscribeToPush = async () => {
@@ -1289,50 +1310,46 @@ function SocialAIMarketingEngine() {
             return false;
         }
 
+        // ✅ Only works if permission is ALREADY granted. Never ask here.
+        if (Notification.permission !== 'granted') {
+            showToastNotification('❌ Please allow notifications first');
+            return false;
+        }
+
         try {
             setPushLoading(true);
-            
+
             const registration = await navigator.serviceWorker.ready;
-            const permission = isNotificationSupported() ? await Notification.requestPermission() : 'unsupported';
-            
-            if (permission !== 'granted') {
-                showToastNotification('❌ Please allow notifications');
-                return false;
-            }
 
             let subscription = await registration.pushManager.getSubscription();
-            
+
             if (!subscription) {
-                // Use VAPID public key from environment
-                const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-                
-                subscription = await registration.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-                });
-            }
-            
-            // Call your edge function
-            const result = await callEdgeFunction('send-push-notifications', {
-                action: 'subscribe',
-                subscription: subscription,
-                userId: user.id,
-                userAgent: navigator.userAgent
+            const vapidPublicKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
             });
-            
-            if (result.success) {
-                showToastNotification('✅ Push notifications enabled!');
-                setPushEnabled(true);
-                return true;
             }
-            
+
+            const result = await callEdgeFunction('send-push-notifications', {
+            action: 'subscribe',
+            subscription,
+            userId: user.id,
+            userAgent: navigator.userAgent,
+            });
+
+            if (result.success) {
+            showToastNotification('✅ Push notifications enabled!');
+            setPushEnabled(true);
+            return true;
+            }
         } catch (error) {
             console.error('Push subscription error:', error);
             showToastNotification('⚠️ Error enabling notifications');
         } finally {
             setPushLoading(false);
         }
-        
+
         return false;
     };
 
@@ -3233,48 +3250,50 @@ function SocialAIMarketingEngine() {
     useEffect(() => {
         const registerServiceWorker = async () => {
             if (!('serviceWorker' in navigator)) {
-                console.log('Service Worker not supported');
-                return;
+            console.log('Service Worker not supported');
+            return;
             }
-            
+
             try {
-                // Register the service worker
-                const registration = await navigator.serviceWorker.register('/sw.js');
-                console.log('✅ Service Worker registered with scope:', registration.scope);
-                
-                // Check for updates
-                registration.addEventListener('updatefound', () => {
-                    const newWorker = registration.installing;
-                    console.log('🔄 New service worker found:', newWorker);
-                    
-                    newWorker.addEventListener('statechange', () => {
-                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                            console.log('✨ New version available');
-                            showToastNotification('New version available! Refresh to update.');
-                        }
-                    });
-                });
-                
-                // Check if we should auto-subscribe to push
-                const hasPromptedForPush = localStorage.getItem('push_prompted');
-                if (!hasPromptedForPush && user && isProfileComplete) {
-                    // Wait a bit before asking for push permission
-                    setTimeout(async () => {
-                        const permission = await Notification.requestPermission();
-                        if (permission === 'granted') {
-                            localStorage.setItem('push_prompted', 'true');
-                            // Don't auto-subscribe, let user choose via button
-                        }
-                    }, 5000);
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            console.log('✅ SW registered with scope:', registration.scope);
+
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker?.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    showToastNotification('New version available! Refresh to update.');
                 }
-                
-            } catch (error) {   
-                console.error('❌ Service Worker registration failed:', error);
+                });
+            });
+
+            // ✅ NO permission request here. Ever.
+            // If permission is already granted, silently subscribe.
+            if (user && isProfileComplete && Notification.permission === 'granted') {
+                setupPushNotifications(); // safe because it now checks permission itself
+            }
+            } catch (error) {
+            console.error('❌ SW registration failed:', error);
             }
         };
-        
+
         registerServiceWorker();
-    }, [user, isProfileComplete]);
+    }, [user, isProfileComplete]); // setupPushNotifications is stable enough for this
+
+    // 🔔 Subscribe to push when user grants permission from Settings
+    useEffect(() => {
+        const handler = async () => {
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                try {
+                    await subscribeToPush();
+                } catch (e) {
+                    console.warn('[Push] subscribe after settings grant failed:', e);
+                }
+            }
+        };
+        window.addEventListener('straun:notification-granted', handler);
+        return () => window.removeEventListener('straun:notification-granted', handler);
+    }, []);
 
     // ✅ Initialize search from URL when component mounts
     useEffect(() => {
@@ -5026,27 +5045,6 @@ function SocialAIMarketingEngine() {
         handleSwitchMode();
     };
 
-    // --- HANDLE SWITCH MODE ---
-    const handleSwitchMode = async () => {
-        await withLoading(async () => {
-            // ✅ Clear mode using AuthContext
-            setMode(null);  // This clears it from AuthContext AND localStorage
-            setIsProfileComplete(false);
-            // ✅ Clear the flag so the new mode triggers a fresh setup
-            localStorage.removeItem('straun_profileComplete');
-            console.log('🗑️ handleSwitchMode: cleared straun_profileComplete');
-            setProfileData(null);
-            setProductsFound([]);
-            setProspects([]);
-            setProductSearch('');
-            setError(null);
-            setAllProducts([]);
-            setCurrentPage(0);
-            setHasMore(true);
-            setSearchCache({});
-        }, 'Switching mode...');
-    };
-
     // --- HANDLE PROFILE COMPLETION ---
     const handleProfileComplete = async (details) => {
         await withLoading(async () => {
@@ -6352,71 +6350,73 @@ function SocialAIMarketingEngine() {
             </div>
         );
     }
-    // --- SHOW SETUP FORM IF MODE SELECTED BUT PROFILE NOT COMPLETE ---
-    if (selectedMode && !isProfileComplete && !initialDataLoading) {
+    
+    if (selectedMode === 'buyer' && (showBuyerForm || !isProfileComplete)) {
+        navigate('/buyer-form', { replace: true });
+        return <div className="loading-container"><p>Redirecting to buyer setup…</p></div>;
+    }
+    
+    // ✅ NEW: Contact Modal
+    const ContactModal = ({ product, onClose }) => {
+        if (!product) return null;
+
+        const handleWhatsApp = () => {
+            const cleanPhone = product.phone_number?.replace(/\D/g, '');
+            const finalNumber = cleanPhone?.startsWith('263') ? cleanPhone : `263${cleanPhone?.replace(/^0/, '')}`;
+            const message = encodeURIComponent(`Hi, I'm interested in "${product.name}" on Straun!`);
+            window.open(`https://wa.me/${finalNumber}?text=${message}`, '_blank');
+            onClose();
+        };
+
+        const handleCall = () => {
+            window.open(`tel:${product.phone_number}`, '_self');
+            onClose();
+        };
+
+        const handleSMS = () => {
+            const message = encodeURIComponent(`Hi, I'm interested in "${product.name}" on Straun!`);
+            window.open(`sms:${product.phone_number}?body=${message}`, '_self');
+            onClose();
+        };
+
         return (
-            <div className="app-container">
-                <div className="profile-setup-screen">
-                    <div className="setup-header">
-                        <h1 className="app-title">
-                            Complete Your {selectedMode === 'seller' ? 'Seller' : 'Buyer'} Setup
-                        </h1>
-                        <p className="setup-subtitle">
-                            <strong>Required:</strong> You must complete this form to proceed to the {selectedMode === 'seller' ? 'seller dashboard' : 'buyer marketplace'}.
-                        </p>
-                        
-                        {error && (
-                            <div className="error-alert">
-                                <span className="error-icon">⚠️</span>
-                                <span>{error}</span>
-                            </div>
-                        )}
-                        
-                        <div className="mode-indicator">
-                            <span className="mode-badge">
-                                {selectedMode === 'seller' ? 'Seller Setup' : 'Buyer Setup'}
-                            </span>
-                            
-                            <button 
-                                onClick={clearAndSwitchMode}
-                                className="change-mode-button"
-                                disabled={profileUpdateLoading} 
-                            >
-                                Change Mode
-                            </button>
-                        </div>
-                        
-                        {profileData && (profileData.location || profileData.phone_number) && (
-                            <div className="existing-profile-info">
-                                <p className="existing-info-note">
-                                    <strong>Note:</strong> Some fields are pre-filled from your existing profile data.
-                                    You must still complete and submit all required fields.
-                                </p>
-                            </div>
-                        )}
+            <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                background: 'rgba(0,0,0,0.6)', zIndex: 99999,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '20px'
+            }}>
+                <div style={{
+                    background: 'white', borderRadius: '16px', padding: '24px',
+                    maxWidth: '400px', width: '100%', textAlign: 'center',
+                    animation: 'slideUp 0.3s ease'
+                }}>
+                    <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', color: '#0f172a' }}>
+                        Contact Seller
+                    </h3>
+                    <p style={{ margin: '0 0 24px 0', color: '#64748b', fontSize: '14px' }}>
+                        How would you like to reach out about "{product.name}"?
+                    </p>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <button onClick={handleWhatsApp} style={{ padding: '14px', background: '#25D366', color: 'white', border: 'none', borderRadius: '10px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            💬 WhatsApp
+                        </button>
+                        <button onClick={handleCall} style={{ padding: '14px', background: '#3182ce', color: 'white', border: 'none', borderRadius: '10px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            📞 Call
+                        </button>
+                        <button onClick={handleSMS} style={{ padding: '14px', background: '#f8961e', color: 'white', border: 'none', borderRadius: '10px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            💬 SMS
+                        </button>
                     </div>
-                    
-                    <div className="setup-form-container">
-                        {selectedMode === 'seller' ? (
-                            <SellerSetupForm 
-                                onProfileComplete={handleProfileComplete}
-                                existingData={profileData}
-                                isSellerFlow={true}
-                                loading={profileUpdateLoading} 
-                            />
-                        ) : (
-                            <BuyerSetupForm 
-                                onProfileComplete={handleProfileComplete}
-                                existingData={profileData}
-                                isBuyerFlow={true}
-                                loading={profileUpdateLoading}
-                            />
-                        )}
-                    </div>
+
+                    <button onClick={onClose} style={{ marginTop: '20px', background: 'none', border: 'none', color: '#64748b', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
+                        Cancel
+                    </button>
                 </div>
             </div>
         );
-    }
+    };
 
     // PWA Install Prompt Component
     const PWAInstallPrompt = () => {
@@ -6741,17 +6741,7 @@ function SocialAIMarketingEngine() {
 
     // --- MAIN INTERFACE ---
     return (
-        <div 
-            className="social-media-page"
-            style={{
-                backgroundColor: '#0d0d10',
-                backgroundImage: HEXAGON_PATTERN,
-                backgroundSize: '28px 49px',
-                backgroundRepeat: 'repeat',
-                backgroundAttachment: 'fixed',
-                minHeight: '100vh'
-            }}
-        > 
+        <div className="social-media-page theme-pattern-bg"> 
 
             {/* Mobile Sidebar Navigation */}
             <div className={`mobile-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
@@ -6794,10 +6784,6 @@ function SocialAIMarketingEngine() {
                     
                     <button onClick={() => { handleNavigation('settings'); toggleMobileMenu(); }}>
                         ⚙️ Settings
-                    </button>
-                    
-                    <button onClick={() => { handleNavigation('switchMode'); toggleMobileMenu(); }}>
-                        🔄 Switch Mode
                     </button>
                     
                     <div className="mobile-nav-divider"></div>
@@ -8206,7 +8192,8 @@ function SocialAIMarketingEngine() {
                                                             </div>
                                                         </div>
                                                         
-                                                        <div className="product-card-footer" style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px', padding: '10px' }}>
+                                                        <div className="product-card-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px', padding: '10px' }}>
+                                                            {/* 1. Save to Wishlist */}
                                                             <button 
                                                                 onClick={() => saveToWishlist(p, 'product')}
                                                                 style={{
@@ -8222,22 +8209,15 @@ function SocialAIMarketingEngine() {
                                                                     display: 'flex',
                                                                     alignItems: 'center',
                                                                     justifyContent: 'center',
-                                                                    gap: '8px',
-                                                                    marginBottom: '5px'
+                                                                    gap: '8px'
                                                                 }}
                                                             >
                                                                 💖 Save to Wishlist
                                                             </button>
 
+                                                            {/* 2. Contact Seller (Opens Modal) */}
                                                             <button 
-                                                                onClick={() => handleContact(
-                                                                    p?.seller_id, 
-                                                                    p?.phone_number, 
-                                                                    p?.name || 'Product', 
-                                                                    'buyer', 
-                                                                    p
-                                                                )}
-                                                                disabled={safeNumber(limits?.CONTACT?.remaining) === 0}
+                                                                onClick={() => setContactProduct(p)}
                                                                 style={{
                                                                     width: '100%',
                                                                     backgroundColor: '#25D366',
@@ -8247,69 +8227,44 @@ function SocialAIMarketingEngine() {
                                                                     borderRadius: '8px',
                                                                     fontWeight: 'bold',
                                                                     fontSize: '14px',
-                                                                    cursor: safeNumber(limits?.CONTACT?.remaining) === 0 ? 'not-allowed' : 'pointer',
+                                                                    cursor: 'pointer',
                                                                     display: 'flex',
                                                                     alignItems: 'center',
                                                                     justifyContent: 'center',
                                                                     gap: '8px',
-                                                                    marginBottom: '10px',
                                                                     boxShadow: '0 2px 8px rgba(37, 211, 102, 0.3)'
                                                                 }}
                                                             >
-                                                                <span style={{ fontSize: '16px' }}>💬</span>
-                                                                WhatsApp Seller
-                                                                {safeNumber(limits?.CONTACT?.remaining) < 3 && safeNumber(limits?.CONTACT?.remaining) > 0 && (
-                                                                    <span style={{
-                                                                        fontSize: '11px',
-                                                                        marginLeft: '5px',
-                                                                        padding: '2px 6px',
-                                                                        backgroundColor: '#ffaa00',
-                                                                        borderRadius: '10px',
-                                                                        fontWeight: 'bold'
-                                                                    }}>
-                                                                        ({safeNumber(limits?.CONTACT?.remaining)} left)
-                                                                    </span>
-                                                                )}
-                                                                {safeNumber(limits?.CONTACT?.remaining) === 0 && (
-                                                                    <span style={{
-                                                                        fontSize: '11px',
-                                                                        marginLeft: '5px',
-                                                                        padding: '2px 6px',
-                                                                        backgroundColor: '#ff4444',
-                                                                        borderRadius: '10px',
-                                                                        fontWeight: 'bold'
-                                                                    }}>
-                                                                        (Limit reached)
-                                                                    </span>
-                                                                )}
+                                                                💬 Contact Seller
                                                             </button>
 
-                                                            <div style={{ display: 'flex', gap: '10px' }}>
-                                                                <button 
-                                                                    onClick={() => {
-                                                                        const phone = safeString(p?.phone_number);
-                                                                        if (phone) window.open(`tel:${phone}`, '_self');
-                                                                    }}
-                                                                    style={smallButtonStyle('#3182ce')}
-                                                                    disabled={!safeString(p?.phone_number)}
-                                                                >
-                                                                    📞 Call
-                                                                </button>
-                                                                <button 
-                                                                    onClick={() => {
-                                                                        const phone = safeString(p?.phone_number);
-                                                                        const name = safeString(p?.name) || 'product';
-                                                                        if (phone) {
-                                                                            const smsMessage = `Hi, I saw your ${name}. Is it available?`;
-                                                                            window.open(`sms:${phone}?body=${encodeURIComponent(smsMessage)}`, '_self');
-                                                                        }
-                                                                    }}
-                                                                    style={smallButtonStyle('#f6ad55')}
-                                                                    disabled={!safeString(p?.phone_number)}
-                                                                >
-                                                                    ✉️ SMS
-                                                                </button>
-                                                            </div>
+                                                            {/* 3. View Seller Shop */}
+                                                            <button 
+                                                                onClick={() => navigate(`/buyer/shop/${p?.seller_id}`, { 
+                                                                    state: { 
+                                                                        sellerId: p?.seller_id, 
+                                                                        claimedProductId: p?.id, 
+                                                                        sellerName: 'Seller Shop' 
+                                                                    } 
+                                                                })} 
+                                                                style={{
+                                                                    width: '100%',
+                                                                    backgroundColor: '#f1f5f9',
+                                                                    color: '#0f172a',
+                                                                    border: '1px solid #cbd5e1',
+                                                                    padding: '12px',
+                                                                    borderRadius: '8px',
+                                                                    fontWeight: 'bold',
+                                                                    fontSize: '14px',
+                                                                    cursor: 'pointer',
+                                                                    display: 'flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '8px'
+                                                                }}
+                                                            >
+                                                                🏪 View Seller Shop
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -8684,6 +8639,15 @@ function SocialAIMarketingEngine() {
             </div>
         </div>
     )}
+
+    {/* ✅ NEW: Contact Modal */}
+    {contactProduct && (
+        <ContactModal 
+            product={contactProduct} 
+            onClose={() => setContactProduct(null)} 
+        />
+    )}
+    
     <InterestPopup />
     </div>
      

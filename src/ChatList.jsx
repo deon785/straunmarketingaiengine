@@ -64,53 +64,67 @@ const ChatList = ({ userId, onSelectChat, onClose }) => {
         setError(null);
         
         try {
+            // ✅ Step 1: Get conversations (no nested joins)
             const result = await supabase
                 .from('conversations')
-                .select(`
-                    *,
-                    product:product_id (name, price, image_url),
-                    participant1:participant1_id (user_id, username, location),
-                    participant2:participant2_id (user_id, username, location)
-                `)
+                .select('*')
                 .or(`participant1_id.eq.${userId},participant2_id.eq.${userId}`)
                 .eq('is_active', true)
                 .order('updated_at', { ascending: false });
 
             if (result.error) {
-                console.error('Error loading conversations:', result.error);
-                setError('Failed to load conversations');
+                console.warn('Conversations unavailable:', result.error.message);
+                setError('Chat is coming soon — use WhatsApp for now');
                 setConversations([]);
                 return;
             }
 
             const data = result.data || [];
-            
-            const formatted = data.map(conv => {
-                try {
-                    const isUserParticipant1 = conv.participant1_id === userId;
-                    const otherUser = isUserParticipant1 
-                        ? conv.participant2 
-                        : conv.participant1;
-                    const unreadCount = isUserParticipant1 
-                        ? (conv.unread_count_p1 || 0)
-                        : (conv.unread_count_p2 || 0);
-                    
-                    return {
-                        ...conv,
-                        otherUser: otherUser || { username: 'Unknown User', user_id: null },
-                        unreadCount,
-                        otherUserId: otherUser?.user_id
-                    };
-                } catch (err) {
-                    console.error('Error formatting conversation:', err);
-                    return null;
+            if (data.length === 0) {
+                setConversations([]);
+                return;
+            }
+
+            // ✅ Step 2: Collect other-user IDs and fetch their profiles
+            const otherUserIds = data.map(conv => 
+                conv.participant1_id === userId ? conv.participant2_id : conv.participant1_id
+            ).filter(Boolean);
+
+            const uniqueIds = [...new Set(otherUserIds)];
+
+            let profilesMap = {};
+            if (uniqueIds.length > 0) {
+                const { data: profiles, error: profileErr } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location')
+                    .in('user_id', uniqueIds);
+
+                if (!profileErr && profiles) {
+                    profiles.forEach(p => { profilesMap[p.user_id] = p; });
                 }
-            }).filter(conv => conv !== null);
-            
+            }
+
+            // ✅ Step 3: Format
+            const formatted = data.map(conv => {
+                const isUserParticipant1 = conv.participant1_id === userId;
+                const otherUserId = isUserParticipant1 ? conv.participant2_id : conv.participant1_id;
+                const otherUser = profilesMap[otherUserId] || { username: 'User', user_id: otherUserId };
+                const unreadCount = isUserParticipant1
+                    ? (conv.unread_count_p1 || 0)
+                    : (conv.unread_count_p2 || 0);
+
+                return {
+                    ...conv,
+                    otherUser,
+                    unreadCount,
+                    otherUserId
+                };
+            });
+
             setConversations(formatted);
         } catch (err) {
-            console.error('Unexpected error loading conversations:', err);
-            setError('Unable to load conversations. Please try again.');
+            console.warn('Chat backend unavailable:', err);
+            setError('Chat is coming soon — use WhatsApp for now');
             setConversations([]);
         } finally {
             setLoading(false);

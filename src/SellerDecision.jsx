@@ -118,7 +118,7 @@ const SellerDecision = () => {
 
   const handleAddProducts = () => {
     try {
-      navigate('/seller-form');
+      navigate('/app/seller');
     } catch (err) {
       console.error('[SellerDecision] Navigation error:', err);
       setError('Unable to open seller form. Please try again.');

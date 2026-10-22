@@ -127,6 +127,8 @@ export const AuthProvider = ({ children }) => {
 
   // ✅ Listen for auth changes (sign in, sign out)
   useEffect(() => {
+    let settled = false;   // ← guard against double-fire
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         console.log('[Auth] Auth event:', event);
@@ -143,7 +145,11 @@ export const AuthProvider = ({ children }) => {
           if (newUser?.id !== user?.id) {
             setUser(newUser);
             setIsAuthenticated(!!newUser);
-            setLoading(false);
+            if (!settled) {
+              setLoading(false);   // ✅ always clear loading on initial session
+              settled = true;
+            }
+          
           }
           return;
         }
@@ -156,7 +162,11 @@ export const AuthProvider = ({ children }) => {
             console.log('[Auth] User signed in:', newUser?.email || 'null');
             setUser(newUser);
             setIsAuthenticated(!!newUser);
-            setLoading(false);
+            if (!settled) {
+              setLoading(false);
+              settled = true;
+            }
+
           }
           
           // ✅ Check mode after sign in
@@ -189,6 +199,16 @@ export const AuthProvider = ({ children }) => {
         }
       }
     );
+
+    // ✅ Safety timeout — if Supabase never fires INITIAL_SESSION,
+    //    unblock the app after 3 seconds
+    const fallback = setTimeout(() => {
+      if (!settled) {
+        console.warn('[Auth] Auth listener timed out — forcing loading=false');
+        setLoading(false);
+        settled = true;
+      }
+    }, 3000);
 
     return () => {
       subscription.unsubscribe();

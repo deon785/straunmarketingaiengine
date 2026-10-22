@@ -6,7 +6,6 @@ const TopNavigationBar = ({
   selectedMode, 
   profileData, 
   loading, 
-  onSwitchMode, 
   onSignOut,
   onSettingsClick,
   isAdmin = false,
@@ -59,11 +58,6 @@ const TopNavigationBar = ({
   const handleSettings = () => {
     handleCloseMenu();
     if (onSettingsClick) onSettingsClick();
-  };
-
-  const handleSwitchMode = () => {
-    handleCloseMenu();
-    if (onSwitchMode) onSwitchMode();
   };
 
   const handleSignOut = () => {
@@ -304,7 +298,8 @@ const TopNavigationBar = ({
           left: menuOpen ? 0 : '-300px',
           width: '280px',
           height: '100vh',
-          background: '#17171f',
+          background: 'var(--bg-secondary)',
+          color: 'var(--text-primary)',
           zIndex: 2000,
           transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           boxShadow: menuOpen ? '4px 0 24px rgba(0,0,0,0.5)' : 'none',
@@ -419,7 +414,7 @@ const TopNavigationBar = ({
           <MenuItem
             icon="🏠"
             label="Home"
-            onClick={() => { handleCloseMenu(); navigate('/app'); }}
+            onClick={() => { handleCloseMenu(); navigate('/'); }}
           />
           <MenuItem
             icon="📊"
@@ -429,12 +424,18 @@ const TopNavigationBar = ({
           <MenuItem
             icon="❤️"
             label="Wishlist"
-            onClick={handleWishlistClick}
+            onClick={() => {
+              handleCloseMenu(); // Close the hamburger menu
+              navigate('/dashboard'); // Go to dashboard, but open wishlist tab
+            }}
           />
           <MenuItem
             icon="🔥"
             label="Daily Deals"
-            onClick={() => { handleCloseMenu(); navigate('/deals'); }}
+            onClick={() => {
+              handleCloseMenu(); // Close the hamburger menu
+              navigate('/dashboard'); // Go to dashboard, but open wishlist tab
+            }}
           />
 
           <Divider />
@@ -443,11 +444,6 @@ const TopNavigationBar = ({
             icon="⚙️"
             label="Settings"
             onClick={handleSettings}
-          />
-          <MenuItem
-            icon="🔄"
-            label="Switch Mode"
-            onClick={handleSwitchMode}
           />
 
           {isAdmin && (
@@ -477,13 +473,13 @@ const TopNavigationBar = ({
         <div
           style={{
             padding: '16px 20px',
-            borderTop: '1px solid #24242e',
+            borderTop: '1px solid var(--border-color)',
             fontSize: '11px',
             color: '#71717a',
             textAlign: 'center'
           }}
         >
-          Straun Marketing AI © 2026
+          Straun Marketing AI © 2025
         </div>
       </div>
 
@@ -505,7 +501,7 @@ const TopNavigationBar = ({
 const MenuItem = ({ icon, label, onClick, disabled = false, danger = false, accent = null }) => {
   const [hovered, setHovered] = useState(false);
 
-  const baseColor = danger ? '#ef4444' : accent || '#e4e4e7';
+  const baseColor = danger ? '#ef4444' : accent || '#000000';
 
   return (
     <button
@@ -544,7 +540,7 @@ const Divider = () => (
   <div
     style={{
       height: '1px',
-      background: '#24242e',
+      background: 'var(--border-color)',
       margin: '8px 20px'
     }}
   />
@@ -556,7 +552,6 @@ TopNavigationBar.defaultProps = {
   selectedMode: 'buyer',
   profileData: null,
   loading: false,
-  onSwitchMode: () => {},
   onSignOut: () => {},
   onSettingsClick: () => {},
   isAdmin: false,

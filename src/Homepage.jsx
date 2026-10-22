@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import DailyDeals from './DailyDeals';
 import { useNavigate } from 'react-router-dom';
 import { useAuthState, useAuthActions } from './AuthContext';
@@ -12,6 +12,90 @@ const Homepage = () => {
     const { user, isAuthenticated } = useAuthState();
     const { setMode, clearAuthState } = useAuthActions();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [tickerItems, setTickerItems] = useState([]);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const loadTicker = async () => {
+            try {
+                const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); // last 2 hours
+
+                // 1) Most recent product listings
+                const { data: products, error: pErr } = await supabase
+                    .from('products')
+                    .select('name, location, created_at, seller_id')
+                    .gte('created_at', since)
+                    .order('created_at', { ascending: false })
+                    .limit(8);
+
+                // 2) Most recent searches
+                const { data: searches, error: sErr } = await supabase
+                    .from('searches')
+                    .select('product_name, created_at')
+                    .gte('created_at', since)
+                    .order('created_at', { ascending: false })
+                    .limit(5);
+
+                if (pErr) console.warn('[Ticker] products fetch failed:', pErr.message);
+                if (sErr) console.warn('[Ticker] searches fetch failed:', sErr.message);
+
+                const items = [];
+
+                // One item per unique seller (avoid same seller spamming the ticker)
+                const seenSellers = new Set();
+                (products || []).forEach((p) => {
+                    if (!p?.name) return;
+                    if (p.seller_id && seenSellers.has(p.seller_id)) return;
+                    if (p.seller_id) seenSellers.add(p.seller_id);
+
+                    const where = p.location ? ` in ${p.location}` : '';
+                    items.push(`🛒 New listing: "${p.name}"${where}`);
+                });
+
+                // Searches (deduplicated by product_name)
+                const seenSearches = new Set();
+                (searches || []).forEach((s) => {
+                    if (!s?.product_name) return;
+                    const key = s.product_name.toLowerCase();
+                    if (seenSearches.has(key)) return;
+                    seenSearches.add(key);
+
+                    items.push(`🔍 Someone is searching for "${s.product_name}"`);
+                });
+
+                // Fallback so the ticker is never empty
+                if (items.length < 3) {
+                    items.push('👶 New baby clothes added every day');
+                    items.push('🍼 Browse prams, toys, and nursery essentials');
+                    items.push('✅ Join thousands of parents buying & selling');
+                    items.push('🚀 Powered by Straun Marketing AI');
+                }
+
+                if (mounted) {
+                    setTickerItems(items.slice(0, 8)); // cap at 8 so it doesn't run too long
+                }
+            } catch (err) {
+                console.warn('[Ticker] load failed:', err);
+                if (mounted) {
+                    setTickerItems([
+                        '🛒 New listings added every day',
+                        '📱 Browse phones, cars, furniture, and more',
+                        '✅ Join thousands of buyers & sellers',
+                        '🚀 Powered by Straun Marketing AI',
+                    ]);
+                }
+            }
+        };
+
+        loadTicker();
+        const interval = setInterval(loadTicker, 60_000); // refresh every 60s
+
+        return () => {
+            mounted = false;
+            clearInterval(interval);
+        };
+    }, []);
 
      const goToLogin = async () => {
         if (isAuthenticated) {
@@ -30,14 +114,11 @@ const Homepage = () => {
     // ✅ FIND PRODUCTS → Buyer flow
     const handleStartBuying = () => {
         if (isAuthenticated && user) {
-            // Already logged in → set mode and go straight to buyer decision
             setMode('buyer');
             setTimeout(() => {
                 navigate('/buyer-decision');
             }, 100);
         } else {
-            // Not logged in → login with intent
-            // After login, signup.jsx will send them to /buyer-decision
             navigate('/login?intent=buyer');
         }
     };
@@ -75,14 +156,14 @@ const Homepage = () => {
                 }
                 .homepage-wrapper {
                     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    background-color: #0f0f13;
-                    color: white;
+                    background-color: #fffffff9;
+                    color: #0f172a;
                     min-height: 100vh;
                     width: 100%;
                 }
 
                 /* ============================================ */
-                /* --- WHITE NAVBAR --- */
+                /* --- BLACK NAVBAR (with search + ticker) --- */
                 /* ============================================ */
                 .hp-nav {
                     position: fixed;
@@ -92,11 +173,11 @@ const Homepage = () => {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    padding: 16px 40px;
+                    padding: 12px 24px;
                     z-index: 1000;
-                    background: #ffffff;
-                    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-                    gap: 24px;
+                    background: #23232a;
+                    box-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 4px 20px -8px rgba(0,0,0,0.5);
+                    gap: 18px;
                 }
 
                 /* ✅ LEFT GROUP: Hamburger + Logo + Name */
@@ -114,8 +195,8 @@ const Homepage = () => {
                 }
 
                 .hp-logo-img {
-                    width: 40px;
-                    height: 40px;
+                    width: 34px;
+                    height: 34px;
                     object-fit: contain;
                 }
 
@@ -127,46 +208,98 @@ const Homepage = () => {
                 }
 
                 .hp-brand-name {
-                    font-size: 18px;
+                    font-size: 16px;
                     font-weight: 800;
-                    color: #111827;
-                    letter-spacing: -0.5px;
+                    color: #ffffff;
+                    letter-spacing: -0.3px;
                 }
 
                 .hp-brand-sub {
                     font-size: 9px;
                     font-weight: 600;
-                    color: #7c3aed;
-                    letter-spacing: 1.5px;
+                    color: #c4b5fd;
+                    letter-spacing: 1.4px;
                     text-transform: uppercase;
                 }
 
-                /* ✅ CENTER: Desktop nav links */
+                /* ✅ NEW: Search bar inside nav */
+                .hp-nav-search {
+                    flex: 1;
+                    display: flex;
+                    align-items: center;
+                    background: #17171a;
+                    border: 1px solid #2a2a30;
+                    border-radius: 9px;
+                    padding: 0 12px;
+                    height: 40px;
+                    max-width: 520px;
+                    transition: border-color 0.15s ease, background 0.15s ease;
+                }
+                .hp-nav-search:focus-within {
+                    border-color: #7c3aed;
+                    background: #1c1c22;
+                }
+                .hp-nav-search .hp-search-icon {
+                    color: #8a8a92;
+                    font-size: 15px;
+                    margin-right: 8px;
+                }
+                .hp-nav-search input {
+                    flex: 1;
+                    background: transparent;
+                    border: none;
+                    outline: none;
+                    color: #f1f1f4;
+                    font-size: 14px;
+                    font-family: inherit;
+                }
+                .hp-nav-search input::placeholder { color: #7a7a84; }
+
+                /* ✅ NEW: Location pill */
+                .hp-nav-loc {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: #17171a;
+                    border: 1px solid #2a2a30;
+                    color: #d1d1d8;
+                    padding: 0 12px;
+                    height: 40px;
+                    border-radius: 9px;
+                    font-size: 13px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    flex-shrink: 0;
+                    transition: border-color 0.15s ease, background 0.15s ease;
+                    font-family: inherit;
+                }
+                .hp-nav-loc:hover { background: #1c1c22; border-color: #3a3a44; }
+
+                /* ✅ CENTER: Desktop nav links (kept for compatibility, hidden if not used) */
                 .hp-nav-links {
                     display: flex;
-                    gap: 32px;
+                    gap: 28px;
                     align-items: center;
-                    margin: 0 auto;
                 }
 
                 .hp-nav-links a {
-                    color: #4b5563;
+                    color: #cbcbd4;
                     text-decoration: none;
-                    font-size: 15px;
-                    font-weight: 600;
-                    transition: color 0.2s;
+                    font-size: 14px;
+                    font-weight: 500;
+                    transition: color 0.15s;
                     white-space: nowrap;
                 }
 
                 .hp-nav-links a:hover {
-                    color: #7c3aed;
+                    color: #ffffff;
                 }
 
-                /* ✅ RIGHT GROUP: Sign Up Free OR Globe */
+                /* ✅ RIGHT GROUP: Sign Up Free OR Avatar */
                 .hp-nav-auth {
                     display: flex;
                     align-items: center;
-                    gap: 12px;
+                    gap: 10px;
                     flex-shrink: 0;
                 }
 
@@ -174,31 +307,35 @@ const Homepage = () => {
                     background: #7c3aed;
                     color: white;
                     border: none;
-                    padding: 10px 24px;
-                    border-radius: 6px;
+                    padding: 0 20px;
+                    height: 40px;
+                    border-radius: 9px;
                     font-size: 14px;
                     font-weight: 700;
                     cursor: pointer;
-                    transition: background 0.2s;
+                    transition: background 0.15s, transform 0.15s;
                     white-space: nowrap;
+                    font-family: inherit;
                 }
 
                 .hp-signup-btn:hover {
                     background: #6d28d9;
+                    transform: translateY(-1px);
                 }
 
                 .hp-login-btn {
                     background: none;
                     border: none;
-                    color: #4b5563;
-                    font-size: 15px;
+                    color: #cbcbd4;
+                    font-size: 14px;
                     font-weight: 600;
                     cursor: pointer;
-                    transition: color 0.2s;
+                    transition: color 0.15s;
+                    font-family: inherit;
                 }
 
                 .hp-login-btn:hover {
-                    color: #7c3aed;
+                    color: #ffffff;
                 }
 
                 /* ✅ Hamburger — hidden on desktop */
@@ -206,9 +343,9 @@ const Homepage = () => {
                     display: none;
                     background: none;
                     border: none;
-                    font-size: 24px;
+                    font-size: 22px;
                     cursor: pointer;
-                    color: #111827;
+                    color: #ffffff;
                     padding: 6px 10px;
                     border-radius: 8px;
                     transition: background 0.15s;
@@ -218,7 +355,63 @@ const Homepage = () => {
                 }
 
                 .hp-hamburger:hover {
-                    background: #f3f4f6;
+                    background: rgba(255,255,255,0.08);
+                }
+
+                /* ✅ NEW: Live ticker strip below the nav */
+                .hp-ticker {
+                    position: fixed;
+                    top: 64px;
+                    left: 0;
+                    right: 0;
+                    height: 34px;
+                    background: #0a0a0a;
+                    border-bottom: 1px solid #1a1a1a;
+                    overflow: hidden;
+                    display: flex;
+                    align-items: center;
+                    padding: 0 24px;
+                    font-size: 13px;
+                    z-index: 999;
+                }
+                .hp-ticker-label {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    color: #4ade80;
+                    font-weight: 700;
+                    font-size: 11px;
+                    letter-spacing: 0.8px;
+                    padding-right: 14px;
+                    border-right: 1px solid #1f1f24;
+                    margin-right: 14px;
+                    flex-shrink: 0;
+                }
+                .hp-ticker-label .hp-ticker-dot {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 50%;
+                    background: #22c55e;
+                }
+                .hp-ticker-viewport {
+                    flex: 1;
+                    overflow: hidden;
+                    position: relative;
+                    height: 100%;
+                }
+                .hp-ticker-track {
+                    display: flex;
+                    gap: 40px;
+                    align-items: center;
+                    height: 100%;
+                    white-space: nowrap;
+                    animation: hpTickerScroll var(--ticker-duration, 40s) linear infinite;
+                }
+                .hp-ticker-item { color: #a8a8b3; }
+                .hp-ticker-item strong { color: #ffffff; font-weight: 600; }
+                @keyframes hpTickerScroll {
+                    from { transform: translateX(0); }
+                    to { transform: translateX(-50%); }
                 }
 
                 /* ============================================ */
@@ -324,91 +517,134 @@ const Homepage = () => {
                 }
 
                 /* ============================================ */
-                /* --- HERO SECTION --- */
+                /* --- HERO SECTION (NEW DARK OVERLAY) --- */
                 /* ============================================ */
-                .hp-hero {
+                .hp-hero-dark {
                     position: relative;
-                    padding: 180px 20px 120px 20px;
+                    height: 100vh;
+                    width: 100%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
                     text-align: center;
-                    background-color: #0f0f13;
-                    background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 0l17.32 10v20L20 40 2.68 30V10z' fill='%23ffffff' fill-opacity='0.05'/%3E%3C/svg%3E");
-                    border-bottom: 1px solid #2d2d2d;
                     overflow: hidden;
+                    padding-top: 98px; /* Account for nav + ticker */
                 }
-                .hp-hero::after {
-                    content: '';
+
+                .hp-hero-dark-bg {
                     position: absolute;
-                    bottom: 0;
+                    top: 0;
                     left: 0;
                     width: 100%;
-                    height: 50%;
-                    background: linear-gradient(to bottom, rgba(15, 15, 19, 0) 0%, #0f0f13 100%);
-                    pointer-events: none;
+                    height: 100%;
+                    /* ✅ The baby image from Pexels (free for commercial use) */
+                    background-image: url('/baby-hero.avif');
+                    background-size: cover;
+                    background-position: center;
+                    z-index: 1;
+                    transform: scale(1.05);
                 }
-                .hp-hero-content {
-                    position: relative;
+
+                .hp-hero-dark-overlay {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    /* ✅ Dark overlay matching the flyer aesthetic */
+                    background: linear-gradient(
+                        135deg,
+                        rgba(26, 26, 46, 0.95) 0%,
+                        rgba(26, 26, 46, 0.7) 50%,
+                        rgba(26, 26, 46, 0.4) 100%
+                    );
                     z-index: 2;
-                    max-width: 900px;
-                    margin: 0 auto;
                 }
-                .hp-hero-title {
-                    font-size: 4.5rem;
-                    font-weight: 900;
-                    line-height: 1.1;
-                    margin-bottom: 24px;
-                    letter-spacing: -2px;
-                    font-family: 'Inter', sans-serif;
+
+                .hp-hero-dark-content {
+                    position: relative;
+                    z-index: 3;
+                    max-width: 800px;
+                    padding: 2rem;
                     color: white;
+                    animation: hpFadeIn 1s ease-out;
                 }
-                .hp-gradient-text {
-                    background: linear-gradient(135deg, #a855f7, #ef4444);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
+
+                .hp-hero-dark-title {
+                    font-size: 4rem;
+                    line-height: 1.1;
+                    margin-bottom: 1.5rem;
+                    font-weight: 800;
+                    letter-spacing: -1px;
                 }
-                .hp-hero-subtitle {
+
+                .hp-hero-dark-title span {
+                    color: #d6336c; /* Magenta from your brand */
+                }
+
+                .hp-hero-dark-subtitle {
                     font-size: 1.2rem;
-                    color: #9ca3af;
-                    max-width: 700px;
-                    margin: 0 auto 40px auto;
+                    color: #e0e0e0;
+                    margin-bottom: 2.5rem;
                     line-height: 1.6;
+                    max-width: 600px;
+                    margin-left: auto;
+                    margin-right: auto;
                 }
-                .hp-hero-actions {
+
+                .hp-hero-dark-actions {
                     display: flex;
-                    gap: 16px;
+                    gap: 1rem;
                     justify-content: center;
                 }
-                .hp-btn-primary {
-                    background: white;
-                    color: #0f0f13;
-                    padding: 16px 36px;
-                    border-radius: 6px;
+
+                /* --- BUTTONS (DARK HERO) --- */
+                .hp-btn-dark-primary {
+                    background-color: #0f172a;
+                    color: white;
+                    padding: 1rem 2.5rem;
+                    border-radius: 50px;
                     font-weight: 700;
-                    font-size: 16px;
+                    font-size: 1rem;
                     border: none;
                     cursor: pointer;
-                    transition: all 0.2s;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 15px rgba(15, 23, 42, 0.4);
+                    font-family: inherit;
                 }
-                .hp-btn-primary:hover { background: #e5e7eb; }
-                .hp-btn-secondary {
-                    background: transparent;
-                    color: #a855f7;
-                    border: 2px solid #7c3aed;
-                    padding: 16px 36px;
-                    border-radius: 6px;
+                .hp-btn-dark-primary:hover {
+                    background-color: #1e293b;
+                    transform: translateY(-3px);
+                    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.6);
+                }
+
+                .hp-btn-dark-secondary {
+                    background-color: #d6336c;
+                    color: white;
+                    padding: 1rem 2.5rem;
+                    border-radius: 50px;
                     font-weight: 700;
-                    font-size: 16px;
+                    font-size: 1rem;
+                    border: none;
                     cursor: pointer;
-                    transition: all 0.2s;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 15px rgba(214, 51, 108, 0.4);
+                    font-family: inherit;
                 }
-                .hp-btn-secondary:hover { background: rgba(124, 58, 237, 0.1); color: white; }
+                .hp-btn-dark-secondary:hover {
+                    background-color: #b02a56;
+                    transform: translateY(-3px);
+                    box-shadow: 0 6px 20px rgba(214, 51, 108, 0.6);
+                }
 
                 /* ============================================ */
-                /* --- DASHBOARD SECTION --- */
+                /* --- DASHBOARD SECTION (soft grey) --- */
                 /* ============================================ */
                 .hp-dashboard {
-                    background-color: #ffffff;
+                    background-color: #f4f6f8;
                     padding: 80px 20px;
-                    color: #111827;
+                    color: #0f172a;
+                    border-bottom: 1px solid #eaeef2;
                 }
                 .hp-section-header {
                     display: flex;
@@ -420,11 +656,12 @@ const Homepage = () => {
                 .hp-section-title {
                     font-size: 2.2rem;
                     font-weight: 800;
-                    color: #111827;
+                    color: #0f172a;
+                    letter-spacing: -0.5px;
                 }
                 .hp-section-subtitle {
                     font-size: 1rem;
-                    color: #6b7280;
+                    color: #8291a9;
                     margin-top: 6px;
                 }
                 .hp-view-all {
@@ -435,14 +672,15 @@ const Homepage = () => {
                     background: none;
                     border: none;
                     cursor: pointer;
+                    font-family: inherit;
                 }
                 .hp-view-all:hover { text-decoration: underline; }
 
                 /* ============================================ */
-                /* --- FEATURES SECTION --- */
+                /* --- FEATURES SECTION (white) --- */
                 /* ============================================ */
                 .hp-features {
-                    background: #0f0f13;
+                    background: #ffffff;
                     padding: 100px 20px;
                 }
                 .hp-features-grid {
@@ -457,9 +695,11 @@ const Homepage = () => {
                     font-size: 2.5rem;
                     font-weight: 800;
                     margin-bottom: 20px;
+                    color: #0f172a;
+                    letter-spacing: -0.5px;
                 }
                 .hp-features-text p {
-                    color: #9ca3af;
+                    color: #52607a;
                     font-size: 1.1rem;
                     line-height: 1.6;
                     margin-bottom: 40px;
@@ -484,47 +724,49 @@ const Homepage = () => {
                     justify-content: center;
                     font-size: 20px;
                     flex-shrink: 0;
+                    border: 1px solid;
                 }
-                .hp-icon-purple { background: rgba(124, 58, 237, 0.2); color: #c084fc; }
-                .hp-icon-red { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-                .hp-icon-blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-                .hp-feature-item h4 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
-                .hp-feature-item p { color: #9ca3af; font-size: 0.9rem; margin: 0; }
+                .hp-icon-purple { background: #f5f3ff; color: #7c3aed; border-color: #ede9fe; }
+                .hp-icon-red    { background: #fdf2f8; color: #db2777; border-color: #fce7f3; }
+                .hp-icon-blue   { background: #eff6ff; color: #2563eb; border-color: #dbeafe; }
+                .hp-feature-item h4 { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; color: #0f172a; }
+                .hp-feature-item p { color: #52607a; font-size: 0.9rem; margin: 0; }
 
                 /* --- MOCKUP CARD --- */
                 .hp-mockup {
-                    background: rgba(255, 255, 255, 0.03);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    background: #fbfcfd;
+                    border: 1px solid #eaeef2;
                     border-radius: 20px;
                     padding: 30px;
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+                    box-shadow: 0 1px 2px rgba(15,23,42,0.03), 0 20px 40px -20px rgba(15,23,42,0.12);
                 }
                 .hp-mockup-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    border-bottom: 1px solid rgba(255,255,255,0.1);
+                    border-bottom: 1px solid #eaeef2;
                     padding-bottom: 16px;
                     margin-bottom: 24px;
                 }
-                .hp-mockup-header h3 { font-size: 1.1rem; }
+                .hp-mockup-header h3 { font-size: 1.1rem; color: #0f172a; }
                 .hp-live-badge {
-                    background: rgba(16, 185, 129, 0.2);
-                    color: #34d399;
-                    border: 1px solid rgba(16, 185, 129, 0.3);
+                    background: #ecfdf5;
+                    color: #047857;
+                    border: 1px solid #d1fae5;
                     padding: 4px 12px;
                     border-radius: 20px;
                     font-size: 0.75rem;
                     font-weight: 700;
                     text-transform: uppercase;
+                    letter-spacing: 0.5px;
                 }
                 .hp-mockup-row {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
                     padding: 16px;
-                    background: rgba(255, 255, 255, 0.03);
-                    border: 1px solid rgba(255, 255, 255, 0.05);
+                    background: #ffffff;
+                    border: 1px solid #eaeef2;
                     border-radius: 12px;
                     margin-bottom: 12px;
                 }
@@ -533,22 +775,23 @@ const Homepage = () => {
                     width: 40px; height: 40px; border-radius: 8px;
                     display: flex; align-items: center; justify-content: center;
                 }
-                .hp-mockup-label { font-size: 0.95rem; font-weight: 600; }
-                .hp-mockup-sub { font-size: 0.8rem; color: #6b7280; }
-                .hp-mockup-stat { color: #34d399; font-weight: 700; font-size: 0.9rem; }
+                .hp-mockup-label { font-size: 0.95rem; font-weight: 600; color: #0f172a; }
+                .hp-mockup-sub { font-size: 0.8rem; color: #8291a9; }
+                .hp-mockup-stat { color: #047857; font-weight: 700; font-size: 0.9rem; }
                 .hp-mockup-btn {
-                    width: 100%; padding: 16px; background: white; color: #0f0f13;
+                    width: 100%; padding: 16px; background: #0f172a; color: #ffffff;
                     border: none; border-radius: 10px; font-weight: 700; font-size: 1rem;
                     cursor: pointer; margin-top: 16px;
+                    font-family: inherit;
                 }
-                .hp-mockup-btn:hover { background: #e5e7eb; }
+                .hp-mockup-btn:hover { background: #1e293b; }
 
                 /* ============================================ */
                 /* --- FOOTER --- */
                 /* ============================================ */
                 .hp-footer {
-                    background: #0a0a0c; padding: 30px; text-align: center;
-                    color: #6b7280; font-size: 14px; border-top: 1px solid #2d2d2d;
+                    background: #fbfcfd; padding: 30px; text-align: center;
+                    color: #8291a9; font-size: 14px; border-top: 1px solid #eaeef2;
                 }
 
                 /* ============================================ */
@@ -556,7 +799,9 @@ const Homepage = () => {
                 /* ============================================ */
                 @media (max-width: 900px) {
                     .hp-features-grid { grid-template-columns: 1fr; gap: 40px; }
-                    .hp-hero-title { font-size: 3rem; }
+                    .hp-hero-dark-title { font-size: 3rem; }
+                    .hp-nav-search { max-width: 320px; }
+                    .hp-nav-loc { display: none; }
                 }
 
                 /* ============================================ */
@@ -568,12 +813,10 @@ const Homepage = () => {
                         gap: 8px;
                     }
 
-                    /* ✅ Show hamburger on mobile — on the LEFT */
                     .hp-hamburger {
                         display: flex;
                     }
 
-                    /* ✅ Compact left group */
                     .hp-nav-left {
                         gap: 6px;
                     }
@@ -581,46 +824,39 @@ const Homepage = () => {
                         gap: 8px;
                     }
                     .hp-logo-img {
-                        width: 32px;
-                        height: 32px;
+                        width: 30px;
+                        height: 30px;
                     }
                     .hp-brand-name {
-                        font-size: 16px;
+                        font-size: 15px;
                     }
                     .hp-brand-sub {
                         font-size: 8px;
                         letter-spacing: 1px;
                     }
 
-                    /* ✅ Hide desktop nav links */
-                    .hp-nav-links {
-                        display: none;
-                    }
+                    .hp-nav-search { display: none; }
+                    .hp-nav-loc { display: none; }
+                    .hp-nav-links { display: none; }
+                    .hp-login-btn { display: none; }
 
-                    /* ✅ Compact right side */
-                    .hp-nav-auth {
-                        gap: 8px;
-                        flex-shrink: 0;
-                    }
-
-                    /* ✅ Hide "Log In" text button on mobile — it's in the drawer */
-                    .hp-login-btn {
-                        display: none;
-                    }
-
-                    /* ✅ Compact Sign Up button */
                     .hp-signup-btn {
-                        padding: 8px 14px;
-                        font-size: 13px;
+                        padding: 0 14px;
+                        height: 34px;
+                        font-size: 12px;
                     }
 
-                    /* Hero + sections */
-                    .hp-hero { padding: 140px 20px 80px 20px; }
-                    .hp-hero-title { font-size: 2.5rem; letter-spacing: -1px; }
-                    .hp-hero-subtitle { font-size: 1rem; }
-                    .hp-hero-actions { flex-direction: column; }
-                    .hp-btn-primary, .hp-btn-secondary { width: 100%; }
+                    .hp-nav { height: 54px; }
+                    .hp-ticker { top: 54px; height: 30px; font-size: 12px; }
+
+                    .hp-hero-dark { padding-top: 84px; height: auto; min-height: 100vh; }
+                    .hp-hero-dark-title { font-size: 2.4rem; letter-spacing: -1px; }
+                    .hp-hero-dark-subtitle { font-size: 1rem; }
+                    .hp-hero-dark-actions { flex-direction: column; }
+                    .hp-btn-dark-primary, .hp-btn-dark-secondary { width: 100%; }
+
                     .hp-section-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+                    .hp-section-title { font-size: 1.8rem; }
                     .hp-dashboard, .hp-features { padding: 50px 20px; }
                 }
 
@@ -632,19 +868,18 @@ const Homepage = () => {
                         display: none;
                     }
                     .hp-signup-btn {
-                        padding: 6px 12px;
-                        font-size: 12px;
+                        padding: 0 10px;
+                        font-size: 11px;
                     }
                     .hp-hamburger {
-                        font-size: 22px;
+                        font-size: 20px;
                         padding: 4px 8px;
                     }
                 }
             `}</style>
 
-            {/* ===== 1. WHITE NAVBAR ===== */}
+            {/* ===== 1. BLACK NAVBAR with SEARCH ===== */}
             <nav className="hp-nav">
-                {/* LEFT SIDE: Hamburger (mobile only) + Logo + Brand */}
                 <div className="hp-nav-left">
                     <button 
                         className="hp-hamburger"
@@ -663,15 +898,13 @@ const Homepage = () => {
                     </div>
                 </div>
 
-                {/* CENTER: Desktop nav links */}
                 <div className="hp-nav-links">
-                    <a href="Homepage">Home</a>
-                    <a href="dashboard">Dashboard</a>
-                    <a href="buyer-decision">Buy</a>
-                    <a href="seller-decision">Sell</a>
+                    <a href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>Home</a>
+                    <a href="/dashboard" onClick={(e) => { e.preventDefault(); navigate('/dashboard'); }}>Dashboard</a>
+                    <a href="/buyer-decision" onClick={(e) => { e.preventDefault(); handleStartBuying(); }}>Buy</a>
+                    <a href="/seller-decision" onClick={(e) => { e.preventDefault(); handleStartSelling(); }}>Sell</a>
                 </div>
 
-                {/* RIGHT SIDE: Sign Up Free (logged out) OR Globe (logged in) */}
                 <div className="hp-nav-auth">
                     {!isAuthenticated && (
                         <button onClick={goToLogin} className="hp-signup-btn">
@@ -682,16 +915,28 @@ const Homepage = () => {
                 </div>
             </nav>
 
-            {/* ✅ Mobile menu drawer */}
+            {/* ===== 2. LIVE TICKER STRIP ===== */}
+            <div className="hp-ticker">
+                <span className="hp-ticker-label">
+                    <span className="hp-ticker-dot"></span>LIVE
+                </span>
+                <div className="hp-ticker-viewport">
+                    <div className="hp-ticker-track">
+                        {tickerItems.concat(tickerItems).map((item, i) => (
+                            <span key={i} className="hp-ticker-item">{item}</span>
+                        ))}
+                    </div>
+                </div>
+            </div>
+
+            {/* ===== 3. MOBILE MENU DRAWER ===== */}
             {mobileMenuOpen && (
                 <>
-                    {/* Backdrop */}
                     <div 
                         className="hp-mobile-overlay"
                         onClick={() => setMobileMenuOpen(false)}
                     />
                     
-                    {/* Drawer */}
                     <div className="hp-mobile-drawer">
                         <div className="hp-mobile-header">
                             <span className="hp-mobile-title">Menu</span>
@@ -704,10 +949,30 @@ const Homepage = () => {
                         </div>
                         
                         <nav className="hp-mobile-nav">
-                            <a href="Homepage" onClick={() => setMobileMenuOpen(false)}>🏠 Home</a>
-                            <a href="dashboard" onClick={() => setMobileMenuOpen(false)}>📊 Dashboard</a>
-                            <a href="buyer-decision" onClick={() => setMobileMenuOpen(false)}>🛒 Buy</a>
-                            <a href="seller-decision" onClick={() => setMobileMenuOpen(false)}>💼 Sell</a>
+                            <a 
+                                href="/" 
+                                onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigate('/'); }}
+                            >
+                                🏠 Home
+                            </a>
+                            <a 
+                                href="/dashboard" 
+                                onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); navigate('/dashboard'); }}
+                            >
+                                📊 Dashboard
+                            </a>
+                            <a 
+                                href="/buyer-decision" 
+                                onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); handleStartBuying(); }}
+                            >
+                                🛒 Buy
+                            </a>
+                            <a 
+                                href="/seller-decision" 
+                                onClick={(e) => { e.preventDefault(); setMobileMenuOpen(false); handleStartSelling(); }}
+                            >
+                                💼 Sell
+                            </a>
                             
                             {!isAuthenticated && (
                                 <>
@@ -725,29 +990,48 @@ const Homepage = () => {
                 </>
             )}
 
-            {/* ===== 2. HERO SECTION ===== */}
-            <header className="hp-hero">
-                <div className="hp-hero-content">
-                    <h1 className="hp-hero-title">
-                        Reigning Supreme <br />
-                        <span className="hp-gradient-text">In The Market</span>
+            {/* ===== 4. HERO SECTION (DARK OVERLAY - NEW DESIGN) ===== */}
+                        {/* ===== 4. HERO SECTION (DARK OVERLAY - NEW DESIGN) ===== */}
+            <header className="hp-hero-dark">
+                <div className="hp-hero-dark-bg"></div>
+                <div className="hp-hero-dark-overlay"></div>
+                <div className="hp-hero-dark-content">
+                    
+                    {/* ✅ Trusted by parents - Forced Italic */}
+                    <h3 style={{ fontStyle: 'italic', marginBottom: '10px', fontWeight: '500' }}>
+                        🤝 Trusted by parents
+                    </h3>
+                    
+                    {/* ✅ H1 and H2 styling applied correctly inline */}
+                    <h1 style={{ fontSize: 'calc(4rem + 4px)', margin: '0 0 20px 0', fontWeight: '800', lineHeight: '1.1' }}>
+                        Dress Your Little One<br />
+                        <h2 style={{ fontSize: 'inherit', color: '#c4b5fd', fontWeight: 'bold', margin: 0, display: 'inline' }}>
+                            In Comfort
+                        </h2>
                     </h1>
-                    <p className="hp-hero-subtitle">
-                        The Straun Marketing AI Engine connects Buyers and Sellers intelligently. 
-                        Grow your business, maximize your potential, and get more sales.
+                    
+                    <p 
+                        className="hp-hero-dark-subtitle" 
+                        style={{ 
+                            textShadow: '0 0 10px rgba(196, 181, 253, 0.8), 0 0 20px rgba(196, 181, 253, 0.5)',
+                            color: '#ffffff'
+                        }}
+                    >
+                        Your Local MarketPlace For Baby Fashion. Shop Brand-New Clothes, Rompers, And Cozy Sets From Trusted Local Sellers. 
+                        Discover Unique Styles And Keep Your Baby Smiling In Ultimate Comfort.
                     </p>
-                    <div className="hp-hero-actions">
-                        <button className="hp-btn-primary" onClick={handleStartBuying}>
-                            Find Products
+                    <div className="hp-hero-dark-actions">
+                        <button className="hp-btn-dark-primary" onClick={handleStartBuying}>
+                            Browse Baby Clothes
                         </button>
-                        <button className="hp-btn-secondary" onClick={handleStartSelling}>
+                        <button className="hp-btn-dark-secondary" onClick={handleStartSelling}>
                             Start Selling
                         </button>
                     </div>
                 </div>
             </header>
-
-            {/* ===== 3. DASHBOARD SECTION (WHITE) ===== */}
+            
+            {/* ===== 5. DASHBOARD SECTION (SOFT GREY) ===== */}
             <section className="hp-dashboard">
                 <div className="hp-section-header">
                     <div>
@@ -768,7 +1052,7 @@ const Homepage = () => {
                 />
             </section>
 
-            {/* ===== 4. FEATURES SECTION (DARK) ===== */}
+            {/* ===== 6. FEATURES SECTION (WHITE) ===== */}
             <section className="hp-features">
                 <div className="hp-features-grid">
                     <div className="hp-features-text">
@@ -841,7 +1125,7 @@ const Homepage = () => {
                 </div>
             </section>
 
-            {/* ===== 5. FOOTER ===== */}
+            {/* ===== 7. FOOTER ===== */}
             <footer className="hp-footer">
                 © 2025 Straun Marketing AI Engine. All rights reserved.
             </footer>

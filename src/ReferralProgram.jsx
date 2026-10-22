@@ -301,6 +301,50 @@ const ReferralProgram = ({ userId, userName, onReferralComplete }) => {
         };
     }, [userId, loadReferralData, loadLeaderboard]);
 
+    useEffect(() => {
+        if (!userId) return;
+
+        // 1. Create the channel
+        const channel = supabase
+            .channel(`referral-changes-${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'referrals',
+                    filter: `referrer_id=eq.${userId}`
+                },
+                (payload) => {
+                    console.log('Referral change received:', payload);
+                    // Update your UI here
+                }
+            )
+            .subscribe(async (status, err) => {
+                // 2. Handle the error if the token expired
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    console.error('Referral channel error:', err);
+                    
+                    // ✅ Force Supabase to refresh the token
+                    const { data, error } = await supabase.auth.refreshSession();
+                    
+                    if (error) {
+                        console.error('Failed to refresh session:', error.message);
+                        // Optionally: Redirect to login if the refresh token is also dead
+                        // window.location.href = '/login';
+                    } else {
+                        console.log('Session refreshed successfully. Reconnecting...');
+                        // The Supabase client will automatically reconnect with the new token
+                    }
+                }
+            });
+
+        // 3. Cleanup on unmount
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [userId]);
+
     const shareReferral = async () => {
         // ✅ Check offline status
         if (!navigator.onLine) {

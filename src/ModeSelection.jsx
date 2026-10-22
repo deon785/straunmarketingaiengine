@@ -74,15 +74,15 @@ const ModeSelection = () => {
     };
 
     return (
-        <div className="mode-selection-page" style={{ minHeight: '100vh', background: '#1e1e1e' }}>
-            <div className="app-container">
+        <div className="mode-selection-page" style={{ minHeight: '100vh', background: '#eeeeee' }}>
+            
                 <div className="mode-selection-screen">
                     
                     <div className="mode-selection-header">
                         <h1 className="mode-selection-title">
                             Welcome to Straun Marketing AI Engine
                         </h1>
-                        <p className="mode-selection-subtitle">
+                        <p className="mode-selection-subtitle" style={{ color: '#0f172a' }}>
                             {user?.email 
                                 ? `Signed in as ${user.email}` 
                                 : 'Choose how you want to use the platform:'}
@@ -132,7 +132,7 @@ const ModeSelection = () => {
                                 <ul className="mode-features">
                                     <li>Your location</li>
                                     <li>Phone number</li>
-                                    <li>Products you're interested in</li>
+                                    <li>Product interests</li>
                                 </ul>
                             </div>
                         </div>
@@ -159,7 +159,7 @@ const ModeSelection = () => {
                     </div>
                 </div>
             </div>
-        </div>
+        
     );
 };
 

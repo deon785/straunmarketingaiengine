@@ -20,6 +20,30 @@ const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
   throw lastError;
 };
 
+// ============================================
+// ✅ LIGHT MODE TOKENS (matches Seller + UserDashboard)
+// ============================================
+const T = {
+  pageBg: '#ffffff',
+  cardBg: '#ffffff',
+  cardBorder: '#e5e7eb',
+  softBg: '#f7f8fa',
+  softBorder: '#eaeef2',
+  text: '#0f172a',
+  textMuted: '#52607a',
+  textLight: '#8291a9',
+  inputBg: '#000000',        // ✅ black inputs (as you requested)
+  inputBorder: '#404040',
+  inputText: '#ffffff',
+  inputPlaceholder: '#888888',
+  errorText: '#dc2626',
+  errorBorder: '#f87171',
+  primary: '#3b82f6',
+  primaryDark: '#1d4ed8',
+  success: '#10b981',
+  radius: '12px',
+};
+
 const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) => {
     const navigate = useNavigate();
     const { setMode } = useAuthActions();
@@ -34,109 +58,74 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
     const isFirstRender = useRef(true);
     const userFetchedRef = useRef(false);
 
-    // ============ REACT HOOK FORM ============
     const {
         register,
         handleSubmit,
-        formState: { errors, isDirty },
+        formState: { errors },
         reset,
         setValue,
         watch,
-        getValues
     } = useForm({
         mode: 'onSubmit',
         defaultValues: {
             username: existingData?.username || '',
             location: existingData?.location || '',
             phone_number: existingData?.phone_number || '',
-            interests: '',  // ✅ Always empty - user types new interests
+            interests: '',
         }
     });
 
-    // Watch values for character counter (no re-renders of whole form)
     const interestsValue = watch('interests', '');
     const locationValue = watch('location', '');
-    const phoneValue = watch('phone_number', '');
     const usernameValue = watch('username', '');
 
-    // ============ PHONE VALIDATION FUNCTION ============
     const validatePhoneNumber = useCallback((phone) => {
         if (!phone) return 'Phone number is required';
-        
-        // Remove all spaces, dashes, parentheses, dots
         let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
-        // Remove leading + if present
         let rawDigits = cleanedPhone.replace(/^\+/, '');
-        // Get only digits
         const digitsOnly = rawDigits.replace(/\D/g, '');
-        
-        // Check if it's a local format (starts with 0)
         const isLocalFormat = rawDigits.startsWith('0');
-        
         if (isLocalFormat) {
-            // ✅ Local format (07...): MUST be exactly 10 digits (0 + 9 digits)
-            if (digitsOnly.length !== 10) {
-            return 'Please enter a valid phone number (e.g., 0712345678)';
-            }
+            if (digitsOnly.length !== 10) return 'Please enter a valid phone number (e.g., 0712345678)';
         } else {
-            // ✅ International format (263...): MUST be exactly 12 digits (263 + 9 digits)
-            if (digitsOnly.length !== 12) {
-            return 'Please enter a valid phone number (e.g., 263712345678)';
-            }
+            if (digitsOnly.length !== 12) return 'Please enter a valid phone number (e.g., 263712345678)';
         }
-        
         return true;
     }, []);
 
-    // ✅ Check for pending interest from deal clicks (PRE-FILL the form)
     useEffect(() => {
         const pendingInterest = localStorage.getItem('straun_pending_interest');
-        
         if (pendingInterest) {
             console.log('🎯 Pre-filling interest from deal:', pendingInterest);
-            
-            // Pre-fill the interests field using react-hook-form's setValue
             setValue('interests', pendingInterest);
-            
-            // ✅ Clear it so it doesn't persist forever
             localStorage.removeItem('straun_pending_interest');
         }
     }, [setValue]);
 
-    // ============ FETCH USER ============
     useEffect(() => {
         const getUser = async () => {
             if (userFetchedRef.current) return;
             userFetchedRef.current = true;
-            
             setUserLoading(true);
             try {
                 const storedUser = localStorage.getItem('user');
-                
                 if (storedUser) {
                     const parsedUser = JSON.parse(storedUser);
                     setUser(parsedUser);
-                    
-                    // Pre-fill form with existing data if available
                     if (existingData && isFirstRender.current) {
-                        const updates = {
+                        reset({
                             username: existingData.username || '',
                             location: existingData.location || '',
                             phone_number: existingData.phone_number || '',
-                            interests: '',  // ✅ Always empty
-                        };
-                        reset(updates);
+                            interests: '',
+                        });
                         isFirstRender.current = false;
                     }
                 } else {
                     const { data: { user: supabaseUser }, error: userError } = await fetchWithRetry(() =>
                         supabase.auth.getUser()
                     );
-                    if (userError) {
-                        console.error('Error getting user:', userError);
-                        setError('Please sign in to continue.');
-                        return;
-                    }
+                    if (userError) { setError('Please sign in to continue.'); return; }
                     if (supabaseUser) {
                         localStorage.setItem('user', JSON.stringify(supabaseUser));
                         setUser(supabaseUser);
@@ -152,7 +141,6 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
         getUser();
     }, [existingData, reset]);
 
-    // ============ FETCH BUYER PROFILES ============
     const fetchBuyerProfiles = useCallback(async () => {
         setLoadingProfiles(true);
         setProfilesError(null);
@@ -164,7 +152,6 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                     .eq('is_buyer', true)
                     .order('created_at', { ascending: false })
             );
-                
             if (error) throw error;
             if (data) setBuyerProfiles(data);
         } catch (err) {
@@ -175,58 +162,32 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
         }
     }, []);
 
-    useEffect(() => {
-        fetchBuyerProfiles();
-    }, [fetchBuyerProfiles]);
+    useEffect(() => { fetchBuyerProfiles(); }, [fetchBuyerProfiles]);
 
-    // ============ FORM SUBMISSION ============
     const onSubmit = useCallback(async (data) => {
-        // Check offline status
-        if (!navigator.onLine) {
-            setError('You are offline. Please connect to the internet to complete setup.');
-            return;
-        }
-        
-        if (!user) {
-            console.error('User not found in state');
-            setError('Please sign in to continue.');
-            return;
-        }
-        
+        if (!navigator.onLine) { setError('You are offline. Please connect to the internet to complete setup.'); return; }
+        if (!user) { setError('Please sign in to continue.'); return; }
         if (isLoading || isSubmitting) return;
-
         setError(null);
         setIsSubmitting(true);
 
         try {
             console.log("📤 BuyerSetupForm submitting...");
-
-            // Sanitize data
             const finalSanitizedData = {
                 username: data.username?.trim().substring(0, 50) || user.email,
                 location: data.location.trim().substring(0, 100),
                 phone_number: data.phone_number.trim().replace(/[^\d+]/g, '').substring(0, 20),
                 interests: DOMPurify.sanitize(data.interests.trim(), {
-                    ALLOWED_TAGS: [],
-                    ALLOWED_ATTR: [],
-                    KEEP_CONTENT: true
+                    ALLOWED_TAGS: [], ALLOWED_ATTR: [], KEEP_CONTENT: true
                 }).substring(0, 500)
             };
 
-            // Process interests
             const newInterests = finalSanitizedData.interests
                 .split(/[,;\s]+/)
-                .map(interest => interest.trim().toLowerCase())
-                .filter(interest => 
-                    interest !== '' && 
-                    interest.length > 1 && 
-                    interest.length < 50
-                );
+                .map(i => i.trim().toLowerCase())
+                .filter(i => i !== '' && i.length > 1 && i.length < 50);
 
-            if (newInterests.length === 0) {
-                throw new Error('Please enter at least one valid interest (e.g., electronics, books)');
-            }
-
+            if (newInterests.length === 0) throw new Error('Please enter at least one valid interest (e.g., electronics, books)');
             const finalNewInterests = [...new Set(newInterests)];
 
             const basePayload = {
@@ -240,69 +201,42 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                 is_active: true
             };
 
-            // Check existing profile
-            const { data: existingProfile, error: existingError } = await fetchWithRetry(() =>
-                supabase
-                    .from('profiles')
-                    .select('interests')
-                    .eq('user_id', user.id)
-                    .maybeSingle()
+            const { data: existingProfile } = await fetchWithRetry(() =>
+                supabase.from('profiles').select('interests').eq('user_id', user.id).maybeSingle()
             );
 
             let combinedInterests;
             if (existingProfile && existingProfile.interests) {
                 const sanitizedExisting = (existingProfile.interests || [])
-                    .map(interest => interest.toLowerCase().trim())
-                    .filter(interest => interest.length > 0 && interest.length < 50);
-                
-                combinedInterests = [...new Set([
-                    ...sanitizedExisting,
-                    ...finalNewInterests
-                ])];
+                    .map(i => i.toLowerCase().trim())
+                    .filter(i => i.length > 0 && i.length < 50);
+                combinedInterests = [...new Set([...sanitizedExisting, ...finalNewInterests])];
             } else {
                 combinedInterests = finalNewInterests;
             }
 
-            const payload = {
-                ...basePayload,
-                interests: combinedInterests
-            };
+            const payload = { ...basePayload, interests: combinedInterests };
 
             let result;
             if (existingProfile) {
                 result = await fetchWithRetry(() =>
-                    supabase
-                        .from('profiles')
-                        .update(payload)
-                        .eq('user_id', user.id)
-                        .select()
+                    supabase.from('profiles').update(payload).eq('user_id', user.id).select()
                 );
             } else {
                 result = await fetchWithRetry(() =>
-                    supabase
-                        .from('profiles')
-                        .insert([payload])
-                        .select()
+                    supabase.from('profiles').insert([payload]).select()
                 );
             }
 
             const { data: resultData, error: resultError } = result;
-
             if (resultError) {
-                console.error('📛 Supabase Error Details:', resultError);
                 if (resultError.code === '42501' || resultError.message.includes('403')) {
                     throw new Error(`Permission denied. Check RLS policies.`);
                 }
                 throw resultError;
             }
+            if (!resultData || resultData.length === 0) throw new Error('Profile saved but no data returned.');
 
-            if (!resultData || resultData.length === 0) {
-                throw new Error('Profile saved but no data returned.');
-            }
-
-            console.log("✅ Profile Saved:", resultData[0]);
-            
-            // Update local storage
             const updatedUser = {
                 ...user,
                 location: finalSanitizedData.location,
@@ -310,16 +244,14 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                 username: finalSanitizedData.username
             };
             localStorage.setItem('user', JSON.stringify(updatedUser));
-            
-            // Reset form with new data
+
             reset({
                 username: finalSanitizedData.username,
                 location: finalSanitizedData.location,
                 phone_number: finalSanitizedData.phone_number,
                 interests: finalSanitizedData.interests
             });
-            
-            // ✅ Safe callback - handles both parent and standalone cases
+
             if (typeof onProfileComplete === 'function') {
                 onProfileComplete({
                     location: finalSanitizedData.location,
@@ -328,388 +260,371 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                     interests: combinedInterests
                 });
             } else {
-                console.log('✅ BuyerSetupForm: no parent callback, using standalone flow');
-                
-                // ✅ Standalone: navigate to /app ourselves
-                setTimeout(() => {
-                    navigate('/app');
-                }, 500);
+                setTimeout(() => navigate('/app'), 500);
             }
 
-            // ✅ Set mode + profile complete (both standalone and nested)
             setMode('buyer');
             localStorage.setItem('straun_profileComplete', 'true');
-            console.log('✅ BuyerSetupForm: mode + profileComplete set');
         } catch (err) {
             console.error('❌ Profile Submission Error:', err);
             setError(err.message || 'Error setting up profile. Please try again.');
         } finally {
             setIsSubmitting(false);
         }
-    }, [user, isLoading, isSubmitting, onProfileComplete, reset]);
+    }, [user, isLoading, isSubmitting, onProfileComplete, reset, setMode, navigate]);
 
     const handleReset = useCallback(() => {
         reset({
             username: existingData?.username || '',
             location: existingData?.location || '',
             phone_number: existingData?.phone_number || '',
-            interests: '',  // ✅ Always empty
+            interests: '',
         });
         setError(null);
     }, [reset, existingData]);
 
+    // ============================================
+    // ✅ FULL PAGE + INLINE STYLES
+    // ============================================
+    const pageWrapperStyle = {
+        background: T.pageBg,
+        minHeight: '100vh',
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        padding: '40px 20px',
+        boxSizing: 'border-box',
+        color: T.text,
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    };
+
+    const innerContentStyle = {
+        width: '100%',
+        maxWidth: '720px',
+        color: T.text,
+    };
+
+    const inputStyle = {
+        width: '100%',
+        padding: '16px 20px',
+        border: `2px solid ${T.inputBorder}`,
+        borderRadius: T.radius,
+        fontSize: '17px',
+        backgroundColor: T.inputBg,       // black
+        color: T.inputText,               // white text
+        boxSizing: 'border-box',
+        marginTop: '8px',
+        marginBottom: '5px',
+        height: '56px',
+        outline: 'none',
+        fontFamily: 'inherit',
+    };
+    const inputErrorStyle = { ...inputStyle, borderColor: T.errorBorder };
+    const textareaStyle = { ...inputStyle, height: 'auto', minHeight: '140px', resize: 'vertical', lineHeight: 1.5, paddingTop: '16px' };
+    const textareaErrorStyle = { ...textareaStyle, borderColor: T.errorBorder };
+
+    const labelStyle = {
+        display: 'block',
+        fontSize: '15px',
+        fontWeight: '600',
+        color: T.text,                   // ✅ black label on white page
+        marginTop: '18px',
+        marginBottom: '4px',
+    };
+
+    const helperTextStyle = {
+        display: 'block',
+        fontSize: '13px',
+        color: T.textMuted,              // grey helper
+        marginTop: '6px',
+    };
+    const errorTextStyle = { color: T.errorText, fontSize: '13px', marginTop: '6px', fontWeight: '500' };
+
+    // ✅ Force page background white
+    const pageBgOverride = (
+        <style>{`
+            html, body, #root { background: #ffffff !important; }
+            .buyer-form-input::placeholder { color: #888888 !important; opacity: 1 !important; }
+        `}</style>
+    );
+
     // ============ RENDER ============
     if (userLoading) {
         return (
-            <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-xl mx-auto my-8">
-                <p className="text-center py-10">Loading user session...</p>
-            </div>
+            <>
+                {pageBgOverride}
+                <div style={pageWrapperStyle}>
+                    <div style={innerContentStyle}>
+                        <p style={{ textAlign: 'center', padding: '40px 0', color: T.textMuted }}>
+                            Loading user session...
+                        </p>
+                    </div>
+                </div>
+            </>
         );
     }
 
     if (!user) {
         return (
-            <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-xl mx-auto my-8">
-                <p className="text-center py-10">Please sign in to continue.</p>
-                {error && (
-                    <div className="mt-4 p-4 bg-red-900 border border-red-700 rounded-lg">
-                        <p className="text-center text-red-200">{error}</p>
-                        <button 
-                            onClick={() => navigate('/')}
-                            className="mt-4 w-full py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
-                        >
-                            Go to Signup
-                        </button>
+            <>
+                {pageBgOverride}
+                <div style={pageWrapperStyle}>
+                    <div style={innerContentStyle}>
+                        <p style={{ textAlign: 'center', padding: '40px 0', color: T.textMuted }}>
+                            Please sign in to continue.
+                        </p>
+                        {error && (
+                            <div style={{
+                                marginTop: '16px',
+                                padding: '16px',
+                                background: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                borderRadius: '10px',
+                            }}>
+                                <p style={{ color: T.errorText, marginBottom: '12px' }}>{error}</p>
+                                <button
+                                    onClick={() => navigate('/')}
+                                    style={{
+                                        width: '100%',
+                                        padding: '12px',
+                                        background: T.primary,
+                                        color: '#ffffff',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        fontFamily: 'inherit',
+                                    }}
+                                >
+                                    Go to Signup
+                                </button>
+                            </div>
+                        )}
                     </div>
-                )}
-            </div>
+                </div>
+            </>
         );
     }
 
     return (
-        <div className="p-5 bg-gray-900 rounded-xl shadow-2xl text-white max-w-4xl mx-auto my-8 font-sans">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
-                    <style>{`
-                        .buyer-form input, 
-                        .buyer-form textarea {
-                            width: 100%;
-                            padding: 12px;
-                            margin-top: 5px;
-                            margin-bottom: 5px;
-                            border-radius: 8px;
-                            border: 2px solid #4a5568;
-                            background-color: #000000 !important;
-                            color: #ffffff !important;
-                            box-sizing: border-box;
-                            font-size: 16px;
-                            transition: border-color 0.3s;
-                        }
-                        
-                        .buyer-form input:focus, 
-                        .buyer-form textarea:focus {
-                            outline: none;
-                            border-color: #48bb78;
-                            box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.2);
-                            background-color: #000000 !important;
-                            color: #ffffff !important;
-                        }
-                        
-                        .buyer-form input.error,
-                        .buyer-form textarea.error {
-                            border-color: #f87171;
-                        }
-                        
-                        .buyer-form input.error:focus,
-                        .buyer-form textarea.error:focus {
-                            border-color: #f87171;
-                            box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.2);
-                        }
-                        
-                        .buyer-form input::placeholder, 
-                        .buyer-form textarea::placeholder {
-                            color: #a0aec0 !important;
-                        }
-                        
-                        .buyer-form label {
-                            display: block;
-                            font-weight: 600;
-                            color: #e2e8f0;
-                            margin-bottom: 8px;
-                            font-size: 14px;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                        }
-                        
-                        .buyer-form .error-message {
-                            background-color: #7f1d1d;
-                            border: 2px solid #dc2626;
-                            color: #fecaca;
-                            padding: 12px;
-                            border-radius: 8px;
-                            margin-bottom: 20px;
-                            font-size: 14px;
-                        }
-                        
-                        .field-error {
-                            color: #f87171;
-                            font-size: 12px;
-                            margin-top: -5px;
-                            margin-bottom: 10px;
-                        }
-                        
-                        .char-counter {
-                            text-align: right;
-                            font-size: 12px;
-                            color: #a0aec0;
-                            margin-top: -10px;
-                            margin-bottom: 10px;
-                        }
-                        
-                        .char-counter.warning {
-                            color: #fbbf24;
-                        }
-                        
-                        .char-counter.error {
-                            color: #f87171;
-                        }
-                        
-                        .buyer-form input:-webkit-autofill,
-                        .buyer-form input:-webkit-autofill:hover,
-                        .buyer-form input:-webkit-autofill:focus,
-                        .buyer-form input:-webkit-autofill:active,
-                        .buyer-form textarea:-webkit-autofill,
-                        .buyer-form textarea:-webkit-autofill:hover,
-                        .buyer-form textarea:-webkit-autofill:focus,
-                        .buyer-form textarea:-webkit-autofill:active {
-                            -webkit-box-shadow: 0 0 0 1000px #000000 inset !important;
-                            -webkit-text-fill-color: #ffffff !important;
-                            transition: background-color 5000s ease-in-out 0s;
-                        }
-                        
-                        .submit-button {
-                            width: 100%;
-                            padding: 16px;
-                            margin-top: 24px;
-                            border-radius: 8px;
-                            border: none;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 18px;
-                            transition: all 0.3s ease;
-                            cursor: pointer;
-                        }
-                        
-                        .submit-button:disabled {
-                            opacity: 0.7;
-                            cursor: not-allowed;
-                            background: #374151;
-                        }
-                        
-                        .submit-button:not(:disabled) {
-                            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
-                        }
-                        
-                        .submit-button:not(:disabled):hover {
-                            transform: translateY(-2px);
-                            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
-                        }
-                        
-                        .reset-button {
-                            width: 100%;
-                            padding: 16px;
-                            margin-top: 16px;
-                            border-radius: 8px;
-                            border: none;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 18px;
-                            transition: all 0.3s ease;
-                            cursor: pointer;
-                            background: #4a5568;
-                        }
-                        
-                        .reset-button:disabled {
-                            opacity: 0.7;
-                            cursor: not-allowed;
-                        }
-                        
-                        .reset-button:not(:disabled):hover {
-                            background: #5a6578;
-                        }
-                    `}</style>
+        <>
+            {pageBgOverride}
 
-                    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off" className="buyer-form">
-                        
+            <div style={pageWrapperStyle}>
+                <div style={innerContentStyle}>
 
-                        {error && (
-                            <div className="error-message">
-                                <strong>Error:</strong> {error}
+                    {/* Heading */}
+                    <h3 style={{
+                        fontSize: '32px',
+                        fontWeight: '800',
+                        marginBottom: '10px',
+                        color: T.text,
+                        letterSpacing: '-0.5px',
+                    }}>
+                        Complete Buyer Setup
+                    </h3>
+                    <p style={{ fontSize: '15px', color: T.textMuted, marginBottom: '28px', lineHeight: 1.5 }}>
+                        Set up your buyer profile and interests. Sellers will use this to find you.
+                    </p>
+
+                    {/* Info box */}
+                    <div style={{
+                        background: T.softBg,
+                        border: `1px solid ${T.softBorder}`,
+                        borderRadius: '12px',
+                        padding: '16px 18px',
+                        marginBottom: '24px',
+                    }}>
+                        <p style={{ fontSize: '14px', color: T.text, marginBottom: '6px' }}>
+                            <strong>User:</strong> {user.email}
+                        </p>
+                        <p style={{ fontSize: '14px', color: T.textMuted, lineHeight: 1.5 }}>
+                            You're creating your buyer profile. This helps sellers find you with relevant products.
+                        </p>
+                        {existingData && (existingData.location || existingData.phone_number) && (
+                            <div style={{
+                                marginTop: '12px',
+                                padding: '10px 12px',
+                                background: '#ecfdf5',
+                                border: '1px solid #a7f3d0',
+                                borderRadius: '8px',
+                            }}>
+                                <p style={{ color: '#047857', fontSize: '13px', margin: 0 }}>
+                                    <strong>Note:</strong> You have existing profile data. Location and phone will be updated.
+                                </p>
                             </div>
                         )}
+                    </div>
+
+                    {/* Error */}
+                    {error && (
+                        <div style={{
+                            padding: '14px 16px',
+                            background: '#fef2f2',
+                            border: '1px solid #fecaca',
+                            borderLeft: '4px solid #dc2626',
+                            borderRadius: '10px',
+                            marginBottom: '20px',
+                        }}>
+                            <strong style={{ color: T.errorText, fontSize: '14px' }}>Error:</strong>
+                            <p style={{ color: T.errorText, fontSize: '14px', marginTop: '4px' }}>{error}</p>
+                        </div>
+                    )}
+
+                    <form onSubmit={handleSubmit(onSubmit)} autoComplete="off" className="buyer-form">
 
                         {/* Location */}
-                        <div className="form-group">
-                            <label htmlFor="location">Location *</label>
+                        <div>
+                            <label htmlFor="location" style={labelStyle}>Location *</label>
                             <input
                                 type="text"
                                 id="location"
-                                className={errors.location ? 'error' : ''}
+                                className="buyer-form-input"
+                                style={errors.location ? inputErrorStyle : inputStyle}
                                 {...register('location', {
                                     required: 'Location is required',
-                                    minLength: {
-                                        value: 2,
-                                        message: 'Location must be at least 2 characters'
-                                    },
-                                    maxLength: {
-                                        value: 100,
-                                        message: 'Location cannot exceed 100 characters'
-                                    }
+                                    minLength: { value: 2, message: 'Location must be at least 2 characters' },
+                                    maxLength: { value: 100, message: 'Location cannot exceed 100 characters' }
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
+                                placeholder="e.g., Chegutu or Harare"
                             />
-                            {errors.location && (
-                                <div className="field-error">{errors.location.message}</div>
-                            )}
+                            {errors.location && <p style={errorTextStyle}>{errors.location.message}</p>}
+                            <small style={helperTextStyle}>{locationValue.length}/100 characters</small>
                         </div>
 
-                        {/* Phone Number */}
-                        <div className="form-group">
-                            <label htmlFor="phone_number">Phone Number *</label>
+                        {/* Phone */}
+                        <div>
+                            <label htmlFor="phone_number" style={labelStyle}>Phone Number *</label>
                             <input
                                 type="tel"
                                 id="phone_number"
-                                className={errors.phone_number ? 'error' : ''}
+                                className="buyer-form-input"
+                                style={errors.phone_number ? inputErrorStyle : inputStyle}
                                 {...register('phone_number', {
                                     required: 'Phone number is required',
                                     validate: validatePhoneNumber
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
+                                placeholder="0712345678 "
                             />
-                            {errors.phone_number && (
-                                <div className="field-error">{errors.phone_number.message}</div>
-                            )}
-                            <small className="text-gray-400 text-sm">
+                            {errors.phone_number && <p style={errorTextStyle}>{errors.phone_number.message}</p>}
+                            <small style={helperTextStyle}>
                                 Format: 0712345678 (10 digits) or 263712345678 (12 digits)
                             </small>
                         </div>
 
                         {/* Interests */}
-                        <div className="form-group">
-                            <label htmlFor="interests">Shopping Interests *</label>
+                        <div>
+                            <label htmlFor="interests" style={labelStyle}>Shopping Interests *</label>
                             <textarea
                                 id="interests"
-                                className={errors.interests ? 'error' : ''}
+                                rows="4"
+                                className="buyer-form-input"
+                                style={errors.interests ? textareaErrorStyle : textareaStyle}
                                 {...register('interests', {
                                     required: 'Interests are required',
-                                    minLength: {
-                                        value: 3,
-                                        message: 'Please enter at least one interest'
-                                    },
-                                    maxLength: {
-                                        value: 500,
-                                        message: 'Interests cannot exceed 500 characters'
-                                    },
+                                    minLength: { value: 3, message: 'Please enter at least one interest' },
+                                    maxLength: { value: 500, message: 'Interests cannot exceed 500 characters' },
                                     validate: {
                                         hasValidInterests: (value) => {
-                                            // ✅ Handle both string and array
                                             let interestsString = value;
-                                            if (Array.isArray(value)) {
-                                                interestsString = value.join(',');
-                                            }
-                                            if (typeof value !== 'string') {
-                                                interestsString = String(value);
-                                            }
-                                            
+                                            if (Array.isArray(value)) interestsString = value.join(',');
+                                            if (typeof value !== 'string') interestsString = String(value);
                                             const interestsArray = interestsString.split(/[,;\s]+/)
-                                                .map(interest => interest.trim())
-                                                .filter(interest => interest !== '');
-                                            
-                                            if (interestsArray.length === 0) {
-                                                return 'Please enter at least one valid interest';
-                                            }
-                                            
-                                            const hasInvalid = interestsArray.some(interest => interest.length > 50);
-                                            if (hasInvalid) {
-                                                return 'Each interest should be less than 50 characters';
-                                            }
-                                            
+                                                .map(i => i.trim()).filter(i => i !== '');
+                                            if (interestsArray.length === 0) return 'Please enter at least one valid interest';
+                                            if (interestsArray.some(i => i.length > 50)) return 'Each interest should be less than 50 characters';
                                             return true;
                                         }
                                     }
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
-                                rows="4"
-                                placeholder="Enter your shopping interests separated by commas (e.g., electronics, books, clothing, home decor)"
+                                placeholder="e.g., baby hats, rhombas, clothing"
                             />
-                            <div className={`char-counter ${
-                                interestsValue.length > 450 ? 'warning' : 
-                                interestsValue.length > 500 ? 'error' : ''
-                            }`}>
-                                {interestsValue.length}/500
-                            </div>
-                            {errors.interests && (
-                                <div className="field-error">{errors.interests.message}</div>
-                            )}
-                            <small className="text-gray-400 text-sm">
-                                Separate interests with commas. This helps sellers find you.
+                            {errors.interests && <p style={errorTextStyle}>{errors.interests.message}</p>}
+                            <small style={helperTextStyle}>
+                                {interestsValue.length}/500 characters. Separate with commas.
                             </small>
                         </div>
 
                         {/* Username */}
-                        <div className="form-group">
-                            <label htmlFor="username">Username (Optional)</label>
+                        <div>
+                            <label htmlFor="username" style={labelStyle}>Username (Optional)</label>
                             <input
                                 type="text"
                                 id="username"
-                                className={errors.username ? 'error' : ''}
+                                className="buyer-form-input"
+                                style={errors.username ? inputErrorStyle : inputStyle}
                                 {...register('username', {
-                                    minLength: {
-                                        value: 2,
-                                        message: 'Username must be at least 2 characters'
-                                    },
-                                    maxLength: {
-                                        value: 50,
-                                        message: 'Username cannot exceed 50 characters'
-                                    }
+                                    minLength: { value: 2, message: 'Username must be at least 2 characters' },
+                                    maxLength: { value: 50, message: 'Username cannot exceed 50 characters' }
                                 })}
                                 disabled={isLoading || isSubmitting || userLoading}
                                 placeholder="Choose a display name (defaults to email)"
                             />
-                            {errors.username && (
-                                <div className="field-error">{errors.username.message}</div>
-                            )}
+                            {errors.username && <p style={errorTextStyle}>{errors.username.message}</p>}
+                            <small style={helperTextStyle}>{usernameValue.length}/50 characters</small>
                         </div>
 
+                        {/* Submit */}
                         <button
                             type="submit"
                             disabled={isLoading || isSubmitting || userLoading}
-                            className="submit-button"
+                            style={{
+                                width: '100%',
+                                padding: '16px',
+                                marginTop: '24px',
+                                background: (isLoading || isSubmitting || userLoading)
+                                    ? '#cbd5e1'
+                                    : `linear-gradient(135deg, ${T.primary} 0%, ${T.primaryDark} 100%)`,
+                                color: (isLoading || isSubmitting || userLoading) ? '#64748b' : 'white',
+                                border: 'none',
+                                borderRadius: '12px',
+                                fontSize: '17px',
+                                fontWeight: '700',
+                                cursor: (isLoading || isSubmitting || userLoading) ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.3s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '12px',
+                                boxShadow: (isLoading || isSubmitting || userLoading)
+                                    ? 'none'
+                                    : '0 4px 15px rgba(59, 130, 246, 0.3)',
+                                letterSpacing: '0.5px',
+                                fontFamily: 'inherit',
+                            }}
                         >
                             {isLoading || isSubmitting ? (
-                                <div className="flex items-center justify-center">
-                                    <svg 
-                                        className="animate-spin mr-3"
-                                        style={{ height: '24px', width: '24px' }}
-                                        xmlns="http://www.w3.org/2000/svg" 
-                                        fill="none" 
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <svg
+                                        style={{ animation: 'spin 1s linear infinite', height: '22px', width: '22px', marginRight: '10px' }}
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        fill="none"
                                         viewBox="0 0 24 24"
                                     >
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                     </svg>
                                     Saving...
                                 </div>
-                            ) : (
-                                'Complete Setup'
-                            )}
+                            ) : ('Complete Setup')}
                         </button>
                     </form>
 
-                    <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700 text-sm text-gray-300">
-                        <h4 className="font-semibold text-gray-200 mb-2">Note:</h4>
-                        <ul className="list-disc pl-5 space-y-1">
+                    {/* Note box */}
+                    <div style={{
+                        marginTop: '24px',
+                        padding: '16px 18px',
+                        background: T.softBg,
+                        border: `1px solid ${T.softBorder}`,
+                        borderRadius: '12px',
+                    }}>
+                        <h4 style={{ fontSize: '14px', fontWeight: '700', color: T.text, marginBottom: '10px' }}>
+                            Note:
+                        </h4>
+                        <ul style={{ listStyle: 'disc', paddingLeft: '20px', fontSize: '13px', color: T.textMuted, lineHeight: 1.6, margin: 0 }}>
                             <li>All HTML tags will be removed from interests for security</li>
                             <li>Your interests will help sellers find potential customers</li>
                             <li>Your location is used to find local products</li>
@@ -718,27 +633,42 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                         </ul>
                     </div>
 
+                    {/* Reset */}
                     <button
                         type="button"
                         onClick={handleReset}
                         disabled={isLoading || isSubmitting || userLoading}
-                        className="reset-button"
+                        style={{
+                            width: '100%',
+                            padding: '16px',
+                            marginTop: '16px',
+                            background: (isLoading || isSubmitting || userLoading) ? '#cbd5e1' : '#4a5568',
+                            color: (isLoading || isSubmitting || userLoading) ? '#64748b' : 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            fontSize: '16px',
+                            fontWeight: '700',
+                            cursor: (isLoading || isSubmitting || userLoading) ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.3s ease',
+                            letterSpacing: '0.5px',
+                            fontFamily: 'inherit',
+                        }}
                     >
                         Reset Form
                     </button>
+
                 </div>
             </div>
-        </div>
+        </>
     );
 };
 
 export default React.memo(BuyerSetupForm, (prevProps, nextProps) => {
-  // Only re-render if these specific props change
-  return (
-    prevProps.isLoading === nextProps.isLoading &&
-    prevProps.existingData?.location === nextProps.existingData?.location &&
-    prevProps.existingData?.phone_number === nextProps.existingData?.phone_number &&
-    prevProps.existingData?.interests === nextProps.existingData?.interests &&
-    prevProps.existingData?.username === nextProps.existingData?.username
-  );
+    return (
+        prevProps.isLoading === nextProps.isLoading &&
+        prevProps.existingData?.location === nextProps.existingData?.location &&
+        prevProps.existingData?.phone_number === nextProps.existingData?.phone_number &&
+        prevProps.existingData?.interests === nextProps.existingData?.interests &&
+        prevProps.existingData?.username === nextProps.existingData?.username
+    );
 });

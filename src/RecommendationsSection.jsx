@@ -20,6 +20,10 @@ const RecommendationsSection = ({
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('personalized');
 
+    const [contactProduct, setContactProduct] = useState(null);
+    const [savingWishlist, setSavingWishlist] = useState(false);
+    const [savedIds, setSavedIds] = useState(new Set()); // track already-saved products
+
     let engine = null;
     try {
         engine = new RecommendationEngine(userId);
@@ -36,6 +40,30 @@ const RecommendationsSection = ({
             setError('Recommendation engine not available');
         }
     }, [userId, currentProductId, searchTerm, isAlternative, isSimilar, isAlternativeProspects]);
+
+    useEffect(() => {
+        if (!userId) return;
+        let cancelled = false;
+
+        (async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('saved_items')
+                    .select('product_id')
+                    .eq('user_id', userId)
+                    .eq('item_type', 'product');
+
+                if (error) throw error;
+                if (cancelled) return;
+
+                setSavedIds(new Set((data || []).map(r => r.product_id).filter(Boolean)));
+            } catch (err) {
+                console.error('Failed to load saved ids:', err);
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [userId]);
 
     const trackView = async (productId) => {
         if (!engine) return;
@@ -274,7 +302,8 @@ const RecommendationsSection = ({
                 key={product.id}
                 onClick={() => {
                     trackView(product.id);
-                    if (onProductClick) onProductClick(product);
+                    // otherwise open contact modal
+                    setContactProduct(product);
                 }}
                 style={{
                     background: 'white',
@@ -388,6 +417,170 @@ const RecommendationsSection = ({
                     )}
                     
                     {label}
+                </div>
+            </div>
+        );
+    };
+
+    // ✅ Inline contact-seller modal
+    const renderContactModal = () => {
+        if (!contactProduct) return null;
+
+        const product = contactProduct;
+        const rawPhone = getSellerPhone(product);
+        const waNumber = toWhatsAppNumber(rawPhone);
+        const alreadySaved = savedIds.has(product.id);
+        const productImage = product.image_url || product.image || null;
+
+        return (
+            <div
+                onClick={() => setContactProduct(null)}
+                style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 1000,
+                    background: 'rgba(0,0,0,0.55)',
+                    backdropFilter: 'blur(4px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                }}
+            >
+                <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: 'white',
+                        borderRadius: '16px',
+                        width: '100%',
+                        maxWidth: '420px',
+                        padding: '24px',
+                        boxShadow: '0 20px 50px rgba(0,0,0,0.3)'
+                    }}
+                >
+                    {/* Product preview */}
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+                        {productImage ? (
+                            <img
+                                src={productImage}
+                                alt={product.name}
+                                style={{
+                                    width: '64px',
+                                    height: '64px',
+                                    borderRadius: '10px',
+                                    objectFit: 'cover'
+                                }}
+                            />
+                        ) : (
+                            <div style={{
+                                width: '64px',
+                                height: '64px',
+                                borderRadius: '10px',
+                                background: 'linear-gradient(135deg,#667eea,#764ba2)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                fontSize: '28px'
+                            }}>🛍️</div>
+                        )}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{
+                                fontWeight: 'bold',
+                                fontSize: '15px',
+                                color: '#1a1a1a',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                            }}>
+                                {product.name || 'Product'}
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#666', marginTop: '2px' }}>
+                                ${typeof product.price === 'number' ? product.price.toFixed(2) : product.price}
+                                {product.location ? ` • ${product.location}` : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Heading */}
+                    <h2 style={{
+                        margin: '0 0 4px 0',
+                        fontSize: '18px',
+                        fontWeight: 'bold',
+                        color: '#1a1a1a'
+                    }}>
+                        How do you want to talk to the seller?
+                    </h2>
+                    <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#666' }}>
+                        Reach out now, or save it for later.
+                    </p>
+
+                    {/* Talk Now — WhatsApp */}
+                    <button
+                        onClick={() => handleTalkNow(product)}
+                        disabled={!waNumber}
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            background: waNumber ? '#25D366' : '#b0b0b0',
+                            color: 'white',
+                            border: 'none',
+                            padding: '14px',
+                            borderRadius: '12px',
+                            fontWeight: 'bold',
+                            fontSize: '15px',
+                            cursor: waNumber ? 'pointer' : 'not-allowed',
+                            marginBottom: '10px'
+                        }}
+                    >
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                        </svg>
+                        {waNumber ? 'Talk Now on WhatsApp' : 'No phone number available'}
+                    </button>
+
+                    {/* Save to Wishlist */}
+                    <button
+                        onClick={() => handleSaveWishlist(product)}
+                        disabled={savingWishlist || alreadySaved}
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            background: alreadySaved ? '#e8f5e9' : '#f1f3f5',
+                            color: alreadySaved ? '#2e7d32' : '#1a1a1a',
+                            border: 'none',
+                            padding: '14px',
+                            borderRadius: '12px',
+                            fontWeight: 'bold',
+                            fontSize: '15px',
+                            cursor: alreadySaved ? 'default' : 'pointer',
+                            marginBottom: '10px'
+                        }}
+                    >
+                        {alreadySaved ? '✓ Saved to Wishlist' : (savingWishlist ? 'Saving…' : '🔖 Save to Wishlist')}
+                    </button>
+
+                    {/* Cancel */}
+                    <button
+                        onClick={() => setContactProduct(null)}
+                        style={{
+                            width: '100%',
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#666',
+                            fontSize: '13px',
+                            padding: '8px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Maybe later
+                    </button>
                 </div>
             </div>
         );
@@ -565,6 +758,95 @@ const RecommendationsSection = ({
         );
     };
 
+    // ✅ Normalize phone for WhatsApp (Zimbabwe default → change country code if needed)
+    const toWhatsAppNumber = (phone) => {
+        if (!phone) return null;
+        let p = String(phone).replace(/\D/g, '');
+        if (p.startsWith('0')) p = '263' + p.slice(1);
+        if (!p.startsWith('263') && p.length <= 10) p = '263' + p;
+        return p;
+    };
+
+    // ✅ Get phone from either product row or joined seller profile
+    const getSellerPhone = (product) => {
+        if (!product) return null;
+        return (
+            product.phone_number ||
+            product.seller_phone ||
+            product.profiles?.phone_number ||
+            null
+        );
+    };
+
+    // ✅ Fire-and-forget track
+    const trackContactClick = (productId) => {
+        if (engine) engine.trackBehavior(productId, 'contact_click');
+    };
+
+    // ✅ WhatsApp open
+    const handleTalkNow = (product) => {
+        const rawPhone = getSellerPhone(product);
+        const waNumber = toWhatsAppNumber(rawPhone);
+
+        if (!waNumber) {
+            alert('This seller has not added a phone number yet.');
+            return;
+        }
+
+        const productUrl = `${window.location.origin}/product/${product.id}`;
+        const sellerName = product.profiles?.username || 'there';
+        const message = encodeURIComponent(
+            `Hi ${sellerName}, I'm interested in your listing "${product.name}" ` +
+            `(${product.price}). Is it still available?\n\n${productUrl}`
+        );
+
+        trackContactClick(product.id);
+        window.open(`https://wa.me/${waNumber}?text=${message}`, '_blank');
+        setContactProduct(null);
+    };
+
+    // ✅ Save to wishlist (uses `saved_items` table)
+    const handleSaveWishlist = async (product) => {
+        if (!userId) {
+            alert('Please log in to save items.');
+            return;
+        }
+        setSavingWishlist(true);
+        try {
+            const { error } = await supabase
+                .from('saved_items')
+                .insert({
+                    user_id: userId,
+                    item_type: 'product',
+                    product_id: product.id,
+                    product_name: product.name || 'Unnamed Product',
+                    product_price: typeof product.price === 'number' ? product.price : null,
+                    product_image: product.image_url || product.image || null,
+                    seller_location: product.location || product.profiles?.location || null,
+                    seller_phone: getSellerPhone(product) || null,
+                    created_at: new Date().toISOString()
+                });
+
+            if (error) {
+                // 23505 = unique violation → already saved, treat as success
+                if (error.code === '23505') {
+                    setSavedIds(prev => new Set(prev).add(product.id));
+                    setContactProduct(null);
+                    return;
+                }
+                throw error;
+            }
+
+            setSavedIds(prev => new Set(prev).add(product.id));
+            setContactProduct(null);
+        } catch (err) {
+            console.error('Wishlist save failed:', err);
+            alert('Could not save to wishlist. Try again.');
+        } finally {
+            setSavingWishlist(false);
+        }
+    };
+
     if (loading) {
         return (
             <div style={{ padding: '20px', textAlign: 'center' }}>
@@ -598,6 +880,7 @@ const RecommendationsSection = ({
                     color: '#666'
                 }}>
                     <p>No alternative prospects found. Try a different search term.</p>
+                    {renderContactModal()}
                 </div>
             );
         }
@@ -726,6 +1009,7 @@ const RecommendationsSection = ({
                     100% { transform: rotate(360deg); }
                 }
             `}</style>
+            {renderContactModal()}
         </div>
     );
 };

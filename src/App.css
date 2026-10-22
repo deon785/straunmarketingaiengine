@@ -17,18 +17,30 @@
   --seller-color: #4361ee;
   --buyer-color: #7209b7;
   
-  /* DARK MODE VARIABLES */
-  --light-bg: #1e1e1e;       /* Dark background for cards */
-  --card-bg: #2d2d2d;        /* Darker cards */
-  --border-color: #404040;   /* Dark borders */
-  --text-primary: #ffffff;   /* White text */
-  --text-secondary: #b0b0b0; /* Light gray text */
-  --text-light: #888888;     /* Gray text */
+  /* ✅ THEME — APP.CSS IS THE SINGLE SOURCE OF TRUTH */
+  --bg-primary: #f8f9fb;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e5e7eb;
+  --bg-card: #ffffff;
+  --bg-soft: #f3f4f6;
   
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.6);
+  --text-primary: #09090b;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --text-light: #9ca3af;
+  --text-on-card: #09090b;
+  --text-on-soft: #1f2937;
+  
+  --border-color: #e5e7eb;
+  --border-subtle: #f3f4f6;
+  
+  --light-bg: #f8f9fb;      /* legacy alias → points to light */
+  --card-bg: #ffffff;       /* legacy alias → points to white */
+  
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.10);
   
   --border-radius-sm: 8px;
   --border-radius-md: 12px;
@@ -38,6 +50,8 @@
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
   --transition-slow: 350ms ease;
+  
+  color-scheme: light;
 }
 
 /* ===== PAGE LAYOUT ===== */
@@ -96,14 +110,6 @@ select:focus {
   box-shadow: none !important;
 }
 
-
-/* Ensure mode selection screen background is transparent */
-/* Ensure mode selection screen background is black */
-.mode-selection-screen {
-    background: #1e1e1e !important;
-    background-color: #1e1e1e !important;
-}
-
 /* Main content expands */
 /* ===== PAGE LAYOUT ===== */
 .page-content {
@@ -159,6 +165,7 @@ select:focus {
     align-items: center;
     position: relative;
     z-index: 1;
+    background-color: var(--light-bg);
 }
 
 .app-title {
@@ -186,6 +193,7 @@ select:focus {
     max-width: 1200px;
     margin: 0 auto;
     padding: 20px 30px 40px 30px; /* Top padding accounts for navbar */
+    background-color:rgb(255, 255, 255);
     width: 100%;           
     text-align: center; 
     display: flex;          
@@ -215,8 +223,7 @@ select:focus {
     margin-bottom: 1rem;
 }
 
-.mode-selection-subtitle,
-.mode-selection-required {
+.mode-selection-subtitle {
     font-size: 1rem;
     margin-bottom: 1rem;
     max-width: 600px;
@@ -225,11 +232,27 @@ select:focus {
 }
 
 .mode-selection-required {
-    color: var(--warning-color);
-    background: rgba(248, 150, 30, 0.1);
-    padding: 1rem;
+    color: #7c3aed;                                  /* same purple as h1 */
+    background: rgba(124, 58, 237, 0.08);            /* soft purple tint */
+    border-left: 4px solid #7c3aed;                  /* purple accent bar */
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    font-weight: 500;
+    max-width: 640px;
+    margin: 0 auto 1.5rem auto;
+}
+
+.mode-selection-required strong {
+    color: #5b21b6;                                  /* deeper purple for "Important:" */
+    font-weight: 700;
+}
+
+.mode-requirements {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    padding: 1.5rem;
     border-radius: var(--border-radius-md);
-    border-left: 4px solid var(--warning-color);
+    margin-top: 1rem;
 }
 
 .mode-selection-cards {
@@ -239,6 +262,7 @@ select:focus {
     justify-content: center; 
     align-items: center;
     flex-wrap: wrap;
+    color:#000000;
 }
 
 .mode-card {
@@ -289,6 +313,7 @@ select:focus {
 .mode-card-icon {
     font-size: 3rem;
     margin-bottom: 1rem;
+
 }
 
 .mode-card-title {
@@ -335,17 +360,10 @@ select:focus {
     transform: scale(0.98);
 }
 
-.mode-requirements {
-    background: var(--light-bg);
-    padding: 1.5rem;
-    border-radius: var(--border-radius-md);
-    margin-top: 1rem;
-}
-
 .mode-requirements p {
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: var(--text-primary);
+    color: #1a1a1a;
 }
 
 .mode-features {
@@ -355,7 +373,7 @@ select:focus {
 
 .mode-features li {
     padding: 0.3rem 0;
-    color: var(--text-secondary);
+    color: #4b5563;
     position: relative;
 }
 
@@ -390,7 +408,7 @@ select:focus {
 }
 
 .mode-note {
-    color: var(--text-secondary);
+    color: #6b7280;
     max-width: 800px;
     margin: 0 auto;
 }
@@ -440,10 +458,10 @@ select:focus {
 
 .mode-badge {
     padding: 4px 12px;
-    background: rgba(255,255,255,0.15);
+    background: rgba(67, 97, 238, 0.1);   /* light blue tint */
+    color: var(--primary-color); 
     border-radius: 20px;
     font-size: 13px;
-    color: white;
 }
 
 .change-mode-button {
@@ -475,14 +493,6 @@ select:focus {
     padding: 8px 12px;
     background: rgba(255,255,255,0.05);
     border-radius: 8px;
-}
-
-.mode-badge {
-    padding: 4px 12px;
-    background: rgba(255,255,255,0.15);
-    border-radius: 20px;
-    font-size: 13px;
-    color: white;
 }
 
 .change-mode-button {
@@ -1266,6 +1276,7 @@ body.modal-open {
     margin-bottom: 0.75rem;
     will-change: transform;
     backface-visibility: hidden;
+    color: var(--text-primary); ;
 }
 
 .search-header h2 {
@@ -1304,27 +1315,31 @@ body.modal-open {
 
 .search-input-large {
     width: 100%;
-    padding: 10px 16px;
+    padding: 12px 16px; /* Matched to button */
     border: 1px solid var(--border-color, #333);
     border-radius: 8px;
-    font-size: 14px;
+    font-size: 15px;
     color: var(--text-primary, #ffffff);
     background: var(--card-bg, #1a1a2e);
     outline: none;
     transition: border-color 0.2s ease;
+    height: 48px; /* FIXED HEIGHT */
 }
 
 .search-input-large:focus {
     border-color: var(--primary-color, #667eea);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
 }
 
 .search-input-large:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+    background: var(--light-bg);
 }
 
 .search-button-large {
-    padding: 10px 24px;
+    padding: 0 24px;
     border: none;
     border-radius: 8px;
     background: linear-gradient(135deg, var(--primary-color, #667eea), var(--secondary-color, #764ba2));
@@ -1332,8 +1347,13 @@ body.modal-open {
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    font-size: 14px;
+    font-size: 15px;
     transition: all 0.2s ease;
+    height: 48px; /* FIXED HEIGHT - Matches input */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0; /* Ensures alignment */
 }
 
 .search-button-large:hover:not(:disabled) {
@@ -1350,34 +1370,6 @@ body.modal-open {
 .search-input-large::placeholder {
     color: var(--text-light); /* ADD: placeholder color */
     opacity: 0.7; 
-}
-
-.search-input-large:focus {
-    outline: none;
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.1);
-}
-
-.search-input-large:disabled {
-    background: var(--light-bg);
-    cursor: not-allowed;
-}
-
-.search-button-large {
-    padding: 1.5rem 2.5rem; 
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-    color: white;
-    border: none;
-    border-radius: var(--border-radius-lg);
-    font-size: 1.2rem;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    transition: all var(--transition-fast);
-    white-space: nowrap;
-    min-height: 60px;
 }
 
 .search-button-large:hover:not(:disabled) {
@@ -4664,18 +4656,17 @@ img {
 
 @media (prefers-color-scheme: light) {
   :root {
-    --light-bg: #1e1e1e;
-    --card-bg: #2d2d2d;
-    --border-color: #404040; 
-    --text-primary: #ffffff;   /* White text */
-    --text-secondary: #b0b0b0; /* Light gray text */
-    --text-light: #888888;  
-
-   /* Add shadow adjustments for light mode */
-    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.15);
-    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.2);
-    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.25);
+    --light-bg: #f9fafb;        /* was #1e1e1e */
+    --card-bg: #ffffff;         /* was #2d2d2d */
+    --border-color: #e5e7eb;    /* was #404040 */
+    --text-primary: #1a1a1a;    /* was #ffffff */
+    --text-secondary: #6b7280;  /* was #b0b0b0 */
+    --text-light: #9ca3af;      /* was #888888 */
+    
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.10);
 
   }
 

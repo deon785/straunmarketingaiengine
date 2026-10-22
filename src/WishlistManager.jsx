@@ -225,36 +225,7 @@ export default function WishlistManager({ onBack }) {
         flexWrap: 'wrap',
         gap: '10px'
       }}>
-        <button 
-          onClick={() => {
-            try {
-              if (onBack) {
-                onBack();
-              } else {
-                console.warn('onBack function not provided');
-                window.history.back();
-              }
-            } catch (err) {
-              console.error('Error navigating back:', err);
-              window.history.back();
-            }
-          }}
-          style={{
-            background: '#4361ee',
-            color: 'white',
-            border: 'none',
-            padding: '10px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            flexShrink: 0
-          }}
-        >
-          ← Back to Dashboard
-        </button>
+        
         <h3 style={{ color: 'white', margin: 0 }}>My Wishlist ({wishlistItems.length} items)</h3>
       </div>
 

@@ -41,14 +41,15 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import * as Sentry from "@sentry/react";
-import App from './App.jsx'; 
 import './index.css';
+import App from './App.jsx'; 
 import ReactGA from "react-ga4";
 import { LoadingProvider } from './LoadingContext';
 import { AuthProvider } from './AuthContext';
 import { GlobalErrorHandler } from './GlobalErrorHandler';
 import { Toaster } from 'react-hot-toast';
 import errorRecovery, { executeWithRecovery } from './utils/errorRecovery.js?v=2'; // ✅ SINGLE IMPORT
+import { ThemeProvider } from './ThemeContext';
 
 // ========== ANALYTICS ==========
 try {
@@ -292,37 +293,39 @@ if (!rootElement) {
     
     root.render(
       <React.StrictMode>
-      <GlobalErrorHandler>
-        <BrowserRouter>                    {/* ✅ Router OUTSIDE everything */}
-          <AuthProvider>                   {/* ✅ AuthProvider INSIDE Router */}
-            <LoadingProvider>
-                <App />
-                <Toaster 
-                  position="top-right"
-                  toastOptions={{
-                    duration: 5000,
-                    style: {
-                      background: '#333',
-                      color: '#fff',
-                    },
-                    success: {
-                      duration: 4000,
-                      iconTheme: {
-                        primary: '#4CAF50',
-                        secondary: '#fff',
-                      },
-                    },
-                    error: {
-                      duration: 6000,
-                      iconTheme: {
-                        primary: '#f44336',
-                        secondary: '#fff',
-                      },
-                    },
-                  }}
-                />
-              </LoadingProvider>
-            </AuthProvider>
+        <GlobalErrorHandler>
+          <BrowserRouter>                    {/* ✅ Router OUTSIDE everything */}
+            <ThemeProvider>
+              <AuthProvider>                   {/* ✅ AuthProvider INSIDE Router */}
+                <LoadingProvider>
+                    <App />
+                    <Toaster 
+                      position="top-right"
+                      toastOptions={{
+                        duration: 5000,
+                        style: {
+                          background: '#333',
+                          color: '#fff',
+                        },
+                        success: {
+                          duration: 4000,
+                          iconTheme: {
+                            primary: '#4CAF50',
+                            secondary: '#fff',
+                          },
+                        },
+                        error: {
+                          duration: 6000,
+                          iconTheme: {
+                            primary: '#f44336',
+                            secondary: '#fff',
+                          },
+                        },
+                      }}
+                    />
+                  </LoadingProvider>
+                </AuthProvider>
+            </ThemeProvider>
           </BrowserRouter>
         </GlobalErrorHandler>
       </React.StrictMode>

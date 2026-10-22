@@ -29,6 +29,121 @@ const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
   throw lastError;
 };
 
+// ============ NOTIFICATION SETTINGS (top-level component) ============
+const NotificationSettings = () => {
+  const [permission, setPermission] = useState(
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+  const [subscribing, setSubscribing] = useState(false);
+
+  // Re-check permission whenever window regains focus
+  useEffect(() => {
+    const onFocus = () => {
+      if (typeof Notification !== 'undefined') {
+        setPermission(Notification.permission);
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const handleEnable = async () => {
+    if (typeof Notification === 'undefined') return;
+
+    // Don't re-ask if already decided
+    if (Notification.permission !== 'default') {
+      setPermission(Notification.permission);
+      return;
+    }
+
+    try {
+      setSubscribing(true);
+      const result = await Notification.requestPermission();
+      setPermission(result);
+
+      if (result === 'granted') {
+        // Ask the parent app to subscribe — see the custom event below
+        window.dispatchEvent(new CustomEvent('straun:notification-granted'));
+      }
+    } catch (err) {
+      console.error('Notification permission request failed:', err);
+    } finally {
+    setSubscribing(false);           
+  }
+  };
+
+  const openBrowserSettings = () => {
+    const ua = navigator.userAgent;
+    let instructions = '';
+    if (/Chrome/.test(ua) && !/Edg/.test(ua)) {
+      instructions = 'Tap the lock icon in the address bar → Site settings → Notifications → Allow';
+    } else if (/Safari/.test(ua)) {
+      instructions = 'Settings app → Safari → [this site] → Notifications → Allow';
+    } else if (/Firefox/.test(ua)) {
+      instructions = 'Tap the lock icon → Connection secure → More information → Permissions → Notifications';
+    } else if (/Edg/.test(ua)) {
+      instructions = 'Tap the lock icon → Permissions for this site → Notifications → Allow';
+    } else {
+      instructions = 'Open your browser settings and allow notifications for this site.';
+    }
+    alert(instructions);
+  };
+
+  return (
+    <div className="settings-section">
+      <h3 className="settings-section-title" style={{ marginBottom: '8px' }}>
+        🔔 Notifications
+      </h3>
+
+      {permission === 'granted' && (
+        <p className="settings-description">
+          ✅ Notifications are enabled. You'll receive updates like WhatsApp.
+        </p>
+      )}
+
+      {permission === 'default' && (
+        <>
+          <p className="settings-description">
+            You haven't enabled notifications yet. Turn them on to get notified about matches, messages, and price drops.
+          </p>
+          <button
+            onClick={handleEnable}
+            disabled={subscribing}
+            className="export-btn"
+            style={{ marginTop: '8px' }}
+          >
+            🔔 Enable Notifications
+          </button>
+        </>
+      )}
+
+      {permission === 'denied' && (
+        <>
+          <p className="settings-description">
+            🔕 Notifications are blocked.
+          </p>
+          <p className="settings-description" style={{ fontSize: '13px', opacity: 0.7 }}>
+            You previously chose "Block". To enable them again, you need to change it in your browser settings.
+          </p>
+          <button
+            onClick={openBrowserSettings}
+            className="export-btn"
+            style={{ marginTop: '8px', background: '#4a5568' }}
+          >
+            How to enable in browser settings
+          </button>
+        </>
+      )}
+
+      {permission === 'unsupported' && (
+        <p className="settings-description">
+          ⚠️ Notifications are not supported in this browser.
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ============ MAIN COMPONENT ============
 const UserSettings = ({ user }) => {
   const [loading, setLoading] = useState(false);
@@ -39,6 +154,38 @@ const UserSettings = ({ user }) => {
   const [confirmText, setConfirmText] = useState('');
   const [isConfirming, setIsConfirming] = useState(false);
   const navigate = useNavigate();
+
+  // Load saved theme on component mount
+  useEffect(() => {
+    try {
+      const savedTheme = localStorage.getItem('user_theme');
+      if (savedTheme) {
+        const themes = ['dark', 'light', 'ocean', 'sunset', 'forest'];
+        const body = document.body;
+        themes.forEach(t => {
+          try {
+            body.classList.remove(`${t}-theme`);
+          } catch (e) {
+            // Ignore
+          }
+        });
+        body.classList.add(`${savedTheme}-theme`);
+      }
+    } catch (err) {
+      console.warn('Theme loading error:', err);
+    }
+  }, []);
+
+  // Clear messages after 5 seconds
+  useEffect(() => {
+    if (error || success) {
+      const timer = setTimeout(() => {
+        setError(null);
+        setSuccess(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error, success]);
 
   // ✅ If no user, show error and return early
   if (!user) {
@@ -90,38 +237,6 @@ const UserSettings = ({ user }) => {
       setError('Failed to apply theme. Please try again.');
     }
   };
-
-  // Load saved theme on component mount
-  useEffect(() => {
-    try {
-      const savedTheme = localStorage.getItem('user_theme');
-      if (savedTheme) {
-        const themes = ['dark', 'light', 'ocean', 'sunset', 'forest'];
-        const body = document.body;
-        themes.forEach(t => {
-          try {
-            body.classList.remove(`${t}-theme`);
-          } catch (e) {
-            // Ignore
-          }
-        });
-        body.classList.add(`${savedTheme}-theme`);
-      }
-    } catch (err) {
-      console.warn('Theme loading error:', err);
-    }
-  }, []);
-
-  // Clear messages after 5 seconds
-  useEffect(() => {
-    if (error || success) {
-      const timer = setTimeout(() => {
-        setError(null);
-        setSuccess(null);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [error, success]);
 
   // ============ DATA EXPORT ============
   const handleDataExport = async () => {
@@ -371,6 +486,8 @@ const UserSettings = ({ user }) => {
           <FontAwesomeIcon icon={faInfoCircle} />
           Manage Your Data
         </h2>
+
+        <NotificationSettings />
         
         <p className="settings-description">
           You have control over your personal data. You can export all your data or permanently delete your account.

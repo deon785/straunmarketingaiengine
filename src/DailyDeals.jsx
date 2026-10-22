@@ -344,7 +344,7 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     }, [deals, loadedCount]);
 
     // Load deals
-    const loadDailyDeals = useCallback(async () => {
+    const loadDailyDeals = useCallback(async (retryCount = 0) => {
         setLoading(true);
         setImagesLoading(true);
 
@@ -386,8 +386,14 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
 
             if (error) throw error;
 
+            // ✅ EMPTY RESPONSE — retry up to 3 times before giving up
             if (!dailyDeals || dailyDeals.length === 0) {
-                console.log('⚠️ No active deals in daily_deals table');
+                if (retryCount < 3) {
+                    console.log(`[DailyDeals] Empty response, retrying... (${retryCount + 1}/3)`);
+                    setTimeout(() => loadDailyDeals(retryCount + 1), 800 * (retryCount + 1));
+                    return;
+                }
+                console.log('⚠️ No active deals in daily_deals table (after 3 retries)');
                 setDeals([]);
                 setLoading(false);
                 setImagesLoading(false);
@@ -612,12 +618,19 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
             );
 
         } catch (error) {
-            console.error('❌ Error loading daily deals:', error);
+            console.error(`❌ Error loading daily deals (attempt ${retryCount + 1}):`, error);
+            
+            // ✅ RETRY on network/query errors too
+            if (retryCount < 3) {
+                console.log(`[DailyDeals] Retrying after error... (${retryCount + 1}/3)`);
+                setTimeout(() => loadDailyDeals(retryCount + 1), 1000 * (retryCount + 1));
+                return;
+            }
+            
+            // After 3 failed retries, give up
             setDeals([]);
             setLoading(false);
             setImagesLoading(false);
-        } finally {
-            setLoading(false);
         }
     }, [userId, visibleDealCount]);
 
@@ -826,10 +839,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     };
 
     const handleManualRefresh = () => {
-        if (window.confirm('Refresh deals now? New deals will appear.')) {
-            setLoadedCount(visibleDealCount);
-            loadDailyDeals();
-        }
+        setLoadedCount(visibleDealCount);
+        loadDailyDeals(0);  // ✅ Reset retry counter
     };
 
     // Render
@@ -837,18 +848,63 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
         return (
             <div style={styles.loadingContainer}>
                 <div style={styles.spinner}></div>
-                <p>Finding hot deals for you...</p>
+                <p style = {{ color: '#000000' }}>Finding hot deals for you...</p>
             </div>
         );
     }
 
     if (deals.length === 0 && !loading) {
         return (
-            <div style={styles.emptyContainer}>
-                <div style={styles.emptyIcon}>🔥</div>
-                <h4>No Products Available</h4>
-                <p>Check back soon — new deals every 10 minutes.</p>
-                <button onClick={handleManualRefresh} style={styles.refreshButton}>🔄 Refresh Now</button>
+            <div style={{
+                textAlign: 'center',
+                padding: '60px 24px',
+                background: 'linear-gradient(160deg, #1e1e24, #1a1a1f)',
+                border: '1px solid #2a2a30',
+                borderRadius: '16px',
+                color: '#ffffff'
+            }}>
+                <div style={{ fontSize: '48px', marginBottom: '14px' }}>🔥</div>
+                <h3 style={{
+                    margin: '0 0 12px 0',
+                    fontSize: '20px',
+                    color: '#ffffff',
+                    fontWeight: '700'
+                }}>
+                    Deals are loading slowly
+                </h3>
+                <p style={{
+                    color: '#a1a1aa',
+                    marginBottom: '24px',
+                    lineHeight: 1.6,
+                    fontSize: '14px',
+                    maxWidth: '420px',
+                    marginLeft: 'auto',
+                    marginRight: 'auto'
+                }}>
+                    {productCheck?.count > 0
+                        ? `We have ${productCheck.count} products in the system — the deals feed just needs a moment. Tap below to reload.`
+                        : 'Check back soon — new deals every 10 minutes.'}
+                </p>
+                <button
+                    onClick={() => loadDailyDeals(0)}
+                    style={{
+                        padding: '12px 28px',
+                        background: 'linear-gradient(135deg, #d6336c, #7c3aed)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontWeight: '700',
+                        fontSize: '14px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontFamily: 'inherit',
+                        boxShadow: '0 4px 14px -6px rgba(214,51,108,0.5)'
+                    }}
+                >
+                    🔄 Reload Deals
+                </button>
             </div>
         );
     }

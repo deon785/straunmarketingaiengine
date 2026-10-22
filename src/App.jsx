@@ -10,6 +10,8 @@ import { toast } from 'react-hot-toast';
 import SocialAIMarketingEngine from './SocialAIMarketingEngine.jsx';
 import Homepage from './Homepage.jsx';
 import NotificationDetail from './NotificationDetail.jsx';
+import { useTheme } from './ThemeContext.jsx';
+import ThemePicker from './ThemePicker.jsx';
 
 // ✅ ONLY import what's needed
 import { useAuthState, useAuthActions } from './AuthContext.jsx';
@@ -21,7 +23,8 @@ import { GlobalErrorHandler } from './GlobalErrorHandler.jsx';
 import { NavigationProvider } from './NavigationContext.jsx';
 import Auth from './signup.jsx';
 import BuyerSetupForm from './BuyerSetupForm.jsx';
-import SellerSetupForm from './SellerSetupForm.jsx';
+import SellerRouter from './SellerRouter.jsx';
+import BuyerSellerShop from './BuyerSellerShop.jsx';
 
 // --- LAZY LOAD ---
 const PrivacyPolicy = lazy(() => import('./PrivacyPolicy.jsx'));
@@ -865,6 +868,16 @@ const MemoizedBuyerDecision = React.memo(BuyerDecision);
 
 // ============ MAIN APP - OPTIMIZED ============
 function App() {
+  const { hasChosenTheme, setTheme } = useTheme();
+  const [showThemePicker, setShowThemePicker] = useState(false);
+
+  useEffect(() => {
+      // Show picker if theme not chosen yet
+      if (!hasChosenTheme) {
+          setShowThemePicker(true);
+      }
+  }, [hasChosenTheme]);
+  
   // ✅ Session refresh on focus
   useEffect(() => {
     const refreshSessionOnFocus = async () => {
@@ -923,7 +936,7 @@ function App() {
                           <Route path="/seller-decision" element={<MemoizedSellerDecision />} />
                           <Route path="/buyer-decision" element={<MemoizedBuyerDecision />} />
                           <Route path="/buyer-form" element={<BuyerSetupForm />} />
-                          <Route path="/seller-form" element={<SellerSetupForm />} />
+                          <Route path="/app/seller" element={<SellerRouter />} />
                           <Route path="/deals" element={<DealsPage />} />
                           <Route path="/mode-selection" element={<ModeSelection />} />
                           <Route path="/dashboard" element={<UserDashboard />} />
@@ -935,7 +948,13 @@ function App() {
                                 <NotificationDetail />
                               </ProtectedRoute>
                             } 
-                          />                 
+                          />              
+
+                          <Route path="/buyer/shop/:sellerId" element={
+                            <ProtectedRoute>
+                              <BuyerSellerShop />
+                            </ProtectedRoute>
+                          } />   
                           
                           <Route path="/app" element={
                             <ProtectedRoute>
@@ -958,6 +977,13 @@ function App() {
                           
                           <Route path="*" element={<SafeNavigate to="/" replace />} />
                         </Routes>
+                        {/* Theme picker overlay */}
+                       {/* {showThemePicker && (
+                            <ThemePicker 
+                                onComplete={() => setShowThemePicker(false)}
+                            />
+                        )}
+                        */}
                       </ComponentErrorBoundary>
                     </Suspense>
                   </main>

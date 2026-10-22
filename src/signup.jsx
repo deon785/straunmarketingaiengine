@@ -71,7 +71,6 @@ const EmailInput = React.memo(({ inputRef, disabled }) => {
             border: '1px solid #000000',
             color: '#ffffff',
             WebkitTextFillColor: '#ffffff',
-            transition: 'none'
           }}
         />
         <FontAwesomeIcon 
@@ -131,7 +130,6 @@ const PasswordInput = React.memo(({ inputRef, disabled, isSignUp }) => {
             border: '1px solid #000000',
             color: '#ffffff',
             WebkitTextFillColor: '#ffffff',
-            transition: 'none'
           }}
         />
         <FontAwesomeIcon 
@@ -223,7 +221,6 @@ const PhoneInput = React.memo(({ inputRef, disabled }) => {
             border: '1px solid #000000',
             color: '#ffffff',
             WebkitTextFillColor: '#ffffff',
-            transition: 'none'
           }}
         />
         <FontAwesomeIcon 

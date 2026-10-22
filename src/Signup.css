@@ -2,6 +2,14 @@
 /* SIGNUP PAGE CSS - FIXED */
 /* ==================== */
 
+/* =========================================================
+   FULL AUTOFILL OVERRIDE
+   Chrome/Safari autofill normally applies a yellow/grey/black
+   background. This forces the input to stay white forever,
+   even when Chrome autofills it or the user types into it.
+   ========================================================= */
+
+
 .signup-page {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   margin: 0 !important;
@@ -44,14 +52,21 @@
   border: 1px solid #000000 !important;
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
-  transition: none !important;
 }
 
 .signup-page .form-input:focus {
   outline: none !important;
   border-color: #000000 !important;
   box-shadow: none !important;
-  transition: none !important;
+}
+
+.signup-page .form-input:hover,
+.signup-page .form-input:active {
+  background: #000000 !important;
+  background-color: #000000 !important;
+  border-color: #000000 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
 }
 
 .signup-page .form-input::placeholder {
@@ -88,14 +103,45 @@
   margin: 0 8px;
 }
 
-/* ========== AUTOFILL FIXES ========== */
-input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:focus,
-input:-webkit-autofill:active {
+/* ========== AUTOFILL FIXES — SCOPED ========== */
+.signup-page input.form-input:-webkit-autofill,
+.signup-page input.form-input:-webkit-autofill:hover,
+.signup-page input.form-input:-webkit-autofill:focus,
+.signup-page input.form-input:-webkit-autofill:active {
   -webkit-box-shadow: 0 0 0 1000px #000000 inset !important;
+  box-shadow: 0 0 0 1000px #000000 inset !important;
   -webkit-text-fill-color: #ffffff !important;
+  color: #ffffff !important;
+  caret-color: #ffffff !important;
+  background-color: #000000 !important;
+  background: #000000 !important;
+  border: 1px solid #000000 !important;
   transition: background-color 5000s ease-in-out 0s !important;
+  -webkit-transition: background-color 5000s ease-in-out 0s !important;
+}
+
+.signup-page input.form-input:autofill,
+.signup-page input.form-input:autofill:hover,
+.signup-page input.form-input:autofill:focus {
+  background-color: #000000 !important;
+  background: #000000 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  border: 1px solid #000000 !important;
+  filter: none !important;
+}
+
+.signup-page input.form-input:-internal-autofill-selected {
+  background-color: #000000 !important;
+  background: #000000 !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+.signup-page input.form-input:-webkit-autofill::first-line {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  color: #ffffff !important;
 }
 
 /* ========== MOBILE ========== */

@@ -176,14 +176,21 @@ class RecommendationEngine {
                 image_url: p.image_url,  // ← CHANGE from 'image' to 'image_url'
                 location: p.location,
                 views: p.views,
-                seller_id: p.seller_id
+                seller_id: p.seller_id,
+                profiles: p.profiles ? {                 // ✅ ADD THIS BLOCK
+                    user_id: p.profiles.user_id,
+                    username: p.profiles.username,
+                    location: p.profiles.location,
+                    phone_number: p.profiles.phone_number
+                } : null
+
             }));
             
             const cacheData = {
                 products: compressed,
                 timestamp: Date.now(),
                 expiresAt: Date.now() + (3 * 24 * 60 * 60 * 1000), // 3 days (was 7)
-                version: '1.0'
+                version: '1.1'
             };
             
             const cacheKey = `${this._cachePrefix}_${this.userId}_${type}`;
@@ -251,7 +258,7 @@ class RecommendationEngine {
                 if (sellerIds.length > 0) {
                     const { data: sellers } = await supabase
                         .from('profiles')
-                        .select('user_id, username, location')
+                        .select('user_id, username, location, phone_number')
                         .in('user_id', sellerIds);
                     
                     if (sellers) {
