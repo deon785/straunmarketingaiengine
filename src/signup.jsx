@@ -70,7 +70,7 @@ const EmailInput = React.memo(({ inputRef, disabled }) => {
             background: '#000000',
             border: '1px solid #000000',
             color: '#ffffff',
-            WebkitTextFillColor: '#ffffff',
+            //WebkitTextFillColor: '#ffffff',
           }}
         />
         <FontAwesomeIcon 
@@ -128,8 +128,8 @@ const PasswordInput = React.memo(({ inputRef, disabled, isSignUp }) => {
             fontSize: '16px',
             background: '#000000',
             border: '1px solid #000000',
-            color: '#ffffff',
-            WebkitTextFillColor: '#ffffff',
+            color: '#6b6b6b',
+            //WebkitTextFillColor: '#4b4a4a',
           }}
         />
         <FontAwesomeIcon 
@@ -220,7 +220,7 @@ const PhoneInput = React.memo(({ inputRef, disabled }) => {
             background: '#000000',
             border: '1px solid #000000',
             color: '#ffffff',
-            WebkitTextFillColor: '#ffffff',
+            //WebkitTextFillColor: '#ffffff',
           }}
         />
         <FontAwesomeIcon 
@@ -693,23 +693,16 @@ const Auth = () => {
     // ✅ FIXED: Clean phone number with exact length logic
     let cleanedPhone = null;
     if (phone) {
-      // Remove spaces, dashes, parentheses, dots
       let raw = phone.replace(/[\s\-\(\)\.]/g, '');
-      // Remove leading +
       raw = raw.replace(/^\+/, '');
-      // Get only digits
       let digits = raw.replace(/\D/g, '');
       
-      // If it starts with 0, it's local format (07...)
       if (raw.startsWith('0')) {
-        // 0712345678 -> 263712345678
         cleanedPhone = '263' + digits.substring(1);
       } else {
-        // Already international format (263...)
         cleanedPhone = digits;
       }
       
-      // ✅ Validate final length
       if (cleanedPhone.length !== 12) {
         console.warn('⚠️ Phone number should be 12 digits after formatting');
       }
@@ -717,6 +710,7 @@ const Auth = () => {
 
     try {
       setLoading(true);
+      setMessage({ text: '', type: '' }); // Clear old messages
       
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -766,6 +760,7 @@ const Auth = () => {
           if (signInError) {
             bouncer.reset();
             setLoading(false);
+            setMessage({ text: signInError.message, type: 'error' });
             return;
           }
 
@@ -779,9 +774,6 @@ const Auth = () => {
 
           resetNavigation();
           
-          // ✅ IMPORTANT: Wait for auth state to update
-          setLoading(false);
-          
           // Poll for auth state to be ready
           let authReady = false;
           let attempts = 0;
@@ -793,7 +785,6 @@ const Auth = () => {
               const { data: { session } } = await supabase.auth.getSession();
               if (session) {
                 authReady = true;
-                console.log('✅ Auth session ready after', attempts, 'attempts');
                 break;
               }
             } catch (err) {
@@ -802,64 +793,55 @@ const Auth = () => {
             await new Promise(resolve => setTimeout(resolve, 300));
           }
 
-          // ✅ Now navigate with a slight delay to ensure state propagation
-          if (authReady) {
-            console.log('🚀 Navigating based on intent:', intent);
-            setTimeout(() => {
-              if (intent === 'buyer') {
-                navigate('/buyer-decision', { replace: true });
-              } else if (intent === 'seller') {
-                navigate('/seller-decision', { replace: true });
-              } else {
-                navigate('/app', { replace: true });
-              }
-            }, 300);
+          setLoading(false);
 
-          } else {
-            console.warn('⚠️ Auth not ready after polling, using fallback');
-            // Fallback: try to navigate anyway
-            setTimeout(() => {
-              supabase.auth.getSession().then(({ data: { session } }) => {
-                if (session) {
-                  if (intent === 'buyer') {
-                    navigate('/buyer-decision', { replace: true });
-                  } else if (intent === 'seller') {
-                    navigate('/seller-decision', { replace: true });
-                  } else {
-                    navigate('/app', { replace: true });
-                  }
-                } else {
-                  navigate('/seller-decision', { replace: true });
-                }
-              });
-            }, 2000);
-          }
+          // ✅ ONLY navigate on SUCCESS
+          setTimeout(() => {
+            if (intent === 'buyer') {
+              navigate('/buyer-decision', { replace: true });
+            } else if (intent === 'seller') {
+              navigate('/seller-decision', { replace: true });
+            } else {
+              navigate('/app', { replace: true });
+            }
+          }, 300);
+
         } else {
           // Email confirmation required
           bouncer.reset();
           setLoading(false);
-          setTimeout(() => {
-            setIsSignUp(false);
-          }, 3000);
+          setMessage({ 
+            text: '📧 Please check your email to confirm your account before signing in.', 
+            type: 'success' 
+          });
+          setIsSignUp(false); // Switch to login mode
         }
       }
     } catch (error) {
       console.error('Sign up error:', error);
+      
+      // ✅ FIXED: Show the error and STAY ON THE PAGE. Do not navigate away.
+      let errorMessage = error.message || 'Sign up failed. Please try again.';
+      
+      // Make common Supabase errors friendlier
+      if (errorMessage.includes('already registered') || errorMessage.includes('User already registered')) {
+        errorMessage = 'An account with this email already exists. Please sign in instead.';
+      } else if (errorMessage.includes('Password should be')) {
+        errorMessage = 'Password is too weak. Please use at least 6 characters.';
+      } else if (errorMessage.includes('Invalid email')) {
+        errorMessage = 'Please enter a valid email address.';
+      }
+      
       setMessage({
-        text: error.message || 'Sign up failed. Please try again.',
+        text: errorMessage,
         type: 'error',
       });
 
-      // ✅ Wait a moment then navigate to mode selection
-      setTimeout(() => {
-        navigate('/app', { replace: true });
-      }, 500);
-      
+      // ✅ DO NOT NAVIGATE AWAY HERE. Let the user read the error.
       setLoading(false);
-      return;
     }
-  }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer]);
-
+  }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer, intent]);
+  
   // ============ SIGN IN ============
   const handleSignIn = useCallback(async (values) => {
     const { email, password } = values;
@@ -886,6 +868,9 @@ const Auth = () => {
       // The AuthContext will check profile and mode expiry
       // ✅ REDIRECT BASED ON INTENT
       setTimeout(() => {
+        // ✅ Tell AuthContext we handled this redirect
+        sessionStorage.setItem('_signup_handled_redirect', String(Date.now()));
+
         if (intent === 'buyer') {
           console.log('🚀 Sign in: Redirecting to buyer decision');
           navigate('/buyer-decision', { replace: true });

@@ -25,6 +25,10 @@ const ResetPassword = () => {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
     const [showPassword, setShowPassword] = useState(false);
+    const [email, setEmail] = useState('');
+    const [otp, setOtp] = useState('');
+    const [step, setStep] = useState(1);
+
     const [isValidToken, setIsValidToken] = useState(false);
     const [isProcessing, setIsProcessing] = useState(true);
     const navigate = useNavigate();
@@ -62,83 +66,36 @@ const ResetPassword = () => {
     }), []);
 
     useEffect(() => {
-        if (window.location.hash.includes('access_token')) {
-            sessionStorage.setItem('passwordResetMode', 'true');
-        }
-        
-        sessionStorage.setItem('onResetPage', 'true');
-        
-        const handlePasswordResetRedirect = async () => {
-            try {
-                const hashParams = new URLSearchParams(window.location.hash.substring(1));
-                const accessToken = hashParams.get('access_token');
-                const refreshToken = hashParams.get('refresh_token');
-                const type = hashParams.get('type');
-
-                console.log('Recovery URL params:', { type, hasAccessToken: !!accessToken });
-
-                if (type === 'recovery' && accessToken) {
-                    // ✅ Use fetchWithRetry
-                    const result = await fetchWithRetry(() =>
-                        supabase.auth.setSession({
-                            access_token: accessToken,
-                            refresh_token: refreshToken || ''
-                        })
-                    );
-
-                    if (result.error) {
-                        console.error('Error setting session:', result.error);
-                        setMessage({ 
-                            type: 'error', 
-                            text: 'Invalid or expired reset link. Please request a new one.' 
-                        });
-                        setIsValidToken(false);
-                    } else {
-                        console.log('Session set successfully for password reset');
-                        setIsValidToken(true);
-                        
-                        try {
-                            window.history.replaceState(null, '', window.location.pathname);
-                        } catch (historyErr) {
-                            console.error('Error clearing URL hash:', historyErr);
-                        }
-                    }
-                } else {
-                    setMessage({ 
-                        type: 'error', 
-                        text: 'Invalid reset link. Please request a new password reset.' 
-                    });
-                    setIsValidToken(false);
-                }
-            } catch (error) {
-                console.error('Error in password reset redirect:', error);
-                setMessage({ 
-                    type: 'error', 
-                    text: error.message || 'Failed to process reset link. Please try again.' 
-                });
-                setIsValidToken(false);
-            } finally {
-                setIsProcessing(false);
-                setTimeout(() => {
-                    try {
-                        sessionStorage.removeItem('onResetPage');
-                    } catch (err) {
-                        console.error('Error clearing session storage:', err);
-                    }
-                }, 5000);
-            }
-        };
-
-        handlePasswordResetRedirect();
-        
-        return () => {
-            try {
-                sessionStorage.removeItem('onResetPage');
-            } catch (err) {
-                console.error('Error in cleanup:', err);
-            }
-        };
+        // We don't need to parse URL hashes anymore.
+        setIsProcessing(false);
     }, []);
+
+    const handleVerifyOtp = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage({ type: '', text: '' });
+
+        try {
+            // Verify the OTP the user typed
+            const { data, error } = await supabase.auth.verifyOtp({
+                email: email,
+                token: otp,
+                type: 'recovery', // 'recovery' is for password resets
+            });
+
+            if (error) throw error;
+
+            // If successful, they now have a temporary session to change their password
+            setStep(2); 
+            setMessage({ type: 'success', text: '✅ Code verified! Please enter your new password.' });
+
+        } catch (error) {
+            console.error('OTP Verification error:', error);
+            setMessage({ type: 'error', text: 'Invalid or expired code. Please try again.' });
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const validatePassword = (password) => {
         return password && password.length >= 6;
@@ -279,7 +236,7 @@ const ResetPassword = () => {
                                 Reset Password
                             </div>
                             <div style={{ color: '#666', fontSize: '16px', fontWeight: '400' }}>
-                                {isValidToken ? 'Enter your new password' : 'Invalid or expired link'}
+                                {step === 1 ? 'Enter the code sent to your email' : 'Create your new password'}
                             </div>
                         </div>
 
@@ -296,133 +253,75 @@ const ResetPassword = () => {
                             </div>
                         )}
 
-                        {isValidToken ? (
+                        {/* STEP 1: ENTER OTP */}
+                        {step === 1 && (
+                            <form onSubmit={handleVerifyOtp}>
+                                <div style={{ marginBottom: '24px' }}>
+                                    <label style={{ display: 'block', color: '#444', fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>
+                                        EMAIL ADDRESS
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        required
+                                        placeholder="Enter your email"
+                                        style={styles.inputStyle(false)}
+                                    />
+                                </div>
+                                <div style={{ marginBottom: '24px' }}>
+                                    <label style={{ display: 'block', color: '#444', fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>
+                                        6-DIGIT CODE
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={otp}
+                                        onChange={(e) => setOtp(e.target.value)}
+                                        required
+                                        placeholder="123456"
+                                        maxLength="6"
+                                        style={{...styles.inputStyle(false), letterSpacing: '5px', textAlign: 'center', fontSize: '24px'}}
+                                    />
+                                </div>
+                                <button type="submit" disabled={loading} style={styles.buttonStyle(loading)}>
+                                    {loading ? 'Verifying...' : 'VERIFY CODE'}
+                                </button>
+                            </form>
+                        )}
+
+                        {/* STEP 2: ENTER NEW PASSWORD */}
+                        {step === 2 && (
                             <form onSubmit={handleResetPassword}>
                                 <div style={{ marginBottom: '24px' }}>
-                                    <label htmlFor="password" style={{
-                                        display: 'block',
-                                        color: '#444',
-                                        fontSize: '14px',
-                                        fontWeight: '500',
-                                        marginBottom: '8px',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.5px'
-                                    }}>
+                                    <label style={{ display: 'block', color: '#444', fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>
                                         NEW PASSWORD
                                     </label>
-                                    <div style={{ position: 'relative' }}>
-                                        <input
-                                            type={showPassword ? "text" : "password"}
-                                            id="password"
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            required
-                                            disabled={loading}
-                                            placeholder="At least 6 characters"
-                                            autoComplete="new-password"
-                                            style={styles.inputStyle(false)}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div style={{ marginBottom: '24px' }}>
-                                    <label htmlFor="confirmPassword" style={{
-                                        display: 'block',
-                                        color: '#444',
-                                        fontSize: '14px',
-                                        fontWeight: '500',
-                                        marginBottom: '8px',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.5px'
-                                    }}>
-                                        CONFIRM PASSWORD
-                                    </label>
-                                    <div style={{ position: 'relative' }}>
-                                        <input
-                                            type={showPassword ? "text" : "password"}
-                                            id="confirmPassword"
-                                            value={confirmPassword}
-                                            onChange={(e) => setConfirmPassword(e.target.value)}
-                                            required
-                                            disabled={loading}
-                                            placeholder="Confirm your new password"
-                                            autoComplete="new-password"
-                                            style={styles.inputStyle(false)}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div style={{ 
-                                    marginBottom: '20px',
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: '10px'
-                                }}>
-                                    <input 
-                                        type="checkbox" 
-                                        id="showPassword"
-                                        checked={showPassword}
-                                        onChange={() => setShowPassword(!showPassword)}
-                                        disabled={loading}
-                                        style={{ 
-                                            cursor: loading ? 'not-allowed' : 'pointer', 
-                                            width: '18px', 
-                                            height: '18px',
-                                            accentColor: '#667eea'
-                                        }}
+                                    <input
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        required
+                                        placeholder="At least 6 characters"
+                                        style={styles.inputStyle(false)}
                                     />
-                                    <label htmlFor="showPassword" style={{ 
-                                        color: '#4a5568', 
-                                        cursor: loading ? 'not-allowed' : 'pointer',
-                                        fontSize: '14px'
-                                    }}>
-                                        Show password
-                                    </label>
                                 </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={loading}
-                                    style={styles.buttonStyle(loading)}
-                                >
+                                <div style={{ marginBottom: '24px' }}>
+                                    <label style={{ display: 'block', color: '#444', fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>
+                                        CONFIRM NEW PASSWORD
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        required
+                                        placeholder="Confirm new password"
+                                        style={styles.inputStyle(false)}
+                                    />
+                                </div>
+                                <button type="submit" disabled={loading} style={styles.buttonStyle(loading)}>
                                     {loading ? 'Resetting...' : 'RESET PASSWORD'}
                                 </button>
                             </form>
-                        ) : (
-                            <div style={{ textAlign: 'center', padding: '20px' }}>
-                                <p style={{ color: '#666', marginBottom: '20px' }}>
-                                    {message.text || 'Invalid reset link. Please request a new one.'}
-                                </p>
-                                <button
-                                    onClick={() => navigate('/')}
-                                    style={{
-                                        padding: '12px 24px',
-                                        background: '#667eea',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        cursor: 'pointer',
-                                        fontWeight: '600',
-                                        marginRight: '10px'
-                                    }}
-                                >
-                                    Go to Login
-                                </button>
-                                <button
-                                    onClick={() => navigate('/')}
-                                    style={{
-                                        padding: '12px 24px',
-                                        background: 'transparent',
-                                        color: '#667eea',
-                                        border: '2px solid #667eea',
-                                        borderRadius: '8px',
-                                        cursor: 'pointer',
-                                        fontWeight: '600'
-                                    }}
-                                >
-                                    Back to Login
-                                </button>
-                            </div>
                         )}
                     </div>
                 </div>
