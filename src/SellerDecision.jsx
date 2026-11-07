@@ -174,7 +174,7 @@ const SellerDecision = () => {
   };
 
   // ✅ Use fetchWithRetry
-  const completeSkip = async (userId) => {
+    const completeSkip = async (userId) => {
     try {
       const { error: updateError } = await fetchWithRetry(() =>
         supabase
@@ -194,7 +194,10 @@ const SellerDecision = () => {
         return;
       }
 
-      // ✅ Set mode to seller BEFORE navigating to /app
+      // ✅ 1. Set local storage so the Social page knows they are a seller immediately
+      localStorage.setItem('straun_profileComplete', 'true');
+
+      // ✅ 2. Set mode to seller BEFORE navigating to /app
       console.log('🚀 Setting seller mode and navigating to /app');
       setMode('seller');
 

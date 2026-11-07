@@ -3748,6 +3748,42 @@ function SocialAIMarketingEngine() {
         }
     }, [user]);
 
+        // ✅ NEW: Handle coming back from Seller Dashboard to Search
+    useEffect(() => {
+        const handleSellerDashboardReturn = async () => {
+            // Check if we came from the seller dashboard
+            if (location.state?.fromSellerDashboard && user) {
+                console.log("🔄 Returning from Seller Dashboard - Updating profile to Seller");
+                
+                try {
+                    // 1. Update Database
+                    await supabase
+                        .from('profiles')
+                        .update({
+                            is_seller: true,
+                            seller_setup_completed: true
+                        })
+                        .eq('user_id', user.id);
+
+                    // 2. Update Local State
+                    setIsProfileComplete(true);
+                    localStorage.setItem('straun_profileComplete', 'true');
+                    
+                    // 3. Refresh Profile Data (to get location)
+                    await fetchProfile();
+                    
+                    // 4. Clear the state so it doesn't trigger again on refresh
+                    window.history.replaceState({}, document.title);
+                    
+                } catch (error) {
+                    console.error("Error updating seller status on return:", error);
+                }
+            }
+        };
+
+        handleSellerDashboardReturn();
+    }, [location.state, user]);
+
     // Detect if running on Vercel (serverless environment)
     const isVercel = import.meta.env.PROD && typeof window !== 'undefined';
 
@@ -4359,7 +4395,7 @@ function SocialAIMarketingEngine() {
         }
     }, [selectedMode, isProfileComplete, profileData, user, showToastNotification]);
 
-    // --- CHECK EXISTING PROFILE DATA ---
+        // --- CHECK EXISTING PROFILE DATA (UPDATED LOGIC) ---
     useEffect(() => {
         const checkExistingProfile = async () => {
             if (!user) {
@@ -4376,8 +4412,32 @@ function SocialAIMarketingEngine() {
 
                 if (data) {
                     setProfileData(data);
+
+                    // ✅ NEW LOGIC: Auto-complete profile if DB says they are a seller/buyer
+                    // We check if they have a location, because we need location to search
+                    const hasLocation = data.location && data.location.trim() !== '';
+                    
+                    if (selectedMode === 'seller' && data.is_seller && hasLocation) {
+                        console.log("✅ Auto-unlocking search: DB says user is a seller with location");
+                        setIsProfileComplete(true);
+                        localStorage.setItem('straun_profileComplete', 'true');
+                    } 
+                    else if (selectedMode === 'buyer' && data.is_buyer && hasLocation) {
+                        console.log("✅ Auto-unlocking search: DB says user is a buyer with location");
+                        setIsProfileComplete(true);
+                        localStorage.setItem('straun_profileComplete', 'true');
+                    }
+                    else {
+                        // Only set to false if we don't meet the criteria
+                        const localComplete = localStorage.getItem('straun_profileComplete') === 'true';
+                        if (!localComplete) {
+                            setIsProfileComplete(false);
+                        }
+                    }
+
                 } else {
                     setProfileData(null);
+                    setIsProfileComplete(false);
                 }
             } catch (err) {
                 console.error('Profile check error:', err);
@@ -4388,7 +4448,7 @@ function SocialAIMarketingEngine() {
         if (user) {
             checkExistingProfile();
         }
-    }, [user]);
+    }, [user, selectedMode]); // Added selectedMode so it re-checks when mode switches
 
     useEffect(() => {
         const cacheKeys = Object.keys(searchCache);

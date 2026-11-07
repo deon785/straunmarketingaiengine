@@ -70,8 +70,9 @@
 }
 
 .signup-page .form-input::placeholder {
-  color: #6b7280 !important; /* A darker, more readable grey (Tailwind Gray-500) */
-  opacity: 1 !important; /* Firefox lowers opacity by default */
+  color: #6b7280 !important; /* Grey color */
+  opacity: 1 !important;
+  -webkit-text-fill-color: #6b7280 !important; /* Force grey on webkit browsers */
 }
 
 .signup-page .auth-button {
