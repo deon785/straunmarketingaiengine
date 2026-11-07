@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from './lib/supabase';
 
 const TopNavigationBar = ({ 
   user, 
@@ -10,13 +11,49 @@ const TopNavigationBar = ({
   onSettingsClick,
   isAdmin = false,
   isHidden = false,
-  unreadNotifications = 3,
-  onNotificationsClick,
   appName = "Straun Marketing AI Engine"
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0); // ✅ New live state
   const navigate = useNavigate();
   const drawerRef = useRef(null);
+
+  // ✅ FETCH & LISTEN (Exactly like NotificationsList does)
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchUnreadCount = async () => {
+      const { count, error } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
+      
+      if (!error && count !== null) {
+        setUnreadCount(count);
+      }
+    };
+
+    fetchUnreadCount();
+
+    // Subscribe to new notifications
+    const channel = supabase
+      .channel(`header-notifs-${user.id}-${Date.now()}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          if (!payload.new.is_read) {
+            setUnreadCount(prev => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   // Close drawer on route change
   useEffect(() => {
@@ -75,12 +112,21 @@ const TopNavigationBar = ({
     navigate('/wishlist');
   };
 
-  const handleNotifications = () => {
-    if (onNotificationsClick) {
-      onNotificationsClick();
-    } else {
-      navigate('/notifications');
+  const handleNotifications = async () => {
+    // 1. Instantly clear badge for UX
+    setUnreadCount(0);
+
+    // 2. Mark all as read in DB
+    if (user?.id) {
+      await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', user.id)
+        .eq('is_read', false);
     }
+
+    // 3. Navigate to your working NotificationsList page
+    navigate('/notifications', { state: { referrer: window.location.pathname } });
   };
 
   // ============================================
@@ -246,7 +292,7 @@ const TopNavigationBar = ({
           }}
         >
           🔔
-          {unreadNotifications > 0 && (
+          {unreadCount > 0 && (
             <span
               style={{
                 position: 'absolute',
@@ -266,7 +312,7 @@ const TopNavigationBar = ({
                 border: '2px solid #667eea'
               }}
             >
-              {unreadNotifications > 9 ? '9+' : unreadNotifications}
+              {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
         </button>

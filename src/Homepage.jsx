@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthState, useAuthActions } from './AuthContext';
 import './App.css'
 import UserDashboard from './UserDashboard';
+import UserSettings from './UserSettings'; 
 import UserAvatarMenu from './UserAvatarMenu';
 import { supabase } from './lib/supabase'; // ✅ Import supabase to force sign-out
 
@@ -13,6 +14,7 @@ const Homepage = () => {
     const { setMode, clearAuthState } = useAuthActions();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [tickerItems, setTickerItems] = useState([]);
+    const [showSettings, setShowSettings] = useState(false);
 
     useEffect(() => {
         let mounted = true;
@@ -299,7 +301,7 @@ const Homepage = () => {
                 .hp-nav-auth {
                     display: flex;
                     align-items: center;
-                    gap: 10px;
+                    gap: 8px;
                     flex-shrink: 0;
                 }
 
@@ -973,7 +975,7 @@ const Homepage = () => {
                             >
                                 💼 Sell
                             </a>
-                            
+                                                        
                             {!isAuthenticated && (
                                 <>
                                     <div className="hp-mobile-divider" />
@@ -1005,9 +1007,9 @@ const Homepage = () => {
                     {/* ✅ H1 and H2 styling applied correctly inline */}
                     <h1 style={{ fontSize: 'calc(4rem + 4px)', margin: '0 0 20px 0', fontWeight: '800', lineHeight: '1.1' }}>
                         Dress Your Little One<br />
-                        <h2 style={{ fontSize: 'inherit', color: '#c4b5fd', fontWeight: 'bold', margin: 0, display: 'inline' }}>
+                        <span style={{ color: '#c4b5fd', fontWeight: 'bold' }}>
                             In Comfort
-                        </h2>
+                        </span>
                     </h1>
                     
                     <p 
@@ -1092,28 +1094,28 @@ const Homepage = () => {
                             <div className="hp-mockup-left">
                                 <div className="hp-mockup-icon hp-icon-purple">📱</div>
                                 <div>
-                                    <div className="hp-mockup-label">Smartphones</div>
-                                    <div className="hp-mockup-sub">124 Active Listings</div>
+                                    <div className="hp-mockup-label">baby clothes</div>
+                                    <div className="hp-mockup-sub">rhombas</div>
                                 </div>
                             </div>
                             <span className="hp-mockup-stat">+15%</span>
                         </div>
                         <div className="hp-mockup-row">
                             <div className="hp-mockup-left">
-                                <div className="hp-mockup-icon hp-icon-red">🚗</div>
+                                <div className="hp-mockup-icon hp-icon-red">🥻</div>
                                 <div>
-                                    <div className="hp-mockup-label">Vehicles</div>
-                                    <div className="hp-mockup-sub">89 Active Listings</div>
+                                    <div className="hp-mockup-label">Rhombas</div>
+                                    <div className="hp-mockup-sub"> Active Listings</div>
                                 </div>
                             </div>
                             <span className="hp-mockup-stat">+8%</span>
                         </div>
                         <div className="hp-mockup-row">
                             <div className="hp-mockup-left">
-                                <div className="hp-mockup-icon hp-icon-blue">🏠</div>
+                                <div className="hp-mockup-icon hp-icon-blue">👖</div>
                                 <div>
-                                    <div className="hp-mockup-label">Real Estate</div>
-                                    <div className="hp-mockup-sub">45 Active Listings</div>
+                                    <div className="hp-mockup-label">Baby Trousers</div>
+                                    <div className="hp-mockup-sub"> Active Listings</div>
                                 </div>
                             </div>
                             <span className="hp-mockup-stat">+22%</span>
@@ -1129,6 +1131,56 @@ const Homepage = () => {
             <footer className="hp-footer">
                 © 2025 Straun Marketing AI Engine. All rights reserved.
             </footer>
+
+            {showSettings && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    backgroundColor: 'rgba(0,0,0,0.7)',
+                    zIndex: 9999,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                }}>
+                    <div style={{
+                        backgroundColor: '#1a1a1a', // Dark theme background
+                        borderRadius: '16px',
+                        width: '100%',
+                        maxWidth: '600px',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        position: 'relative',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
+                    }}>
+                        {/* Close Button */}
+                        <button
+                            onClick={() => setShowSettings(false)}
+                            style={{
+                                position: 'absolute',
+                                top: '15px',
+                                right: '15px',
+                                background: '#ef4444',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '32px',
+                                height: '32px',
+                                cursor: 'pointer',
+                                fontSize: '16px',
+                                zIndex: 10
+                            }}
+                        >
+                            ✕
+                        </button>
+
+                        {/* The UserSettings Component */}
+                        <div style={{ padding: '20px' }}>
+                            <UserSettings user={user} />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

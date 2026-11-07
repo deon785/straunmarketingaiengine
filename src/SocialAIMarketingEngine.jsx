@@ -26,7 +26,7 @@ import { fscrub } from 'fpoint';
 
 import PriceAlertButton from './PriceAlertButton.jsx';
 import RecommendationsSection from './RecommendationsSection';
-import RecommendationEngine from './recommendationEngine';
+import RecommendationEngine from './RecommendationEngine.js';
 import { useLoading } from './LoadingContext';
 
 import DailyDeals from './DailyDeals';
@@ -400,6 +400,12 @@ function SocialAIMarketingEngine() {
     const [productsFetchLoading, setProductsFetchLoading] = useState(false);
 
     const [signOutLoading, setSignOutLoading] = useState(false);
+    const [previousSearchState, setPreviousSearchState] = useState({
+        productSearch: '',
+        prospects: [],
+        productsFound: [],
+        searchLoading: false
+    });
 
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
@@ -789,32 +795,10 @@ function SocialAIMarketingEngine() {
 
     // ========== INTEREST CATEGORIES ==========
     const INTEREST_CATEGORIES = {
-        // Electronics & Tech
-        electronics: ['electronics', 'technology', 'gadgets', 'smartphone', 'laptop', 'computer', 'tablet', 'tv', 'television', 'monitor', 'speaker', 'headphone', 'earphone', 'headset', 'charger', 'cable', 'battery', 'power bank', 'phone', 'iphone', 'samsung', 'xiaomi', 'huawei', 'apple', 'macbook', 'dell', 'hp', 'lenovo', 'asus', 'acer', 'gaming', 'console', 'playstation', 'xbox', 'nintendo', 'vr', 'virtual reality', 'drone', 'camera', 'lens', 'tripod', 'microphone', 'webcam'],
-        
-        // Home & Furniture
-        home: ['furniture', 'sofa', 'couch', 'table', 'chair', 'bed', 'wardrobe', 'cabinet', 'shelf', 'bookshelf', 'drawer', 'desk', 'office chair', 'dining table', 'coffee table', 'bed frame', 'mattress', 'pillow', 'blanket', 'curtain', 'rug', 'carpet', 'lamp', 'lighting', 'decor', 'decoration', 'mirror', 'painting', 'picture frame', 'vase', 'pot', 'plant', 'flower', 'fridge', 'refrigerator', 'stove', 'oven', 'microwave', 'washing machine', 'dryer', 'air conditioner', 'fan', 'heater'],
         
         // Fashion & Clothing
-        fashion: ['clothing', 'clothes', 'shirt', 't-shirt', 'pants', 'jeans', 'trousers', 'shorts', 'skirt', 'dress', 'blouse', 'jacket', 'coat', 'sweater', 'hoodie', 'socks', 'underwear', 'lingerie', 'swimwear', 'bikini', 'swimsuit', 'suit', 'tie', 'belt', 'hat', 'cap', 'sunglasses', 'watch', 'jewelry', 'necklace', 'bracelet', 'ring', 'earring', 'handbag', 'bag', 'backpack', 'wallet', 'shoe', 'sneaker', 'boot', 'heels', 'sandal', 'athletic', 'sportswear', 'leather'],
+        fashion: ['clothing', 'clothes', 'shirt', 't-shirt', 'pants', 'jeans', 'trousers', 'shorts', 'skirt', 'dress', 'coat', 'sweater', 'hoodie', 'socks', 'underwear', , 'swimwear', 'bikini', 'hat', 'cap', 'sunglasses', 'watch', 'jewelry', 'necklace', 'bracelet', 'ring', 'earring', 'handbag',],
         
-        // Food & Groceries
-        food: ['food', 'grocery', 'vegetable', 'fruit', 'meat', 'chicken', 'beef', 'pork', 'fish', 'seafood', 'rice', 'pasta', 'bread', 'milk', 'cheese', 'yogurt', 'egg', 'oil', 'spice', 'seasoning', 'snack', 'chips', 'chocolate', 'candy', 'beverage', 'drink', 'soda', 'juice', 'wine', 'beer', 'spirit', 'coffee', 'tea', 'sugar', 'flour', 'cereal', 'oatmeal', 'pizza', 'burger', 'fries', 'ice cream'],
-        
-        // Health & Beauty
-        health: ['health', 'beauty', 'cosmetic', 'makeup', 'foundation', 'lipstick', 'mascara', 'eyeshadow', 'nail polish', 'perfume', 'deodorant', 'soap', 'body wash', 'shampoo', 'conditioner', 'lotion', 'cream', 'serum', 'face mask', 'skin care', 'hair care', 'nail care', 'toothpaste', 'mouthwash', 'vitamin', 'supplement', 'protein', 'gym', 'fitness', 'exercise', 'yoga', 'mat', 'dumbbell', 'weight', 'band', 'massage', 'relaxation'],
-        
-        // Auto & Vehicles
-        auto: ['auto', 'vehicle', 'car', 'truck', 'van', 'suv', 'sedan', 'hatchback', 'coupe', 'convertible', 'motorcycle', 'bike', 'bicycle', 'cycle', 'scooter', 'tyre', 'tire', 'rim', 'wheel', 'battery', 'oil', 'filter', 'brake', 'light', 'bulb', 'audio', 'speaker', 'subwoofer', 'amplifier', 'tool', 'jack', 'spanner', 'wrench', 'socket', 'screwdriver'],
-        
-        // Books & Media
-        media: ['book', 'novel', 'magazine', 'newspaper', 'comic', 'manga', 'textbook', 'dictionary', 'encyclopedia', 'cd', 'dvd', 'blu-ray', 'vinyl', 'record', 'music', 'album', 'movie', 'film', 'documentary', 'series', 'season', 'episode', 'game', 'board game', 'puzzle', 'toy', 'doll', 'action figure', 'collectible', 'statue', 'figurine'],
-        
-        // Sports & Outdoors
-        sports: ['sport', 'football', 'soccer', 'basketball', 'tennis', 'golf', 'rugby', 'cricket', 'hockey', 'volleyball', 'baseball', 'badminton', 'squash', 'table tennis', 'ping pong', 'swimming', 'running', 'jogging', 'cycling', 'hiking', 'camping', 'tent', 'sleeping bag', 'backpack', 'compass', 'knife', 'lantern', 'stove', 'cookware', 'water bottle', 'thermos'],
-        
-        // Services
-        services: ['service', 'repair', 'maintenance', 'cleaning', 'gardening', 'plumbing', 'electrical', 'carpentry', 'painting', 'roofing', 'tiling', 'plastering', 'welding', 'mechanic', 'auto repair', 'towing', 'delivery', 'transport', 'shipping', 'logistics', 'storage', 'moving', 'relocation', 'event planning', 'catering', 'photography', 'videography', 'editing', 'design', 'graphic design', 'web design', 'programming', 'development', 'it', 'computer repair', 'phone repair', 'tutoring', 'teaching'],
     };
 
     // ========== SMART INTEREST FILTERING ==========
@@ -1046,6 +1030,7 @@ function SocialAIMarketingEngine() {
                 }, 100);
                 break;
                 
+            // When opening the wishlist, push a hash to the URL
             case 'wishlist':
                 setPreviousSearchState({
                     productSearch: productSearch,
@@ -1053,7 +1038,8 @@ function SocialAIMarketingEngine() {
                     productsFound: productsFound,
                     searchLoading: searchLoading
                 });
-                navigate('/app', { state: { showWishlist: true } });
+                // ✅ Push #wishlist to the URL so the back button works
+                window.history.pushState({ modal: 'wishlist' }, '', '#wishlist'); 
                 setShowWishlist(true);
                 break;
                 
@@ -1268,33 +1254,47 @@ function SocialAIMarketingEngine() {
 
             let subscription = await registration.pushManager.getSubscription();
             if (!subscription) {
-            const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-            if (!VAPID_PUBLIC_KEY) {
-                console.error('[Push] Missing VAPID public key');
+                const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+                if (!VAPID_PUBLIC_KEY) {
+                    console.error('[Push] Missing VAPID public key');
+                    return;
+                }
+                subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+                });
+            }
+
+            // ✅ FIXED: correct columns, jsonb object, check error
+            const { data, error } = await supabase
+            .from('push_subscriptions')
+            .upsert(
+                {
+                    user_id: user.id,
+                    subscription: subscription.toJSON(),
+                    user_agent: navigator.userAgent,
+                    is_active: true,
+                    updated_at: new Date().toISOString(),
+                },
+                { onConflict: 'user_id' }
+            )
+            .select();
+
+            if (error) {
+                console.error('[Push] save failed:', error);
+                try { Sentry.captureException(error); } catch (_) {}
                 return;
             }
-            subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: VAPID_PUBLIC_KEY,
-            });
-            }
 
-            await supabase.from('push_subscriptions').upsert(
-            [{
-                user_id: user.id,
-                subscription,
-                device_info: navigator.userAgent,
-            }],
-            { onConflict: 'user_id' }
-            );
-
-            console.log('[Push] Subscription saved');
+            console.log('[Push] Subscription saved:', data);
         } catch (error) {
             console.error('[Push] Setup failed:', error);
-            Sentry.captureMessage('Push notification setup failed', {
-            level: 'warning',
-            extra: { error: error.message },
-            });
+            try {
+                Sentry.captureMessage('Push notification setup failed', {
+                    level: 'warning',
+                    extra: { error: error.message },
+                });
+            } catch (_) {}
         }
         };
 
@@ -2867,10 +2867,20 @@ function SocialAIMarketingEngine() {
 
         try {
             const sanitizedSearch = sanitizeProductName(searchTerm);
-            
             console.log('🔍 Searching similar products for:', searchTerm);
             
-            // ✅ USING ACTUAL COLUMNS FROM YOUR SCHEMA
+            // 🧠 STEP 2 & 4: SMART FALLBACK
+            // Break the search term into words (e.g., "baby vest" -> ["baby", "vest"])
+            const searchWords = sanitizedSearch.toLowerCase().split(' ').filter(w => w.length > 2);
+            
+            // Build an OR query to find ANY of the words in the name OR description
+            let orQuery = searchWords.map(word => `name.ilike.%${word}%,description.ilike.%${word}%`).join(',');
+            
+            // If no valid words, just use the whole string
+            if (!orQuery) {
+                orQuery = `name.ilike.%${sanitizedSearch}%`;
+            }
+
             let query = supabase
                 .from('products')
                 .select(`
@@ -2892,9 +2902,9 @@ function SocialAIMarketingEngine() {
                         is_buyer
                     )
                 `)
-                .ilike('name', `%${sanitizedSearch}%`)
+                .or(orQuery) // ✅ Uses fuzzy matching on name OR description
                 .neq('seller_id', user.id)
-                .limit(10);
+                .limit(20); // Fetch more to shuffle them
             
             // Exclude products
             if (excludeIds && excludeIds.length > 0) {
@@ -2917,26 +2927,14 @@ function SocialAIMarketingEngine() {
             }
             
             // Remove duplicates
-            const uniqueProducts = Array.from(
+            let uniqueProducts = Array.from(
                 new Map(products.map(p => [p.id, p])).values()
             );
             
-            // Sort by relevance
-            const searchTermLower = sanitizedSearch.toLowerCase();
-            const sortedProducts = uniqueProducts.sort((a, b) => {
-                const aName = a.name ? a.name.toLowerCase() : '';
-                const bName = b.name ? b.name.toLowerCase() : '';
-                
-                if (aName === searchTermLower && bName !== searchTermLower) return -1;
-                if (aName !== searchTermLower && bName === searchTermLower) return 1;
-                if (aName.startsWith(searchTermLower) && !bName.startsWith(searchTermLower)) return -1;
-                if (!aName.startsWith(searchTermLower) && bName.startsWith(searchTermLower)) return 1;
-                if (aName.includes(searchTermLower) && !bName.includes(searchTermLower)) return -1;
-                if (!aName.includes(searchTermLower) && bName.includes(searchTermLower)) return 1;
-                return (a.price || 0) - (b.price || 0);
-            });
+            // 🎲 SHUFFLE SIMILAR PRODUCTS TOO
+            uniqueProducts = uniqueProducts.sort(() => Math.random() - 0.5);
             
-            const limitedProducts = sortedProducts.slice(0, 6);
+            const limitedProducts = uniqueProducts.slice(0, 6);
             
             console.log(`✅ Found ${limitedProducts.length} similar products for "${searchTerm}"`);
             
@@ -3622,40 +3620,29 @@ function SocialAIMarketingEngine() {
     }, [productSearch, searchParams, location.pathname, location.search, isProfileComplete]);
 
     // 🔥 REPLACE BOTH OF YOUR USEEFFECTS WITH THIS SINGLE ONE:
+        // ✅ Handle browser back/forward buttons for Wishlist
     useEffect(() => {
-        const handleHashChange = () => {
-            if (window.location.hash !== '#wishlist' && showWishlist) {
-                // Hash changed from #wishlist to something else (user clicked back)
-                setShowWishlist(false);
-            }
-            if (window.location.hash === '#wishlist' && !showWishlist) {
-                // Hash changed to #wishlist (user clicked forward or typed URL)
-                setShowWishlist(true);
-            }
-        };
-        
         const handlePopState = (event) => {
-            // Handle browser back/forward buttons
-            handleHashChange();
-            
-            // Restore previous state if needed (optional)
-            if (event.state && event.state.previousState) {
-                const { previousState } = event.state;
-                setProductSearch(previousState.productSearch);
-                setProspects(previousState.prospects);
-                setProductsFound(previousState.productsFound);
-                setSearchLoading(previousState.searchLoading);
+            // If the URL hash is no longer #wishlist, close the modal
+            if (window.location.hash !== '#wishlist' && showWishlist) {
+                setShowWishlist(false);
+                
+                // Restore previous search state if it exists
+                if (previousSearchState.productSearch !== undefined) {
+                    setProductSearch(previousSearchState.productSearch);
+                    setProspects(previousSearchState.prospects);
+                    setProductsFound(previousSearchState.productsFound);
+                    setSearchLoading(previousSearchState.searchLoading);
+                }
             }
         };
         
-        window.addEventListener('hashchange', handleHashChange);
         window.addEventListener('popstate', handlePopState);
         
         return () => {
-            window.removeEventListener('hashchange', handleHashChange);
             window.removeEventListener('popstate', handlePopState);
         };
-    }, [showWishlist]);
+    }, [showWishlist, previousSearchState]);
 
     // Combined useEffect for initial data load
     useEffect(() => {
@@ -4205,8 +4192,11 @@ function SocialAIMarketingEngine() {
                     notificationSubscription = null;
                 }
 
+                // ✅ FIX 1: Add a random string to the channel name to make it unique every time
+                const uniqueChannelName = `notifications-${user.id}-${Math.random().toString(36).substring(7)}`;
+
                 notificationSubscription = supabase
-                    .channel(`notifications-${user.id}`)
+                    .channel(uniqueChannelName) 
                     .on(
                         'postgres_changes',
                         {
@@ -4265,7 +4255,9 @@ function SocialAIMarketingEngine() {
             checkForNewNotifications();
             
             // Set up interval
-            pollingInterval = setInterval(checkForNewNotifications, 10000);
+            pollingInterval = setInterval(() => {
+                if (document.visibilityState === 'visible') checkForNewNotifications();
+            }, 15000);
         };
 
         // ========== STOP POLLING ==========
@@ -4924,13 +4916,6 @@ function SocialAIMarketingEngine() {
             localStorage.setItem('straun_profileData', JSON.stringify(safeProfileData));
         }
     }, [profileData]);
-    
-    const [previousSearchState, setPreviousSearchState] = useState({
-        productSearch: '',
-        prospects: [],
-        productsFound: [],
-        searchLoading: false
-    });
 
     // --- HANDLE MODE SELECTION ---
     const handleModeSelect = async (mode) => {
@@ -5504,6 +5489,8 @@ function SocialAIMarketingEngine() {
 
     // --- FIND PRODUCTS (BUYER MODE) - 100% CORRECT ---
     const findProducts = useCallback(async (searchTerm, useFilters = false) => {
+        if (!user?.id) return; 
+
         console.log('🔍 Starting findProducts with search:', searchTerm);
         
         if (!user) {
@@ -5519,9 +5506,15 @@ function SocialAIMarketingEngine() {
         setHasMore(true);
 
         const cacheKey = searchTerm.toLowerCase().trim();
-        if (searchCache[cacheKey] && !useFilters) {
+        const cachedItem = searchCache[cacheKey];
+
+        // ✅ Check if cache exists AND is less than 15 minutes old
+        if (cachedItem && cachedItem.timestamp && (Date.now() - cachedItem.timestamp < 15 * 60 * 1000) && !useFilters) {
             console.log('Cache hit for:', cacheKey);
-            setProductsFound(searchCache[cacheKey]);
+            
+            // 🎲 Re-shuffle the cached data so it feels fresh every time they return
+            const reshuffledProducts = [...cachedItem.data].sort(() => Math.random() - 0.5);
+            setProductsFound(reshuffledProducts);
             return;
         }
 
@@ -5584,7 +5577,7 @@ function SocialAIMarketingEngine() {
                 
                 switch (filters.sortBy) {
                     case 'newest':
-                        query = query.order('created_at', { ascending: false });
+                        query = query.order('last_shown_at', { ascending: true, nullsFirst: true });
                         break;
                     case 'price_low':
                         query = query.order('price', { ascending: true });
@@ -5596,7 +5589,7 @@ function SocialAIMarketingEngine() {
                         query = query.order('created_at', { ascending: false });
                 }
             } else {
-                query = query.order('price', { ascending: true });
+                query = query.order('last_shown_at', { ascending: true, nullsFirst: true });
             }
 
             query = query.limit(50);
@@ -5610,20 +5603,28 @@ function SocialAIMarketingEngine() {
                 return;
             }
 
-            const productsData = products || [];
+            let productsData = products || [];
             console.log(`✅ Found ${productsData.length} products for: "${sanitizedSearch}"`);
+            
+            // 🎲 STEP 1: FAIR EXPOSURE SHUFFLE
+            // If we have more than 1 product, shuffle them so everyone gets a chance
+            if (productsData.length > 1) {
+                productsData = productsData.sort(() => Math.random() - 0.5);
+                console.log('🎲 Shuffled products for fair exposure');
+            }
             
             // ✅ SIMILAR PRODUCTS - using actual UUID
             if (productsData.length === 0) {
                 console.log('⚠️ No products found in database');
                 await findSimilarProducts(sanitizedSearch);
-            } else if (productsData.length < 3 && productsData[0]?.id) {
+            } else if (productsData.length > 0 && productsData.length < 3) {
                 try {
-                    const firstProductId = productsData[0].id;
-                    
-                    // ✅ Check if it's a valid UUID format
+                    // ✅ Safely find the first product that has a valid UUID (since it's shuffled)
                     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                    if (uuidRegex.test(firstProductId)) {
+                    const firstValidProduct = productsData.find(p => p.id && uuidRegex.test(p.id));
+                    
+                    if (firstValidProduct) {
+                        const firstProductId = firstValidProduct.id;
                         const { data: similarData, error: similarError } = await supabase
                             .from('product_similarity')
                             .select(`
@@ -5670,19 +5671,36 @@ function SocialAIMarketingEngine() {
                 setShowSafetyWarning(true);
             }
             
+            // When saving to cache later in the function, save it WITH a timestamp:
             if (!useFilters) {
                 setSearchCache(prev => ({
                     ...prev,
-                    [cacheKey]: productsData
+                    [cacheKey]: {
+                        data: productsData,
+                        timestamp: Date.now() // ✅ Save the time it was cached
+                    }
                 }));
             }
 
             setProductsFound(productsData);
 
+             // ✅ STEP 3: UPDATE LAST SHOWN TIMESTAMP
+            if (productsData.length > 0) {
+                const shownIds = productsData.map(p => p.id);
+                supabase
+                    .from('products')
+                    .update({ last_shown_at: new Date().toISOString() })
+                    .in('id', shownIds)
+                    .then(({ error }) => {
+                        if (error) console.warn('Failed to update last_shown_at:', error);
+                    });
+            }
+
             // ✅ NOTIFICATIONS - USING ACTUAL COLUMNS FROM YOUR SCHEMA
             // notifications: user_id, message, link_type, is_read, created_at, buyer_phone, product_image
             // NOTE: 'is_read' NOT 'read'
-            if (productsData && productsData.length > 0 && selectedMode === 'buyer') {
+            // ✅ FIX: Prevent notification spam (only notify for searches >= 4 chars)
+            if (productsData && productsData.length > 0 && selectedMode === 'buyer' && sanitizedSearch.length >= 4) {
                 try {
                     // ✅ Get the buyer's phone number
                     const { data: buyerProfile } = await supabase
@@ -5700,20 +5718,36 @@ function SocialAIMarketingEngine() {
                     
                     if (uniqueSellerIds.length > 0) {
                         for (const sellerId of uniqueSellerIds) {
-                            const { error: notifError } = await supabase
+                             // ✅ CHECK: Did we already notify this seller for this exact search in the last 30 mins?
+                            const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: existingNotif } = await supabase
                                 .from('notifications')
-                                .insert({
-                                    user_id: sellerId,
-                                    sender_id: user.id,
-                                    message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
-                                    link_type: 'search_match',
-                                    buyer_phone: buyerPhone,  // ✅ Add buyer's phone number
-                                    is_read: false,
-                                    created_at: new Date().toISOString()
-                                });
-                            
-                            if (notifError) {
-                                console.error('Error notifying seller:', notifError);
+                                .select('id')
+                                .eq('user_id', sellerId)
+                                .eq('sender_id', user.id)
+                                .ilike('message', `%searched for "${sanitizedSearch}"%`)
+                                .gte('created_at', thirtyMinsAgo)
+                                .limit(1);
+
+                            // If no recent notification exists, send it
+                            if (!existingNotif || existingNotif.length === 0) {
+                                const { error: notifError } = await supabase
+                                    .from('notifications')
+                                    .insert({
+                                        user_id: sellerId,
+                                        sender_id: user.id,
+                                        message: `🔍 A buyer searched for "${sanitizedSearch}" and found your products!`,
+                                        link_type: 'search_match',
+                                        buyer_phone: buyerPhone, 
+                                        is_read: false,
+                                        created_at: new Date().toISOString()
+                                    });
+                                
+                                if (notifError) {
+                                    console.error('Error notifying seller:', notifError);
+                                }
+                            } else {
+                                console.log(`ℹ️ Skipped notification for seller ${sellerId} (already notified recently)`);
                             }
                         }
                     }
@@ -6910,7 +6944,7 @@ function SocialAIMarketingEngine() {
                             <button
                                 onClick={() => {
                                     console.log('👑 Admin crown clicked - navigating to admin dashboard');
-                                    navigate('/mode-selection'); //replaced this , window.location.href = '/admin';
+                                    navigate('/admin'); //replaced this , window.location.href = '/admin';
                                 }}
                                 title="Admin Dashboard"
                                 style={{
@@ -6944,8 +6978,54 @@ function SocialAIMarketingEngine() {
                     </div>
                 </div>
                 
-                {/* Empty spacer for balance */}
-                <div style={{ width: '38px' }}></div>
+                {/* ✅ RIGHT: Notification Bell */}
+                <div style={{ position: 'relative' }}>
+                    <button 
+                        onClick={() => {
+                            setUnreadCount(0); // Drop count to 0
+                            navigate('/notifications', { state: { referrer: '/app' } });
+                        }}
+                        style={{
+                            background: 'rgba(255,255,255,0.15)',
+                            border: 'none',
+                            color: 'white',
+                            fontSize: '18px',
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '50%',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            position: 'relative',
+                            transition: 'all 0.2s ease',
+                        }}
+                    >
+                        🔔
+                        {/* 🔴 RED BADGE */}
+                        {unreadCount > 0 && (
+                            <span style={{
+                                position: 'absolute',
+                                top: '-2px',
+                                right: '-2px',
+                                background: '#ef4444',
+                                color: 'white',
+                                fontSize: '10px',
+                                fontWeight: '700',
+                                minWidth: '18px',
+                                height: '18px',
+                                padding: '0 5px',
+                                borderRadius: '10px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '2px solid #667eea'
+                            }}>
+                                {unreadCount > 9 ? '9+' : unreadCount}
+                            </span>
+                        )}
+                    </button>
+                </div>
             </header>
             
         )}
@@ -7020,57 +7100,7 @@ function SocialAIMarketingEngine() {
                     </div>
                 )}
                 
-                {/* Notifications */}
-                <div className="notification-container">
-                    <button 
-                    className="notification-button"
-                    onClick={() => {
-                        // ✅ Navigate to notifications list with state
-                        navigate('/notifications', { 
-                        state: { 
-                            referrer: '/app'  // Tell the notification page where to go back to
-                        } 
-                        });
-                    }}
-                    >
-                    🔔
-                    {unreadCount > 0 && (
-                        <div className="notification-badge">
-                        {unreadCount > 9 ? '9+' : unreadCount}
-                        </div>
-                    )}
-                    </button>
                 
-                    {showNotifications && (
-                        <div className="notification-dropdown">
-                            <div className="notification-header">
-                                <h3>Notifications ({unreadCount})</h3>
-                                <button onClick={() => setShowNotifications(false)}>×</button>
-                            </div>
-                            
-                            {notifications.length === 0 ? (
-                                <div className="notification-empty">No notifications yet</div>
-                            ) : (
-                                <div className="notification-list">
-                                    {notifications.map(notification => (
-                                        <div 
-                                            key={notification.id} 
-                                            className={`notification-item ${notification.is_read ? 'read' : 'unread'}`}
-                                            onClick={() => markAsRead(notification.id)}
-                                        >
-                                            <div className="notification-message">
-                                                {notification.message}
-                                            </div>
-                                            <div className="notification-time">
-                                                {new Date(notification.created_at).toLocaleTimeString()}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
 
                 {/* ===== FLOATING BUTTONS - PROPER ORDER ===== */}
                 
@@ -7158,8 +7188,8 @@ function SocialAIMarketingEngine() {
                                     type="text" 
                                     placeholder={
                                         selectedMode === 'seller' 
-                                        ? "E.g., Blankets, iPhone 13, Headphones.." 
-                                        : "E.g., Headphones, Laptop, Furniture..."
+                                        ? "E.g., Vests, Rhombas , Trousers.." 
+                                        : "E.g., Vests, Hat, baby Feeders..."
                                     }
                                     value={productSearch}
                                     onChange={(e) => {
@@ -7804,8 +7834,8 @@ function SocialAIMarketingEngine() {
                                                         <div className="empty-tips">
                                                             <p><strong>Try searching for:</strong></p>
                                                             <ul>
-                                                                <li>"laptop" - Found in existing interests</li>
-                                                                <li>"fruits" - Found in existing interests</li>
+                                                                <li>"Vests" - Found in existing interests</li>
+                                                                <li>"trousers" - Found in existing interests</li>
                                                                 <li>Other common products</li>
                                                             </ul>
                                                         </div>
@@ -8087,13 +8117,6 @@ function SocialAIMarketingEngine() {
                                                         key={p?.id || `product-${index}`} 
                                                         className={`product-card ${index === 0 ? 'best-deal' : ''}`}
                                                         onClick={() => {
-                                                            // ✅ Track view when product card is clicked
-                                                            if (p?.id) {
-                                                                supabase.rpc('increment_product_views', {
-                                                                    p_product_id: p.id
-                                                                }).catch(err => console.error('View tracking error:', err));
-                                                            }
-                                                            // Call handleProductClick to track with recommendation engine
                                                             handleProductClick(p);
                                                         }}
                                                         style={{ cursor: 'pointer' , position: 'relative' }}

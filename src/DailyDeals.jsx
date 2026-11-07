@@ -285,7 +285,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const [claiming, setClaiming] = useState({});
     const [nextRefreshIn, setNextRefreshIn] = useState(null);
     const [productCheck, setProductCheck] = useState(null);
-    const [loadedCount, setLoadedCount] = useState(6);
+    // ✅ FIX 1: Start with 12, so it attempts to show as many as possible
+    const [loadedCount, setLoadedCount] = useState(12); 
     const [imagesLoaded, setImagesLoaded] = useState(0);
     const [imagesLoading, setImagesLoading] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -301,14 +302,12 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
     const refreshIntervalRef = useRef(null);
     const [lastRefresh, setLastRefresh] = useState(null);
 
+    // ✅ FIX 2: Always aim for 12, regardless of screen size
     const getResponsiveDealCount = () => {
-        const width = window.innerWidth;
-        if (width < 640) return 4;
-        if (width < 1024) return 6;
-        return 12;
+        return 12; 
     };
 
-    const [visibleDealCount, setVisibleDealCount] = useState(getResponsiveDealCount());
+    const [visibleDealCount, setVisibleDealCount] = useState(12);
 
     // Image preloading tracker
     useEffect(() => {
@@ -385,6 +384,8 @@ const DailyDeals = ({ userId, userReferralCount, onClaimDeal }) => {
                 .limit(30);
 
             if (error) throw error;
+
+            console.log("🔍 DEALS FROM DATABASE:", dailyDeals);
 
             // ✅ EMPTY RESPONSE — retry up to 3 times before giving up
             if (!dailyDeals || dailyDeals.length === 0) {
@@ -1096,7 +1097,7 @@ const styles = {
     subtitle: { fontSize: '13px', color: '#b0b0b0', margin: 0 },
     refreshTimer: { background: '#2a2a2a', padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', color: '#FF9800' },
     manualRefreshIcon: { background: '#2a2a2a', border: '1px solid #444', borderRadius: '50%', width: '36px', height: '36px', cursor: 'pointer', fontSize: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' },
-    dealsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px', maxHeight: '70vh', overflowY: 'auto', padding: '5px' },
+    dealsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '20px', maxHeight: '70vh', overflowY: 'auto', padding: '5px' },
     dealCard: { background: '#2d2d2d', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.3)', position: 'relative', cursor: 'pointer', border: '1px solid #404040' },
     soldOutBadge: { position: 'absolute', top: '10px', right: '10px', background: '#f44336', color: 'white', padding: '4px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', zIndex: 2 },
     dealImage: { width: '100%', height: '180px', objectFit: 'cover' },

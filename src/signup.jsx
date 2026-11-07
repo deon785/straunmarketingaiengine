@@ -302,6 +302,14 @@ const TermsCheckbox = React.memo(({ inputRef, disabled }) => {
 });
 TermsCheckbox.displayName = 'TermsCheckbox';
 
+// 🚪 BOUNCER
+const INITIAL_BOUNCER_VALUES = {
+  email: '',
+  password: '',
+  phone: '',
+  terms: false,
+};
+
 // 5. Submit Button
 const SubmitButton = React.memo(({ loading, isSignUp }) => {
   return (
@@ -483,14 +491,7 @@ const Auth = () => {
   const intent = searchParams.get('intent');
   const isFreshLogin = searchParams.get('fresh') === 'true';
   const retryCountRef = useRef(0);
-
-  // 🚪 BOUNCER
-  const bouncer = useBouncer({
-    email: '',
-    password: '',
-    phone: '',
-    terms: false,
-  });
+  const bouncer = useBouncer(INITIAL_BOUNCER_VALUES);
 
   // ✅ PRE-REGISTER ALL FIELDS ONCE - Stable refs!
   const emailRegister = useMemo(() => bouncer.register('email'), [bouncer]);

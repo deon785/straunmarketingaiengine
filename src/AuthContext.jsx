@@ -83,6 +83,16 @@ export const AuthProvider = ({ children }) => {
   // The signup.jsx handles intent-based redirects (buyer-decision/seller-decision)
   // This is just a safety net for direct logins
   useEffect(() => {
+    if (!user || !isAuthenticated) return;
+
+    // ✅ NEW: If signup.jsx just handled a redirect (within last 3 seconds), skip
+    const signupTs = Number(sessionStorage.getItem('_signup_handled_redirect') || 0);
+    const sinceSignup = Date.now() - signupTs;
+    if (sinceSignup < 3000) {
+      console.log('[REDIRECT:AuthContext] ⏭️ SKIP — signup handled this', (sinceSignup / 1000).toFixed(2), 's ago');
+      return;
+    }
+    
     if (user && isAuthenticated) {
       // 1. Don't redirect if they are on the Admin page
       if (window.location.pathname === '/admin') {

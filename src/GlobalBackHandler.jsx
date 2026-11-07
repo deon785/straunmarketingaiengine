@@ -1,51 +1,33 @@
 // src/components/GlobalBackHandler.jsx
 import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useNavigation } from './NavigationContext.jsx';
 
 const GlobalBackHandler = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { goBack, getPreviousPage } = useNavigation();
 
   useEffect(() => {
-    // ✅ Don't intercept back button on signup/auth pages
-    const skipPaths = ['/', '/reset-password'];
+    // ✅ Do NOT intercept standard back button behavior. 
+    // React Router handles it naturally. 
+    // This is ONLY a safety fallback for hardware back buttons in PWAs/Capacitor.
 
-    const handleBackButton = (e) => {
-      e.preventDefault();
-      
-      // Don't handle back on signup page
-      if (location.pathname === '/' || location.pathname === '/reset-password') {
-        return; // Let browser handle it normally
+    const handleHardwareBack = (e) => {
+      // If the user is on the root page, we might want to confirm exit
+      if (location.pathname === '/') {
+        // Optional: Only confirm exit if they are at the absolute root
+        // e.preventDefault(); 
+        // if (window.confirm('Do you want to exit the app?')) {
+        //   if (window.navigator.standalone) {
+        //      // PWA exit logic
+        //   } else {
+        //      window.history.back();
+        //   }
+        // }
+        return;
       }
 
-      console.log('Back button pressed at:', location.pathname + location.search);
-      
-      // Get the previous page from our navigation stack
-      const previousPage = getPreviousPage();
-      
-      if (previousPage) {
-        // Navigate back to the exact previous state
-        navigate({
-          pathname: previousPage.path,
-          search: previousPage.search,
-          hash: previousPage.hash
-        }, {
-          replace: true,
-          state: previousPage.state
-        });
-        
-        // Update navigation stack
-        goBack();
-      } else {
-        // If no history in our stack, use fallback routes
-        handleFallbackNavigation();
-      }
-    };
-
-    const handleFallbackNavigation = () => {
-      // Define minimum fallback routes for edge cases
+      // ✅ Fallback logic: If the user is stuck on a subpage and presses 
+      // the hardware back button, send them to the app root.
       const fallbackRoutes = {
         '/notifications': '/app',
         '/privacy': '/app',
@@ -53,83 +35,34 @@ const GlobalBackHandler = () => {
         '/help': '/app',
         '/wishlist': '/app',
         '/admin': '/app',
-        '/reset-password': '/',
-        // Special case: if on /app with search, go to clean /app
-        '/app': '/',
       };
 
       const targetPath = fallbackRoutes[location.pathname];
       
       if (targetPath) {
+        // Only navigate if we are explicitly matching a fallback route
+        // This prevents loops on the main /app feed
         navigate(targetPath, { replace: true });
-      } else if (location.pathname !== '/') {
-        // Try browser history as last resort
-        navigate(-1);
       } else {
-        // On home page - ask before exiting
-        handleExitConfirmation();
+        // Let React Router / Browser handle it naturally
+        // Do not call e.preventDefault() here
       }
     };
 
-    const handleExitConfirmation = () => {
-      if (window.confirm('Do you want to exit the app?')) {
-        // For PWA installed on phone
-        if (window.navigator.standalone) {
-          // Can't close PWA, but we can simulate
-          window.dispatchEvent(new Event('appShouldExit'));
-        } else {
-          // For browser, just go back in history
-          if (window.history.length > 1) {
-            navigate(-1);
-          }
-        }
-      } else {
-        // User cancelled - stay on page
-        window.history.pushState(null, '', window.location.href);
-      }
-    };
-
-    // Listen for hardware back button (mobile)
-    const handleHardwareBack = (e) => {
-      handleBackButton(e);
-    };
-
-    // Listen for browser back/forward buttons
-    const handlePopState = (e) => {
-      handleBackButton(e);
-    };
-
-    // Add event listeners
-    window.addEventListener('popstate', handlePopState);
-    
-    // For mobile hardware back button
-    if (document.addEventListener) {
-      document.addEventListener('backbutton', handleHardwareBack, false);
-    }
-    
-    // For Capacitor/Cordova
+    // For mobile hardware back button (Capacitor/Cordova)
     if (window.Capacitor?.Plugins?.App) {
       window.Capacitor.Plugins.App.addListener('backButton', handleHardwareBack);
     }
 
-    // Prevent default back swipe on iOS
-    document.body.style.overscrollBehavior = 'none';
+    // DO NOT add a window.addEventListener('popstate', ...) here.
+    // React Router already listens to popstate. Adding another one causes the loops.
 
     return () => {
-      // Cleanup
-      window.removeEventListener('popstate', handlePopState);
-      
-      if (document.removeEventListener) {
-        document.removeEventListener('backbutton', handleHardwareBack, false);
-      }
-      
       if (window.Capacitor?.Plugins?.App) {
         window.Capacitor.Plugins.App.removeAllListeners();
       }
-      
-      document.body.style.overscrollBehavior = '';
     };
-  }, [navigate, location, goBack, getPreviousPage]);
+  }, [navigate, location.pathname]);
 
   return null;
 };

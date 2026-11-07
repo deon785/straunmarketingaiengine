@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from './lib/supabase'; 
+import { useLocation } from 'react-router-dom';
 import './PushNotificationHandler.css';
 
 // ✅ Add fetchWithRetry helper
@@ -25,6 +26,15 @@ const PushNotificationHandler = () => {
     const [userId, setUserId] = useState(null);
     const [isPromptVisible, setIsPromptVisible] = useState(true);
     const [hasUserDecided, setHasUserDecided] = useState(false);
+    const location = useLocation();
+
+    // ✅ NEW: Check if user previously said "Not Now"
+    const [hasDeclinedBefore, setHasDeclinedBefore] = useState(() => {
+        return localStorage.getItem('pushNotificationDeclined') === 'true';
+    });
+
+    // ✅ NEW: Don't show on login/signup pages or if no user
+    const isAuthPage = ['/login', '/reset-password', '/'].includes(location.pathname);
 
     // ✅ Memoize functions with useCallback
     const checkUser = useCallback(async () => {
@@ -64,7 +74,7 @@ const PushNotificationHandler = () => {
         }, 3000);
         
         return () => clearInterval(interval);
-    }, [isSupported, checkUser]);
+     }, [isSupported, checkUser, hasDeclinedBefore]);
 
     const urlBase64ToUint8Array = (base64String) => {
         if (!base64String) {
@@ -172,13 +182,19 @@ const PushNotificationHandler = () => {
     const handleDenyClick = () => {
         setIsPromptVisible(false);
         setHasUserDecided(true);
+        setHasDeclinedBefore(true); // ✅ Save to state
         setStatus('Notifications not enabled. You can enable them later.');
         try {
-            localStorage.setItem('pushNotificationDeclined', 'true');
+            localStorage.setItem('pushNotificationDeclined', 'true'); // ✅ Save to localStorage permanently
         } catch (err) {
             console.error('Failed to save preference:', err);
         }
     };
+
+    // ✅ ADD THIS GUARD: If not supported, not logged in, on auth page, or previously declined -> Return null
+    if (!isSupported || !userId || isAuthPage || hasDeclinedBefore) {
+        return null;
+    }
 
     const showPromptAgain = () => {
         setIsPromptVisible(true);
@@ -379,7 +395,7 @@ const PushNotificationHandler = () => {
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
                 }, {
-                    onConflict: 'user_id,endpoint'
+                    onConflict: 'user_id', user_agent   
                 })
             );
             
@@ -450,6 +466,16 @@ const PushNotificationHandler = () => {
         }
     };
 
+    if (
+        !isSupported || 
+        !userId || 
+        isAuthPage || 
+        hasDeclinedBefore || 
+        (permission === 'granted' && !isPromptVisible)
+    ) {
+        return null; 
+    }
+
     if (!isSupported) {
         return (
             <div className="push-notification-container unsupported">
@@ -460,11 +486,6 @@ const PushNotificationHandler = () => {
                 </div>
             </div>
         );
-    }
-
-    // Return null when enabled and prompt is hidden
-    if (permission === 'granted' && !isPromptVisible) {
-        return null; 
     }
 
     return (

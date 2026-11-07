@@ -15,7 +15,7 @@ const NotificationsList = () => {
 
   const referrer = location.state?.referrer || '/app';
 
-  // ✅ Fetch notifications
+  // ✅ Fetch ALL notifications
   const fetchNotifications = useCallback(async () => {
     if (!user?.id) {
       setNotifications([]);
@@ -31,11 +31,18 @@ const NotificationsList = () => {
         .from('notifications')
         .select('id, user_id, sender_id, message, link_type, is_read, created_at, buyer_phone, product_image')
         .eq('user_id', user.id)
-        .eq('is_read', false)
-        .order('created_at', { ascending: false });
+        // ❌ REMOVED .eq('is_read', false) so we get old ones too
+        .order('created_at', { ascending: false }); // Newest first
 
       if (fetchError) throw fetchError;
-      setNotifications(data || []);
+      
+      // ✅ SORT: Unread first, then Read
+      const sortedData = (data || []).sort((a, b) => {
+        if (a.is_read === b.is_read) return 0;
+        return a.is_read ? 1 : -1; // Unread (false) comes before Read (true)
+      });
+      
+      setNotifications(sortedData);
 
     } catch (err) {
       console.error('Error fetching notifications:', err);
@@ -44,6 +51,39 @@ const NotificationsList = () => {
       setLoading(false);
     }
   }, [user?.id]);
+
+  // ✅ Handle notification click
+  const handleNotificationClick = async (notification) => {
+    if (processedIds.current.has(notification.id)) return;
+    processedIds.current.add(notification.id);
+
+    // 1. Mark THIS specific notification as read in the database
+    if (!notification.is_read) {
+        await supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('id', notification.id)
+          .eq('user_id', user.id);
+
+        // 2. Update the UI state (move it to the read section)
+        setNotifications(prev => {
+            const updated = prev.map(n => n.id === notification.id ? { ...n, is_read: true } : n);
+            // Re-sort so the newly read item moves down
+            return updated.sort((a, b) => {
+                if (a.is_read === b.is_read) return 0;
+                return a.is_read ? 1 : -1;
+            });
+        });
+    }
+
+    // 3. Navigate to the details page
+    navigate(`/notification/${notification.id}`, {
+      state: { 
+        referrer: '/notifications',
+        notification: notification 
+      }
+    });
+  };
 
   // ✅ Initial fetch
   useEffect(() => {
@@ -97,19 +137,6 @@ const NotificationsList = () => {
       supabase.removeChannel(channel);
     };
   }, [user?.id, fetchNotifications]);
-
-  // ✅ Handle notification click
-  const handleNotificationClick = useCallback((notification) => {
-    if (processedIds.current.has(notification.id)) return;
-    processedIds.current.add(notification.id);
-
-    navigate(`/notification/${notification.id}`, {
-      state: { 
-        referrer: '/notifications',
-        notification: notification 
-      }
-    });
-  }, [navigate]);
 
   // ✅ Go back
   const handleGoBack = () => {
@@ -206,15 +233,16 @@ const NotificationsList = () => {
           onClick={() => handleNotificationClick(notification)}
           style={{
             padding: '16px', marginBottom: '10px', borderRadius: '10px',
-            backgroundColor: '#b4b4b4', cursor: 'pointer', border: '1px solid #e9ecef',
-            transition: 'all 0.2s', position: 'relative'
+            // ✅ Unread is white/blueish, Read is grey
+            backgroundColor: notification.is_read ? '#f8f9fa' : '#e0e7ff',
+            cursor: 'pointer', border: '1px solid #e9ecef',
+            transition: 'all 0.2s', position: 'relative',
+            opacity: notification.is_read ? 0.7 : 1 // ✅ Slight fade for read items
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#e9ecef';
             e.currentTarget.style.transform = 'translateX(4px)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = '#f8f9fa';
             e.currentTarget.style.transform = 'translateX(0)';
           }}
         >
@@ -227,7 +255,10 @@ const NotificationsList = () => {
             </div>
             
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500', marginBottom: '4px', fontSize: '15px', color: '#333' }}>
+              <div style={{ 
+                fontWeight: notification.is_read ? '400' : '700', // Bold if unread
+                marginBottom: '4px', fontSize: '15px', color: '#333' 
+              }}>
                 {notification.message || 'New notification'}
               </div>
               <div style={{ fontSize: '12px', color: '#adb5bd' }}>
@@ -240,11 +271,14 @@ const NotificationsList = () => {
               )}
             </div>
             
-            <div style={{
-              width: '10px', height: '10px', borderRadius: '50%',
-              backgroundColor: '#007bff', flexShrink: 0, marginTop: '6px',
-              animation: 'pulse 2s infinite'
-            }} />
+            {/* ✅ Only show the blue dot if it is UNREAD */}
+            {!notification.is_read && (
+              <div style={{
+                width: '10px', height: '10px', borderRadius: '50%',
+                backgroundColor: '#007bff', flexShrink: 0, marginTop: '6px',
+                animation: 'pulse 2s infinite'
+              }} />
+            )}
           </div>
         </div>
       ))}

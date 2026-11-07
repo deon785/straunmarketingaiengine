@@ -32,7 +32,6 @@ ChartJS.register(
 );
 
 export function SuspiciousActivityMonitor() {
-    const [suspiciousUsers, setSuspiciousUsers] = useState([]);
     const [refresh, setRefresh] = useState(0);
     
     useEffect(() => {
@@ -89,6 +88,16 @@ export function SuspiciousActivityMonitor() {
 }
 
 const AdminDashboard = () => {
+  const followUpThStyle = {
+    padding: '12px',
+    textAlign: 'left',
+    borderBottom: '2px solid #e5e7eb',
+    color: '#111827',
+    fontWeight: '600',
+    fontSize: '12px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em'
+  };
   const { user } = useAuthState();
 
   console.log('👑👑👑 ADMIN DASHBOARD IS RENDERING 👑👑👑');
@@ -113,6 +122,14 @@ const AdminDashboard = () => {
     dailyStats: [],
     topProducts: []
   });
+
+  const [timeStats, setTimeStats] = useState({
+    activeUsers: 0,
+    newToday: 0,
+    newWeek: 0,
+    newMonth: 0,
+    newYear: 0
+  });
   
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState([]);
@@ -122,10 +139,18 @@ const AdminDashboard = () => {
   const [authStats, setAuthStats] = useState({ auth_users: 0, profiles: 0, missing_profiles: 0 });
   const [productsWithNoImages, setProductsWithNoImages] = useState([]);
   const [userSearch, setUserSearch] = useState('');
+  const [suspiciousUsers, setSuspiciousUsers] = useState([]);
+  const [contactUser, setContactUser] = useState(null);
   const [realtimeData, setRealtimeData] = useState({
     onlineUsers: 0,
     recentActivities: []
   });
+
+    // ✅ NEW: Follow-up state
+  const [followUpUsers, setFollowUpUsers] = useState([]);
+  const [followUpLoading, setFollowUpLoading] = useState(false);
+  const [sendingFollowUp, setSendingFollowUp] = useState({});
+  const [followUpFilter, setFollowUpFilter] = useState('all'); // all | attempt1 | attempt2 | attempt3 | stopped
 
   // Real-time subscription
   useEffect(() => {
@@ -233,7 +258,267 @@ const AdminDashboard = () => {
     }
   }, []);
 
-  // In your AdminDashboard.jsx
+  // ✅ NEW: Fetch users inactive for 10+ days
+  const fetchFollowUpUsers = useCallback(async () => {
+    setFollowUpLoading(true);
+    try {
+      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(`
+          user_id,
+          username,
+          location,
+          phone_number,
+          last_activity_at,
+          last_reengagement_sent_at,
+          reengagement_attempts,
+          reengagement_stopped,
+          is_seller,
+          is_buyer
+        `)
+        .not('last_activity_at', 'is', null)
+        .lt('last_activity_at', tenDaysAgo)
+        .order('last_activity_at', { ascending: true });
+
+      if (error) throw error;
+
+      // Calculate days inactive & determine next attempt
+      const enriched = (data || []).map(user => {
+        const lastActive = new Date(user.last_activity_at).getTime();
+        const daysInactive = Math.floor((Date.now() - lastActive) / (1000 * 60 * 60 * 24));
+        const attempts = user.reengagement_attempts || 0;
+
+        let nextAttempt = null;
+        if (!user.reengagement_stopped) {
+          if (attempts === 0 && daysInactive >= 10) nextAttempt = 1;
+          else if (attempts === 1 && daysInactive >= 30) nextAttempt = 2;
+          else if (attempts === 2 && daysInactive >= 60) nextAttempt = 3;
+        }
+
+        return {
+          ...user,
+          days_inactive: daysInactive,
+          next_attempt: nextAttempt,
+        };
+      });
+
+      setFollowUpUsers(enriched);
+      console.log(`📊 Loaded ${enriched.length} inactive users for follow-up`);
+    } catch (err) {
+      console.error('Error fetching follow-up users:', err);
+      setFollowUpUsers([]);
+    } finally {
+      setFollowUpLoading(false);
+    }
+  }, []);
+
+  // ✅ NEW: Send a manual follow-up notification for a specific user
+  const sendManualFollowUp = async (user, attemptNumber) => {
+    if (!window.confirm(
+      `Send Attempt ${attemptNumber} to ${user.username || user.user_id.substring(0, 8)}?\n\n` +
+      `They've been inactive for ${user.days_inactive} days.`
+    )) return;
+
+    setSendingFollowUp(prev => ({ ...prev, [user.user_id]: true }));
+
+    try {
+      // ✅ Call the existing Edge Function
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/reengagement-cron`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: user.user_id,
+            attemptNumber,
+            forceSend: true, // In case you want to override the auto-check
+          }),
+        }
+      );
+
+      const result = await res.json().catch(() => ({}));
+
+      // ✅ Treat 200 AND "success" as success
+      if (res.ok) {
+        // ✅ Locally update the user's state
+        setFollowUpUsers(prev => prev.map(u => {
+          if (u.user_id !== user.user_id) return u;
+          const newAttempts = attemptNumber;
+          const newNext = newAttempts >= 3 ? null : newAttempts + 1;
+          return {
+            ...u,
+            reengagement_attempts: newAttempts,
+            last_reengagement_sent_at: new Date().toISOString(),
+            next_attempt: newNext,
+          };
+        }));
+
+        alert(`✅ Attempt ${attemptNumber} sent to ${user.username || 'user'}!`);
+      } else {
+        alert(`⚠️ Function responded: ${result.error || 'Unknown error'}\n\nThe cron function may not support manual sending. Check the function code.`);
+      }
+    } catch (err) {
+      console.error('Manual follow-up failed:', err);
+      alert(`❌ Error: ${err.message}`);
+    } finally {
+      setSendingFollowUp(prev => ({ ...prev, [user.user_id]: false }));
+    }
+  };
+
+  // ✅ NEW: Stop future follow-ups for a user
+  const stopFollowUp = async (userId) => {
+    if (!window.confirm('Stop all future follow-up notifications for this user?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ reengagement_stopped: true })
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      setFollowUpUsers(prev => prev.map(u =>
+        u.user_id === userId ? { ...u, reengagement_stopped: true, next_attempt: null } : u
+      ));
+      alert('✅ Follow-ups stopped for this user.');
+    } catch (err) {
+      console.error('Failed to stop follow-ups:', err);
+      alert(`❌ Error: ${err.message}`);
+    }
+  };
+
+    // ✅ NEW: Send follow-ups to ALL eligible users in one go
+  const sendBulkFollowUps = async () => {
+    // Get only users whose next_attempt is set AND not stopped
+    const eligible = followUpUsers.filter(
+      u => u.next_attempt && !u.reengagement_stopped
+    );
+
+    if (eligible.length === 0) {
+      alert('✅ No users are currently eligible for a follow-up.');
+      return;
+    }
+
+    // Breakdown by attempt number so admin knows what's about to happen
+    const byAttempt = {
+      1: eligible.filter(u => u.next_attempt === 1).length,
+      2: eligible.filter(u => u.next_attempt === 2).length,
+      3: eligible.filter(u => u.next_attempt === 3).length,
+    };
+
+    const summary = [
+      byAttempt[1] > 0 ? `• Attempt 1 (10-day): ${byAttempt[1]} users` : null,
+      byAttempt[2] > 0 ? `• Attempt 2 (30-day): ${byAttempt[2]} users` : null,
+      byAttempt[3] > 0 ? `• Attempt 3 (60-day): ${byAttempt[3]} users` : null,
+    ].filter(Boolean).join('\n');
+
+    if (!window.confirm(
+      `Send follow-ups to ${eligible.length} users?\n\n${summary}\n\n` +
+      `Each user will receive the correct next attempt based on their history.\n\n` +
+      `This cannot be undone. Continue?`
+    )) return;
+
+    // Set all as "sending" so the UI shows progress
+    const sendingState = {};
+    eligible.forEach(u => { sendingState[u.user_id] = true; });
+    setSendingFollowUp(prev => ({ ...prev, ...sendingState }));
+
+    let sent = 0;
+    let failed = 0;
+    const failedUsers = [];
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      // ✅ Process sequentially with a small delay to be gentle on the Edge Function
+      for (let i = 0; i < eligible.length; i++) {
+        const user = eligible[i];
+        const attemptNumber = user.next_attempt;
+
+        try {
+          const res = await fetch(
+            `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/reengagement-cron`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                userId: user.user_id,
+                attemptNumber,
+                forceSend: true,
+              }),
+            }
+          );
+
+          if (res.ok) {
+            sent++;
+
+            // ✅ Update locally so the UI reflects reality immediately
+            setFollowUpUsers(prev => prev.map(u => {
+              if (u.user_id !== user.user_id) return u;
+              const newAttempts = attemptNumber;
+              const newNext = newAttempts >= 3 ? null : newAttempts + 1;
+              return {
+                ...u,
+                reengagement_attempts: newAttempts,
+                last_reengagement_sent_at: new Date().toISOString(),
+                next_attempt: newNext,
+              };
+            }));
+          } else {
+            failed++;
+            failedUsers.push(user.username || user.user_id.substring(0, 8));
+          }
+        } catch (err) {
+          console.error(`Bulk send failed for ${user.user_id}:`, err);
+          failed++;
+          failedUsers.push(user.username || user.user_id.substring(0, 8));
+        } finally {
+          // Clear per-user sending flag
+          setSendingFollowUp(prev => ({ ...prev, [user.user_id]: false }));
+        }
+
+        // ✅ 300ms delay between calls — prevents Edge Function rate-limiting
+        if (i < eligible.length - 1) {
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+
+      // ✅ Final report
+      if (failed === 0) {
+        alert(`✅ Bulk send complete!\n\n${sent} follow-up notifications sent successfully.`);
+      } else {
+        alert(
+          `⚠️ Bulk send finished with some failures.\n\n` +
+          `✅ Sent: ${sent}\n` +
+          `❌ Failed: ${failed}\n\n` +
+          `Failed users: ${failedUsers.slice(0, 5).join(', ')}${failedUsers.length > 5 ? ` +${failedUsers.length - 5} more` : ''}`
+        );
+      }
+
+      // Refresh to confirm server state
+      await fetchFollowUpUsers();
+
+    } catch (err) {
+      console.error('Bulk send fatal error:', err);
+      alert(`❌ Bulk send failed: ${err.message}`);
+    } finally {
+      // Ensure every sending flag is cleared
+      setSendingFollowUp({});
+    }
+  };
+
   const fetchAuthStatsSQL = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -277,45 +562,49 @@ const AdminDashboard = () => {
   }, [callAdminUsersFunction]);
 
   // Update fetchIncompleteUsers to use the Edge Function
-  const fetchIncompleteUsers = useCallback(async () => {
+    const fetchIncompleteUsers = useCallback(async () => {
     try {
       setLoading(true);
-      
       console.log('🔄 Fetching incomplete users...');
       
       const result = await callAdminUsersFunction('list');
       
-      console.log('📊 Raw result:', result);
-      
       if (!result.success || !result.users) {
-        console.error('Failed to fetch users:', result);
         setIncompleteUsers([]);
         return;
       }
       
-      console.log(`📊 Total users: ${result.total}`);
-      console.log(`📊 With profiles: ${result.with_profiles}`);
-      console.log(`📊 Without profiles: ${result.without_profiles}`);
-      
       // Filter incomplete users
       const incomplete = result.users.filter(user => {
-        // Users without profile are incomplete
         if (!user.has_profile) return true;
-        
-        // Users with incomplete setup
         const profile = user.profile;
         if (!profile) return true;
-        
         return !profile.is_seller && 
               !profile.is_buyer && 
               !profile.seller_setup_completed && 
               !profile.buyer_setup_completed;
       });
       
-      console.log(`📊 Found ${incomplete.length} incomplete users`);
+      // ✅ NEW: Check if these "incomplete" users actually have products in the DB
+      const incompleteIds = incomplete.map(u => u.id);
+      let usersWithProducts = [];
+
+      if (incompleteIds.length > 0) {
+        // Fetch product counts for these specific users
+        const { data: products } = await supabase
+          .from('products')
+          .select('seller_id')
+          .in('seller_id', incompleteIds);
+
+        if (products) {
+          usersWithProducts = [...new Set(products.map(p => p.seller_id))];
+        }
+      }
+
+      // Only show as incomplete if they DON'T have products
+      const trulyIncomplete = incomplete.filter(user => !usersWithProducts.includes(user.id));
       
-      // Format for display
-      const formattedUsers = incomplete.map(user => ({
+      const formattedUsers = trulyIncomplete.map(user => ({
         user_id: user.id,
         username: user.username || user.email || 'Unknown',
         email: user.email || 'No email',
@@ -323,17 +612,9 @@ const AdminDashboard = () => {
         phone_number: user.phone_number || 'No profile',
         created_at: user.created_at || new Date().toISOString(),
         has_profile: user.has_profile,
-        is_seller: user.is_seller || false,
-        is_buyer: user.is_buyer || false,
-        seller_setup_completed: user.seller_setup_completed || false,
-        buyer_setup_completed: user.buyer_setup_completed || false
       }));
       
-      // ✅ Force state update with new array
       setIncompleteUsers([...formattedUsers]);
-      
-      console.log('✅ Incomplete users updated:', formattedUsers.length);
-      
     } catch (error) {
       console.error('Error fetching incomplete users:', error);
       setIncompleteUsers([]);
@@ -341,6 +622,41 @@ const AdminDashboard = () => {
       setLoading(false);
     }
   }, [callAdminUsersFunction]);
+
+    const detectSuspiciousActivity = useCallback((activities) => {
+    if (!activities || activities.length === 0) return;
+
+    const userActivityMap = {};
+    
+    activities.forEach(act => {
+      if (!userActivityMap[act.user_id]) {
+        userActivityMap[act.user_id] = [];
+      }
+      userActivityMap[act.user_id].push(new Date(act.created_at).getTime());
+    });
+
+    const flaggedUsers = [];
+
+    Object.keys(userActivityMap).forEach(userId => {
+      const timestamps = userActivityMap[userId].sort((a, b) => a - b);
+      const BOT_THRESHOLD = 10; 
+      const TIME_WINDOW_MS = 60000; 
+
+      for (let i = 0; i <= timestamps.length - BOT_THRESHOLD; i++) {
+        const timeDiff = timestamps[i + BOT_THRESHOLD - 1] - timestamps[i];
+        if (timeDiff <= TIME_WINDOW_MS) {
+          flaggedUsers.push({
+            userId,
+            reason: `Performed ${BOT_THRESHOLD}+ actions in under 60 seconds`,
+            activityCount: userActivityMap[userId].length
+          });
+          break;
+        }
+      }
+    });
+
+    setSuspiciousUsers(flaggedUsers);
+  }, []);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -352,7 +668,7 @@ const AdminDashboard = () => {
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(25);
 
       const { data: userActivity } = await supabase
         .from('user_activities')
@@ -388,11 +704,49 @@ const AdminDashboard = () => {
         .order('views', { ascending: false })
         .limit(10);
 
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString();
+
+      // 1. Get all valid profiles (is_seller or is_buyer is true)
+      const { data: validProfiles } = await supabase
+        .from('profiles')
+        .select('created_at')
+        .or('is_seller.eq.true,is_buyer.eq.true');
+
+      // 2. Get all products (to count sellers who have products but maybe incomplete profiles)
+      const { data: allProducts } = await supabase
+        .from('products')
+        .select('seller_id, created_at');
+
+      // 3. Create a Set of unique valid User IDs
+      const validUserIds = new Set(validProfiles?.map(p => p.id) || []);
+      allProducts?.forEach(p => validUserIds.add(p.seller_id));
+
+      // 4. Calculate Timeframes
+      const newToday = validProfiles?.filter(p => p.created_at >= oneDayAgo).length || 0;
+      const newWeek = validProfiles?.filter(p => p.created_at >= oneWeekAgo).length || 0;
+      const newMonth = validProfiles?.filter(p => p.created_at >= oneMonthAgo).length || 0;
+      const newYear = validProfiles?.filter(p => p.created_at >= oneYearAgo).length || 0;
+
+      setTimeStats({
+        activeUsers: validUserIds.size,
+        newToday,
+        newWeek,
+        newMonth,
+        newYear
+      });
+
       const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
       const { data: activeUsers } = await supabase
         .from('profiles')
         .select('user_id')
         .gte('last_activity_at', fifteenMinutesAgo);
+
+      // ✅ Run bot detection on the fetched activities
+      detectSuspiciousActivity(userActivity || []);  
 
       setStats({
         users: userCount || 0,
@@ -464,6 +818,7 @@ const AdminDashboard = () => {
       await fetchReports();
       await fetchIncompleteUsers();
       await fetchAuthStats();
+      await fetchFollowUpUsers();
       const products = await fetchProductsWithNoImages();
       setProductsWithNoImages(products);
     };
@@ -903,8 +1258,8 @@ const AdminDashboard = () => {
                 🟢 {realtimeData.onlineUsers} Users Online
               </span>
             </div>
-            <span style={{ fontSize: '14px', color: '#6b7280' }}>
-              📊 {stats.userActivity.length} Activities Today
+            <span style={{ fontSize: '14px', color: '#2563eb', fontWeight: 'bold', background: '#dbeafe', padding: '4px 10px', borderRadius: '20px' }}>
+              📊 {stats.userActivity.length} Total Tracked Activities
             </span>
             <span style={{ fontSize: '14px', color: '#6b7280' }}>
               👤 Auth Users: {authStats.auth_users}
@@ -932,18 +1287,15 @@ const AdminDashboard = () => {
               transition: 'all 0.2s ease'
             }}
             onMouseEnter={(e) => {
-              if (activeTab !== 'overview') {
-                e.currentTarget.style.background = '#f3f4f6';
-              }
+              if (activeTab !== 'overview') e.currentTarget.style.background = '#f3f4f6';
             }}
             onMouseLeave={(e) => {
-              if (activeTab !== 'overview') {
-                e.currentTarget.style.background = 'transparent';
-              }
+              if (activeTab !== 'overview') e.currentTarget.style.background = 'transparent';
             }}
           >
             Overview
           </button>
+
           <button 
             onClick={() => setActiveTab('users')}
             style={{ 
@@ -993,6 +1345,49 @@ const AdminDashboard = () => {
             }}
           >
             📢 Reports ({reports.filter(r => r.status === 'pending').length})
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('followups')}
+            style={{ 
+              padding: '8px 16px',
+              background: activeTab === 'followups' ? '#f97316' : 'transparent',
+              color: activeTab === 'followups' ? 'white' : '#6b7280',
+              border: activeTab === 'followups' ? 'none' : '1px solid #e5e7eb',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: '500',
+              transition: 'all 0.2s ease',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== 'followups') e.currentTarget.style.background = '#f3f4f6';
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== 'followups') e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            🔔 Follow-Ups
+            {followUpUsers.filter(u => u.next_attempt).length > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: '-6px',
+                right: '-6px',
+                background: '#dc2626',
+                color: 'white',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                minWidth: '18px',
+                height: '18px',
+                padding: '0 5px',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                {followUpUsers.filter(u => u.next_attempt).length}
+              </span>
+            )}
           </button>
           <button 
             onClick={() => setActiveTab('products')}
@@ -1075,6 +1470,28 @@ const AdminDashboard = () => {
       {/* Overview Tab */}
       {activeTab === 'overview' && (
         <>
+        {/* ✅ Security Alert goes here */}
+          {suspiciousUsers.length > 0 && (
+            <div style={{ 
+              background: '#fee2e2', border: '1px solid #ef4444', borderLeft: '5px solid #dc2626',
+              padding: '15px', borderRadius: '8px', marginBottom: '24px', boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+            }}>
+              <h3 style={{ color: '#b91c1c', margin: '0 0 10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🚨 Security Alert: Suspicious Activity Detected
+              </h3>
+              <p style={{ color: '#7f1d1d', margin: '0 0 10px 0', fontSize: '14px' }}>
+                The following users are acting like bots (too many requests in a short time):
+              </p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: '#991b1b' }}>
+                {suspiciousUsers.map((u, i) => (
+                  <li key={i} style={{ marginBottom: '5px' }}>
+                    <strong>User {u.userId.substring(0, 8)}...</strong> — {u.reason} (Total tracked: {u.activityCount})
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
           {/* Stats Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ 
@@ -1093,11 +1510,17 @@ const AdminDashboard = () => {
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
             }}>
-              <h3 style={{ color: '#6b7280', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '500' }}>Total Users</h3>
-              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: 0, color: '#111827' }}>{stats.users}</p>
-              <p style={{ fontSize: '12px', color: '#16a34a', marginTop: '5px' }}>
-                ↑ {stats.recentUsers.length} new in last 24h
-              </p>
+              <h3 style={{ color: '#6b7280', margin: '0 0 8px 0', fontSize: '13px', fontWeight: '500' }}>Total Active Users</h3>
+              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: 0, color: '#111827' }}>{stats.users}</p> 
+              <p style={{ fontSize: '32px', fontWeight: 'bold', margin: 0, color: '#111827' }}>{timeStats.activeUsers}</p>
+               
+              {/* YouTube-style timeframe breakdown */}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '11px', background: '#dcfce7', color: '#16a34a', padding: '2px 6px', borderRadius: '4px' }}>24h: {timeStats.newToday}</span>
+                <span style={{ fontSize: '11px', background: '#dbeafe', color: '#2563eb', padding: '2px 6px', borderRadius: '4px' }}>7d: {timeStats.newWeek}</span>
+                <span style={{ fontSize: '11px', background: '#fef3c7', color: '#d97706', padding: '2px 6px', borderRadius: '4px' }}>30d: {timeStats.newMonth}</span>
+                <span style={{ fontSize: '11px', background: '#f3f4f6', color: '#4b5563', padding: '2px 6px', borderRadius: '4px' }}>1y: {timeStats.newYear}</span>
+              </div>
             </div>
 
             <div style={{ 
@@ -1371,7 +1794,13 @@ const AdminDashboard = () => {
                     </div>
                     <div style={{ display: 'flex', gap: '5px' }}>
                       <button 
-                        onClick={() => window.open(`/product/${product.id}`, '_blank')}
+                        onClick={() => {
+                          if (product.seller_id) {
+                            window.open(`/buyer/shop/${product.seller_id}`, '_blank');
+                          } else {
+                            alert("This product has no seller ID attached.");
+                          }
+                        }}
                         style={{ 
                           padding: '4px 12px',
                           background: '#2563eb',
@@ -1380,13 +1809,14 @@ const AdminDashboard = () => {
                           borderRadius: '6px',
                           fontSize: '11px',
                           cursor: 'pointer',
-                          transition: 'background-color 0.2s'
+                          
                         }}
                         onMouseEnter={(e) => e.currentTarget.style.background = '#1d4ed8'}
                         onMouseLeave={(e) => e.currentTarget.style.background = '#2563eb'}
                       >
-                        View
+                        🏪 View Shop
                       </button>
+
                       <button 
                         onClick={() => handleDeleteProduct(product.id)}
                         style={{ 
@@ -1774,6 +2204,274 @@ const AdminDashboard = () => {
               Next →
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Follow-Ups Tab */}
+      {activeTab === 'followups' && (
+        <div style={{ 
+          background: 'white',
+          padding: '20px',
+          borderRadius: '12px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            marginBottom: '20px',
+            flexWrap: 'wrap',
+            gap: '15px'
+          }}>
+            <div>
+              <h2 style={{ color: '#111827', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                🔔 Re-Engagement Follow-Ups
+              </h2>
+              <p style={{ color: '#6b7280', fontSize: '13px', margin: '5px 0 0 0' }}>
+                Users inactive for 10+ days. Send attempt 1 (10d), 2 (30d), or 3 (60d). After 3 attempts, follow-ups stop.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              {followUpUsers.filter(u => u.next_attempt && !u.reengagement_stopped).length > 0 && (
+                <button
+                  onClick={sendBulkFollowUps}
+                  disabled={followUpLoading || Object.keys(sendingFollowUp).length > 0}
+                  style={{
+                    padding: '8px 16px',
+                    background: Object.keys(sendingFollowUp).length > 0 ? '#9ca3af' : '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: followUpLoading || Object.keys(sendingFollowUp).length > 0 ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  title="Send the next attempt to every eligible user"
+                >
+                  {Object.keys(sendingFollowUp).length > 0
+                    ? `⏳ Sending (${Object.keys(sendingFollowUp).length})...`
+                    : `🚀 Send to All Eligible (${followUpUsers.filter(u => u.next_attempt && !u.reengagement_stopped).length})`}
+                </button>
+              )}
+              <button
+                onClick={fetchFollowUpUsers}
+                disabled={followUpLoading}
+                style={{
+                  padding: '8px 16px',
+                  background: followUpLoading ? '#9ca3af' : '#f97316',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: followUpLoading ? 'not-allowed' : 'pointer',
+                  fontSize: '13px',
+                  fontWeight: '600'
+                }}
+              >
+                {followUpLoading ? '⏳ Loading...' : '🔄 Refresh'}
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Buttons */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+            {[
+              { key: 'all', label: `All (${followUpUsers.length})`, color: '#6b7280' },
+              { key: 'attempt1', label: `Attempt 1 (${followUpUsers.filter(u => u.next_attempt === 1).length})`, color: '#2563eb' },
+              { key: 'attempt2', label: `Attempt 2 (${followUpUsers.filter(u => u.next_attempt === 2).length})`, color: '#f59e0b' },
+              { key: 'attempt3', label: `Attempt 3 (${followUpUsers.filter(u => u.next_attempt === 3).length})`, color: '#dc2626' },
+              { key: 'stopped', label: `Stopped (${followUpUsers.filter(u => u.reengagement_stopped).length})`, color: '#9ca3af' },
+            ].map(f => (
+              <button
+                key={f.key}
+                onClick={() => setFollowUpFilter(f.key)}
+                style={{
+                  padding: '6px 14px',
+                  background: followUpFilter === f.key ? f.color : 'transparent',
+                  color: followUpFilter === f.key ? 'white' : '#6b7280',
+                  border: `1px solid ${f.color}`,
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: '600'
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {followUpLoading ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                border: '3px solid #f3f3f3',
+                borderTop: '3px solid #f97316',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                margin: '0 auto 12px auto'
+              }} />
+              Loading users...
+            </div>
+          ) : followUpUsers.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#16a34a' }}>
+              ✅ No inactive users found. Everyone is active!
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ background: '#fff7ed' }}>
+                    <th style={followUpThStyle}>User</th>
+                    <th style={followUpThStyle}>Inactive For</th>
+                    <th style={followUpThStyle}>Attempts</th>
+                    <th style={followUpThStyle}>Last Sent</th>
+                    <th style={followUpThStyle}>Status</th>
+                    <th style={followUpThStyle}>Send Next</th>
+                    <th style={followUpThStyle}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {followUpUsers
+                    .filter(u => {
+                      if (followUpFilter === 'all') return true;
+                      if (followUpFilter === 'stopped') return u.reengagement_stopped;
+                      if (followUpFilter === 'attempt1') return u.next_attempt === 1;
+                      if (followUpFilter === 'attempt2') return u.next_attempt === 2;
+                      if (followUpFilter === 'attempt3') return u.next_attempt === 3;
+                      return true;
+                    })
+                    .map((u, index) => {
+                      const isSending = sendingFollowUp[u.user_id];
+                      const attempts = u.reengagement_attempts || 0;
+                      return (
+                        <tr key={u.user_id} style={{
+                          borderBottom: '1px solid #e5e7eb',
+                          background: index % 2 === 0 ? 'white' : '#fef3c7'
+                        }}>
+                          <td style={{ padding: '12px', fontSize: '13px', color: '#111827' }}>
+                            <strong>{u.username || 'No username'}</strong>
+                            <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                              ID: {u.user_id.substring(0, 8)}...
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                              📍 {u.location || 'No location'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '13px', color: '#111827' }}>
+                            <span style={{
+                              padding: '4px 10px',
+                              background: u.days_inactive >= 60 ? '#fee2e2' :
+                                          u.days_inactive >= 30 ? '#fef3c7' : '#dbeafe',
+                              color: u.days_inactive >= 60 ? '#dc2626' :
+                                    u.days_inactive >= 30 ? '#d97706' : '#2563eb',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {u.days_inactive} days
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '13px', color: '#111827' }}>
+                            {attempts} / 3
+                            <div style={{ display: 'flex', gap: '2px', marginTop: '4px' }}>
+                              {[0, 1, 2].map(i => (
+                                <div key={i} style={{
+                                  width: '20px',
+                                  height: '6px',
+                                  borderRadius: '3px',
+                                  background: i < attempts ? '#f97316' : '#e5e7eb'
+                                }} />
+                              ))}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '12px', color: '#6b7280' }}>
+                            {u.last_reengagement_sent_at
+                              ? new Date(u.last_reengagement_sent_at).toLocaleDateString()
+                              : 'Never'}
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            {u.reengagement_stopped ? (
+                              <span style={{ padding: '4px 10px', background: '#f3f4f6', color: '#6b7280', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>
+                                🛑 Stopped
+                              </span>
+                            ) : u.next_attempt ? (
+                              <span style={{ padding: '4px 10px', background: '#fff7ed', color: '#f97316', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>
+                                🟠 Ready (Attempt {u.next_attempt})
+                              </span>
+                            ) : (
+                              <span style={{ padding: '4px 10px', background: '#f3f4f6', color: '#6b7280', borderRadius: '12px', fontSize: '11px', fontWeight: '600' }}>
+                                ⏳ Waiting
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            {u.reengagement_stopped ? (
+                              <span style={{ fontSize: '12px', color: '#9ca3af' }}>—</span>
+                            ) : (
+                              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                {[1, 2, 3].map(n => (
+                                  <button
+                                    key={n}
+                                    onClick={() => sendManualFollowUp(u, n)}
+                                    disabled={isSending || attempts >= n}
+                                    title={
+                                      attempts >= n ? `Attempt ${n} already sent` :
+                                      n === 1 ? 'Send 10-day re-engagement' :
+                                      n === 2 ? 'Send 30-day reminder' :
+                                      'Send 60-day final reminder'
+                                    }
+                                    style={{
+                                      padding: '4px 10px',
+                                      background: attempts >= n ? '#e5e7eb' :
+                                                 isSending ? '#9ca3af' :
+                                                 n === 1 ? '#2563eb' :
+                                                 n === 2 ? '#f59e0b' : '#dc2626',
+                                      color: attempts >= n ? '#9ca3af' : 'white',
+                                      border: 'none',
+                                      borderRadius: '6px',
+                                      fontSize: '11px',
+                                      fontWeight: '600',
+                                      cursor: isSending || attempts >= n ? 'not-allowed' : 'pointer',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {isSending ? '...' : `Send #${n}`}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            {!u.reengagement_stopped && (
+                              <button
+                                onClick={() => stopFollowUp(u.user_id)}
+                                style={{
+                                  padding: '4px 10px',
+                                  background: '#f3f4f6',
+                                  color: '#6b7280',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                🛑 Stop
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -2180,13 +2878,15 @@ const AdminDashboard = () => {
                         background: color,
                         color: 'white',
                         borderRadius: '4px',
-                        fontSize: '10px',
-                        fontWeight: '600'
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        minWidth: '100px',
+                        textAlign: 'center'
                       }}>
-                        {activity.action_type.replace('_', ' ').toUpperCase()}
+                        {activity.action_type.replace(/_/g, ' ').toUpperCase()}
                       </span>
                       <span style={{ flex: 1, fontSize: '12px', color: '#111827' }}>
-                        User {activity.user_id?.substring(0, 8)}...
+                        {activity.message || `User ${activity.user_id.substring(0, 8)} did a ${activity.action_type}`}
                       </span>
                       <span style={{ fontSize: '11px', color: '#6b7280' }}>
                         {new Date(activity.created_at).toLocaleTimeString()}
@@ -2238,6 +2938,21 @@ const AdminDashboard = () => {
           background: #9ca3af;
         }
       `}</style>
+
+      {/* Shared styles for Follow-Ups tab */}
+      {(() => {
+        window.__followUpThStyle = window.__followUpThStyle || {
+          padding: '12px',
+          textAlign: 'left',
+          borderBottom: '2px solid #e5e7eb',
+          color: '#111827',
+          fontWeight: '600',
+          fontSize: '12px',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em'
+        };
+        return null;
+      })()}
 
       {/* INCOMPLETE USERS SECTION */}
       <div style={{
@@ -2317,29 +3032,54 @@ const AdminDashboard = () => {
                         {new Date(user.created_at).toLocaleTimeString()}
                       </div>
                     </td>
-                    <td style={{ padding: '12px' }}>
-                      <button
-                        onClick={() => deleteUserCompletely(user.user_id)}
-                        style={{
-                          padding: '8px 16px',
-                          background: '#dc2626',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
-                      >
-                        🗑️ Delete User
-                      </button>
+                                        <td style={{ padding: '12px' }}>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {/* ✅ NEW: Contact Button */}
+                        <button
+                          onClick={() => setContactUser(user)}
+                          style={{
+                            padding: '8px 16px',
+                            background: '#25D366', // WhatsApp Green
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#1da851'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = '#25D366'}
+                        >
+                          💬 Contact
+                        </button>
+
+                        {/* Existing Delete Button */}
+                        <button
+                          onClick={() => deleteUserCompletely(user.user_id)}
+                          style={{
+                            padding: '8px 16px',
+                            background: '#dc2626',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = '#b91c1c'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = '#dc2626'}
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
                       <div style={{ fontSize: '10px', color: '#6b7280', marginTop: '4px' }}>
-                        Deletes all user data
+                        Contact user or delete their data
                       </div>
                     </td>
                   </tr>
@@ -2446,6 +3186,135 @@ const AdminDashboard = () => {
           </div>
         )}
       </div>
+            {/* ✅ NEW: Contact User Modal (Handles both Phone and Email) */}
+      {contactUser && (
+        <div
+          onClick={() => setContactUser(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            background: 'rgba(0,0,0,0.6)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '400px',
+              padding: '24px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+              textAlign: 'center'
+            }}
+          >
+            <div style={{ fontSize: '48px', marginBottom: '10px' }}>👋</div>
+            <h2 style={{ margin: '0 0 8px 0', color: '#111827', fontSize: '20px' }}>
+              Reach out to {contactUser.username || 'User'}
+            </h2>
+            <p style={{ margin: '0 0 20px 0', color: '#6b7280', fontSize: '14px' }}>
+              They haven't finished setting up their account. A quick message might help them get started!
+            </p>
+
+            {/* Contact Info Box */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '20px',
+              textAlign: 'left'
+            }}>
+              <div style={{ marginBottom: '8px' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '2px' }}>Phone Number:</div>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', color: contactUser.phone_number ? '#0f172a' : '#dc2626' }}>
+                  {contactUser.phone_number || 'Not provided'}
+                </div>
+              </div>
+              
+              <div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '2px' }}>Email:</div>
+                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>
+                  {contactUser.email || 'No email'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* WhatsApp Button */}
+              <button
+                onClick={() => {
+                  if (!contactUser.phone_number) return;
+                  const cleanPhone = contactUser.phone_number.replace(/\D/g, '');
+                  const finalNum = cleanPhone.startsWith('263') ? cleanPhone : `263${cleanPhone.replace(/^0/, '')}`;
+                  const msg = encodeURIComponent(`Hi ${contactUser.username || 'there'}, I noticed you created an account on Straun AI but haven't finished setting up. Do you need any help getting started?`);
+                  window.open(`https://wa.me/${finalNum}?text=${msg}`, '_blank');
+                }}
+                disabled={!contactUser.phone_number}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: contactUser.phone_number ? '#25D366' : '#f1f5f9',
+                  color: contactUser.phone_number ? 'white' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontWeight: 'bold',
+                  fontSize: '15px',
+                  cursor: contactUser.phone_number ? 'pointer' : 'not-allowed'
+                }}
+              >
+                💬 {contactUser.phone_number ? 'Message on WhatsApp' : 'No Phone Number Available'}
+              </button>
+
+              {/* Email Button (Fallback) */}
+              <button
+                onClick={() => {
+                  if (!contactUser.email) return;
+                  const subject = encodeURIComponent("Finish setting up your Straun AI account");
+                  const body = encodeURIComponent(`Hi ${contactUser.username || 'there'},\n\nI noticed you created an account on Straun AI but haven't finished setting up. Do you need any help getting started?\n\nBest,\nThe Straun Team`);
+                  window.open(`mailto:${contactUser.email}?subject=${subject}&body=${body}`, '_self');
+                }}
+                disabled={!contactUser.email || contactUser.email === 'No email'}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: contactUser.email ? '#3182ce' : '#f1f5f9',
+                  color: contactUser.email ? 'white' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontWeight: 'bold',
+                  fontSize: '15px',
+                  cursor: contactUser.email ? 'pointer' : 'not-allowed'
+                }}
+              >
+                ✉️ Send Email
+              </button>
+
+              <button
+                onClick={() => setContactUser(null)}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: 'transparent',
+                  color: '#64748b',
+                  border: 'none',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  marginTop: '10px'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}      
     </div>
   );
 };

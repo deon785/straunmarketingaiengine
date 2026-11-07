@@ -11,11 +11,25 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY")
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY")
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") || "mailto:your-email@example.com"
 
-webpush.setVapidDetails(
-  VAPID_SUBJECT,
-  VAPID_PUBLIC_KEY,
-  VAPID_PRIVATE_KEY
-)
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  console.error("❌ CRITICAL: VAPID keys are missing from environment variables!");
+} else {
+  try {
+    // ✅ Deno requires the VAPID subject to be a valid mailto: or https: URL
+    const subject = VAPID_SUBJECT.startsWith('mailto:') || VAPID_SUBJECT.startsWith('http') 
+      ? VAPID_SUBJECT 
+      : `mailto:${VAPID_SUBJECT}`;
+
+    webpush.setVapidDetails(
+      subject,
+      VAPID_PUBLIC_KEY.trim(),
+      VAPID_PRIVATE_KEY.trim()
+    );
+    console.log("✅ VAPID details set successfully");
+  } catch (error) {
+    console.error("❌ Error setting VAPID details:", error.message);
+  }
+}
 
 const CONFIG = {
   DRY_RUN: Deno.env.get('DRY_RUN') === 'true',
@@ -33,10 +47,10 @@ const CONFIG = {
 }
 
 Deno.serve(async (req) => {
-  const corsHeaders = {
+    const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey, x-client-info',
   };
 
   try {
@@ -65,7 +79,32 @@ Deno.serve(async (req) => {
         { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    // ✅ NEW: Handle manual send from admin
+    let body: any = {};
+    try { body = await req.json(); } catch { /* no body */ }
 
+    if (body.userId && body.attemptNumber) {
+      console.log(`🎯 Manual send: Attempt ${body.attemptNumber} to user ${body.userId}`);
+      
+      const manualUser = {
+        user_id: body.userId,
+        reengagement_attempts: body.attemptNumber - 1,
+        reengagement_stopped: false,
+        forceSend: true, // ✅ Force it
+        manualAttemptNumber: body.attemptNumber // ✅ Pass the number
+      };
+      
+      const results: any = { processed: 0, sent: 0, errors: 0, skipped: 0, details: [] };
+      await processUser(manualUser, results);
+      
+      return new Response(
+        JSON.stringify({ success: true, manual: true, ...results }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ✅ Default: run the full cron
     const result = await processReengagementNotifications();
     
     return new Response(
@@ -168,18 +207,22 @@ async function processUser(user: any, results: any) {
   try {
     const daysInactive = getDaysInactive(user.last_activity_at);
     
-    // Skip if less than 10 days inactive
-    if (daysInactive < 10) {
-      results.skipped++;
-      return;
+    // ✅ NEW: Allow manual force send
+    let attemptNumber;
+    if (user.forceSend && user.manualAttemptNumber) {
+        attemptNumber = user.manualAttemptNumber;
+    } else {
+        // Standard automatic logic
+        if (daysInactive < 10) {
+          results.skipped++;
+          return;
+        }
+        attemptNumber = determineAttemptNumber(
+          daysInactive,
+          user.reengagement_attempts || 0,
+          user.last_reengagement_sent_at
+        );
     }
-
-    // Determine which attempt to send
-    const attemptNumber = determineAttemptNumber(
-      daysInactive,
-      user.reengagement_attempts || 0,
-      user.last_reengagement_sent_at
-    );
 
     if (!attemptNumber) {
       results.skipped++;
@@ -256,20 +299,20 @@ function determineAttemptNumber(
   currentAttempts: number,
   lastSentAt: string | null
 ): number | null {
-  // Already sent 3 times
+  // If they already received all 3 attempts, stop.
   if (currentAttempts >= 3) return null;
 
-  // Attempt 1: 10-29 days
-  if (daysInactive >= 10 && daysInactive < 30 && currentAttempts === 0) {
+  // Attempt 1: 10+ days inactive, 0 attempts sent
+  if (daysInactive >= 10 && currentAttempts === 0) {
     return 1;
   }
   
-  // Attempt 2: 30-59 days
-  if (daysInactive >= 30 && daysInactive < 60 && currentAttempts === 1) {
+  // Attempt 2: 30+ days inactive, 1 attempt sent
+  if (daysInactive >= 30 && currentAttempts === 1) {
     return 2;
   }
   
-  // Attempt 3: 60+ days
+  // Attempt 3: 60+ days inactive, 2 attempts sent
   if (daysInactive >= 60 && currentAttempts === 2) {
     return 3;
   }
@@ -300,22 +343,20 @@ async function checkUserPushSubscription(userId: string): Promise<boolean> {
 
 async function checkUserOptedOut(userId: string): Promise<boolean> {
   try {
-    // Check if user has opted out of push notifications
+    // ✅ FIX: Query an actual column. We can use 'reengagement_stopped'
     const { data, error } = await supabase
       .from('profiles')
-      .select('push_notifications_enabled')
+      .select('reengagement_stopped')
       .eq('user_id', userId)
       .single();
 
     if (error) {
       console.error('Error checking opt-out:', error);
-      return false;
+      return false; // Assume not opted out if the query fails
     }
 
-    // If column doesn't exist or is false, they haven't opted out
-    return data?.push_notifications_enabled === false;
+    return data?.reengagement_stopped === true;
   } catch (error) {
-    // Column might not exist, treat as not opted out
     return false;
   }
 }
@@ -365,6 +406,20 @@ async function sendReengagementNotification(
       }
     });
 
+    // ✅ NEW: Save it to the database so it shows in the bell
+        // ✅ Save it to the notifications table so the bell shows it
+    const { error: dbError } = await supabase
+      .from('notifications')
+      .insert({
+        user_id: userId,
+        message: `👋 We miss you! ${personalizedBody}`,
+        link_type: 'reengagement',
+        is_read: false,
+        created_at: new Date().toISOString()
+      });
+
+    if (dbError) console.error('Failed to save notification to DB:', dbError);
+
     await webpush.sendNotification(subscription.subscription, payload);
 
     await logNotification(userId, attemptNumber, daysInactive, true);
@@ -373,7 +428,10 @@ async function sendReengagementNotification(
     return { success: true };
 
   } catch (error) {
-    console.error(`❌ Failed to send notification to user ${userId}:`, error);
+    console.error(`❌ Failed to send notification to user ${userId}:`);
+    console.error(`Status Code: ${error.statusCode}`);
+    console.error(`Body: ${error.body}`); // ✅ THIS IS THE KEY
+    console.error(`Message: ${error.message}`);
     
     await logNotification(userId, attemptNumber, daysInactive, false, error.message);
     

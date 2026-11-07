@@ -3628,11 +3628,11 @@ img {
   
   /* Adjust main content to account for fixed menu button */
   .main-content-wrapper {
-    padding-top: 20px !important;
+    padding-top: 10px !important;
   }
   
   .app-container {
-    padding-top: 60px !important;
+    padding-top: 10px !important;
   }
   
   /* Adjust notification container position */
@@ -4318,7 +4318,7 @@ img {
     }
 
     .main-content-wrapper {
-        padding-top: 16px !important; /* Smaller gap on mobile */
+        padding-top: 10px !important; /* Smaller gap on mobile */
         min-height: calc(100vh - 60px - 16px); 
     }
     
@@ -4563,7 +4563,7 @@ img {
         }
         
         .main-content-wrapper {
-            padding-top: calc(60px + env(safe-area-inset-top)) !important;
+            padding-top: calc(50px + env(safe-area-inset-top)) !important;
         }
     }
 }

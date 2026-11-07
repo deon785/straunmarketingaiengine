@@ -42,6 +42,7 @@ const BuyerDecision = lazy(() => import('./BuyerDecision.jsx'));
 const DealsPage = lazy(() => import('./DealsPage.jsx'));
 const ModeSelection = lazy(() => import('./ModeSelection.jsx'));
 const UserDashboard = lazy(() => import('./UserDashboard.jsx'));
+const UserSettings = lazy(() => import('./UserSettings.jsx'));
 
 // Helper function
 const fetchWithRetry = async (fetchFn, maxRetries = 3) => {
@@ -414,6 +415,20 @@ const ProtectedRoute = React.memo(({ children }) => {
   const checkAttempts = useRef(0);
   const maxCheckAttempts = 8;
   const checkDone = useRef(false);
+  
+  // ✅ Store resetNavigation in a ref so it doesn't trigger effect re-runs
+  const resetNavigationRef = useRef(resetNavigation);
+  useEffect(() => {
+    resetNavigationRef.current = resetNavigation;
+  }, [resetNavigation]);
+
+  useEffect(() => {
+    // The flag has served its purpose — signup.jsx's redirect succeeded
+    if (sessionStorage.getItem('_signup_handled_redirect')) {
+      sessionStorage.removeItem('_signup_handled_redirect');
+      console.log('[ProtectedRoute] Cleared signup redirect flag');
+    }
+  }, []);
 
   useEffect(() => {
     console.log('🔵 [ProtectedRoute] useEffect RUNNING for path:', location.pathname);
@@ -464,9 +479,7 @@ const ProtectedRoute = React.memo(({ children }) => {
         if (loading) {
           console.log('[ProtectedRoute] Auth loading, waiting...');
           timeoutId = setTimeout(() => {
-            if (mounted) {
-              validateSession();
-            }
+            if (mounted) validateSession();
           }, 500);
           return;
         }
@@ -490,11 +503,9 @@ const ProtectedRoute = React.memo(({ children }) => {
 
     return () => {
       mounted = false;
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [loading, user, resetNavigation]);
+  }, [loading, user]);  // ✅ REMOVED resetNavigation from deps
 
   if (checking) {
     console.log('🟡 [ProtectedRoute] CHECKING - showing loader for path:', location.pathname);
@@ -504,38 +515,31 @@ const ProtectedRoute = React.memo(({ children }) => {
   const authenticated = isAuthenticated || sessionValid || !!user;
   
   console.log('🔵 [ProtectedRoute] Auth check:', {
-    isAuthenticated,
-    sessionValid,
-    hasUser: !!user,
-    authenticated,
-    path: location.pathname,
-    selectedMode
+    isAuthenticated, sessionValid, hasUser: !!user, authenticated,
+    path: location.pathname, selectedMode
   });
 
-  // ✅ ALLOW ACCESS TO PUBLIC PAGES
-  const publicPaths = ['/', '/seller-decision', '/buyer-decision', '/buyer-form' , '/admin'];
+  const publicPaths = ['/', '/seller-decision', '/buyer-decision', '/buyer-form', '/admin', '/login'];
   if (publicPaths.includes(location.pathname)) {
-    console.log('🟢 [ProtectedRoute] ✅ Public path allowed (NO REDIRECT):', location.pathname);
+    console.log('🟢 [ProtectedRoute] ✅ Public path allowed:', location.pathname);
     return children;
   }
 
-  // ✅ CRITICAL FIX: Allow /app even when mode is null
   if (location.pathname === '/app') {
     if (authenticated) {
-      console.log('🟢 [ProtectedRoute] ✅ App path allowed (NO REDIRECT) (mode:', selectedMode || 'null', ')');
+      console.log('🟢 [ProtectedRoute] ✅ App path allowed (mode:', selectedMode || 'null', ')');
       return children;
     }
   }
 
-  // ✅ Not authenticated - redirect to login
   if (!authenticated) {
-    console.log('🔴 [ProtectedRoute] 🔒 Not authenticated, REDIRECTING to login from path:', location.pathname);
-    resetNavigation();
+    console.log('🔴 [ProtectedRoute] 🔒 Not authenticated, REDIRECTING to login from:', location.pathname);
+    // ✅ Use ref to avoid dep issues
+    resetNavigationRef.current();
     return <Navigate to="/login" replace />;
   }
 
-  // ✅ For all other protected routes, allow access
-  console.log('🟢 [ProtectedRoute] ✅ Allowing access (NO REDIRECT) to:', location.pathname);
+  console.log('🟢 [ProtectedRoute] ✅ Allowing access to:', location.pathname);
   return children;
 });
 
@@ -826,10 +830,9 @@ const FeedbackButton = React.memo(() => {
 FeedbackButton.displayName = 'FeedbackButton';
 
 // ✅ FIXED: AppHeader - Only shows when user is authenticated
-const AppHeader = React.memo(() => {
+const AppHeader = React.memo(({ onSettingsClick }) => {
   const { user, isAuthenticated } = useAuthState();
   
-  // Don't render header on auth page
   if (!isAuthenticated) return null;
   
   return (
@@ -855,12 +858,36 @@ const AppHeader = React.memo(() => {
               Hi, {user.email?.split('@')[0] || 'User'}
             </span>
           )}
+          {/* ✅ ADD THIS SETTINGS BUTTON */}
+          <button 
+            onClick={onSettingsClick}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: 'white',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            ⚙️ Settings
+          </button>
         </div>
       </div>
     </header>
   );
 });
 AppHeader.displayName = 'AppHeader';
+
+const SettingsPage = React.memo(() => {
+  const { user } = useAuthState();
+  return <UserSettings user={user} />;
+});
+SettingsPage.displayName = 'SettingsPage';
 
 const MemoizedAuth = Auth;
 const MemoizedSellerDecision = React.memo(SellerDecision);
@@ -870,6 +897,8 @@ const MemoizedBuyerDecision = React.memo(BuyerDecision);
 function App() {
   const { hasChosenTheme, setTheme } = useTheme();
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const { user } = useAuthState();
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
       // Show picker if theme not chosen yet
@@ -967,6 +996,15 @@ function App() {
                               <NotificationsList />
                             </ProtectedRoute>
                           } />
+
+                          <Route 
+                            path="/settings" 
+                            element={
+                              <ProtectedRoute>
+                                <SettingsPage />
+                              </ProtectedRoute>
+                            } 
+                          />
                          
                           <Route path="/privacy" element={<PrivacyPolicy />} />
                           <Route path="/terms" element={<Terms />} />
@@ -995,8 +1033,58 @@ function App() {
                   <FeedbackButton />
                   
                   <Suspense fallback={null}>
-                    <PushNotificationHandler />
+                    {user && <PushNotificationHandler />}
                   </Suspense>
+
+                  {showSettings && (
+                    <div style={{
+                      position: 'fixed',
+                      top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: 'rgba(0,0,0,0.7)',
+                      zIndex: 9999,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '20px'
+                    }}>
+                      <div style={{
+                        backgroundColor: '#1a1a1a', // Dark background
+                        borderRadius: '16px',
+                        width: '100%',
+                        maxWidth: '600px',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        position: 'relative',
+                        boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
+                      }}>
+                        <button
+                          onClick={() => setShowSettings(false)}
+                          style={{
+                            position: 'absolute',
+                            top: '15px',
+                            right: '15px',
+                            background: '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '50%',
+                            width: '32px',
+                            height: '32px',
+                            cursor: 'pointer',
+                            fontSize: '16px',
+                            zIndex: 10
+                          }}
+                        >
+                          ✕
+                        </button>
+
+                        <div style={{ padding: '20px' }}>
+                          {/* ✅ Import UserSettings at the top of App.jsx if you haven't */}
+                          <UserSettings user={user} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               </PullToRefreshWrapper>
             </RefreshPersistenceWrapper>

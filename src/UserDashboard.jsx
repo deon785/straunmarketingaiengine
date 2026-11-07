@@ -8,6 +8,7 @@ import PriceAlertDashboard from './PriceAlertDashboard';
 import WishlistManager from './WishlistManager';
 import { useAuthState } from './AuthContext';
 import TopNavigationBar from './TopNavigationBar';
+import UserSettings from './UserSettings';
 
 // ============================================
 // DESIGN TOKENS (UPDATED FOR DARK MODE)
@@ -114,6 +115,7 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
     const navigate = useNavigate();
     const location = useLocation();
     const { user: authUser, loading: authLoading } = useAuthState();
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
     
     const userId = propUserId || authUser?.id;
     const userName = propUserName || authUser?.email?.split('@')[0] || 'User';
@@ -156,6 +158,7 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
     const [showClaimedDeals, setShowClaimedDeals] = useState(false);
     const [profileData, setProfileData] = useState(null);
     const [error, setError] = useState('');
+    const [unreadCount, setUnreadCount] = useState(0);
 
     const showToastNotification = (msg) => {
         console.log('[Toast]', msg);
@@ -164,10 +167,27 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
     // ✅ REMOVED the popstate trap so browser back button works naturally.
 
     useEffect(() => {
-        if (userId) {
-            loadDashboardData();
-            loadProfileData();
-        }
+        const loadInitialData = async () => {
+            if (userId) {
+                loadDashboardData();
+                loadProfileData();
+                
+                // Fetch unread notifications count
+                try {
+                    const { count } = await supabase
+                        .from('notifications')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('user_id', userId)
+                        .eq('is_read', false);
+
+                    if (count !== null) setUnreadCount(count);
+                } catch (err) {
+                    console.error('Failed to fetch unread count', err);
+                }
+            }
+        };
+
+        loadInitialData();
     }, [userId, selectedMode]);
 
     const loadDashboardData = async () => {
@@ -315,11 +335,12 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
                     unreadMessages: 0,
                     rating: 0,
                     totalSales: 0,
-                    totalPurchases: orderCount,
-                    totalSaved: totalSaved,
+                    totalPurchases: 0,
+                    totalSaved: 0,
                     wishlistCount: wishlistCount || 0,
                     activeAlerts: activeAlerts,
-                    savedSearchesCount: savedSearchesCount
+                    savedSearchesCount: savedSearchesCount,
+                    sellersContacted: sellersContacted
                 });
                 
                 setWishlistItems(savedItems || []);
@@ -475,11 +496,15 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
             loading={false}
             onSwitchMode={() => navigate('/app')}
             onSignOut={() => navigate('/login')}
-            onSettingsClick={() => navigate('/app')}
+            onSettingsClick={() => setShowSettingsModal(true)}
             isAdmin={false}
             isHidden={false}
-            unreadNotifications={unreadNotifications}
-            onNotificationsClick={onNotificationsClick || (() => navigate('/notifications'))}
+            unreadNotifications={unreadCount} // ✅ Use the new state
+            onNotificationsClick={() => {
+                setUnreadCount(0); // ✅ Drop the count to 0 when clicked
+                if (onNotificationsClick) onNotificationsClick();
+                else navigate('/notifications');
+            }}
         />
     );
 
@@ -1559,6 +1584,50 @@ const UserDashboard = ({userId: propUserId, userName: propUserName, userEmail: p
                 )}
 
             </div>
+
+            {showSettingsModal && (
+                <div
+                    onClick={() => setShowSettingsModal(false)}
+                    style={{
+                    position: 'fixed', inset: 0,
+                    background: 'rgba(15, 23, 42, 0.65)',
+                    zIndex: 9999,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '20px',
+                    }}
+                >
+                    <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: '#ffffff',
+                        borderRadius: '16px',
+                        width: '100%',
+                        maxWidth: '640px',
+                        maxHeight: '90vh',
+                        overflowY: 'auto',
+                        position: 'relative',
+                        boxShadow: '0 20px 60px rgba(15, 23, 42, 0.35)',
+                    }}
+                    >
+                    <button
+                        onClick={() => setShowSettingsModal(false)}
+                        aria-label="Close settings"
+                        style={{
+                        position: 'absolute', top: '12px', right: '12px',
+                        background: '#ef4444', color: '#fff',
+                        border: 'none', borderRadius: '50%',
+                        width: '32px', height: '32px',
+                        cursor: 'pointer', fontSize: '16px', zIndex: 10,
+                        }}
+                    >
+                        ✕
+                    </button>
+                    <div style={{ padding: '24px' }}>
+                        <UserSettings user={authUser} embedded />
+                    </div>
+                    </div>
+                </div>
+                )}
         </div>
     );
 };

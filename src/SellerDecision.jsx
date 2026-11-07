@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthActions } from './AuthContext';
+import { useAuthActions, useAuthState } from './AuthContext';
 import { supabase } from './lib/supabase';
 import './SellerDecision.css';
 
@@ -30,6 +30,7 @@ const SellerDecision = () => {
   const [retryCount, setRetryCount] = useState(0);
   const navigate = useNavigate();
   const { setMode } = useAuthActions();
+  const { user, loading: authLoading } = useAuthState();
 
   const safeNavigate = (path) => {
     try {
@@ -47,30 +48,14 @@ const SellerDecision = () => {
 
   // ✅ Use fetchWithRetry
   const fetchProfile = async (attempt = 0) => {
+    // ✅ No need for supabase.auth.getUser() — we already have user from context
+    if (!user?.id) {
+      setError('User not found. Please log in again.');
+      setChecking(false);
+      return;
+    }
+
     try {
-      const { data: userData, error: userError } = await fetchWithRetry(() =>
-        supabase.auth.getUser()
-      );
-      
-      if (userError) {
-        console.warn('[SellerDecision] User fetch error:', userError);
-        if (attempt < 3) {
-          setTimeout(() => fetchProfile(attempt + 1), 1000 * (attempt + 1));
-          return;
-        }
-        setError('Please log in to continue');
-        setChecking(false);
-        return;
-      }
-      
-      const user = userData?.user;
-      
-      if (!user) {
-        setError('User not found. Please log in again.');
-        setChecking(false);
-        return;
-      }
-      
       const { data: profileResult, error: profileError } = await fetchWithRetry(() =>
         supabase
           .from('profiles')
@@ -78,7 +63,7 @@ const SellerDecision = () => {
           .eq('user_id', user.id)
           .maybeSingle()
       );
-      
+
       if (profileError) {
         console.warn('[SellerDecision] Profile fetch error:', profileError);
         if (attempt < 3) {
@@ -89,17 +74,16 @@ const SellerDecision = () => {
         setChecking(false);
         return;
       }
-      
+
       setProfileData({
         location: profileResult?.location || '',
         phone_number: profileResult?.phone_number || '',
         is_seller: profileResult?.is_seller || false,
         seller_setup_completed: profileResult?.seller_setup_completed || false
       });
-      
+
       setError(null);
       setRetryCount(0);
-      
     } catch (err) {
       console.error('[SellerDecision] Unexpected error:', err);
       if (attempt < 3) {
@@ -113,8 +97,22 @@ const SellerDecision = () => {
   };
 
   useEffect(() => {
-    fetchProfile();
-  }, []);
+    // ✅ Wait until auth has finished loading
+    if (authLoading) {
+      console.log('[SellerDecision] Auth still loading, waiting...');
+      return;
+    }
+
+    // ✅ If no user after loading, show error (don't call supabase.auth.getUser)
+    if (!user) {
+      console.log('[SellerDecision] No user after auth loaded');
+      setError('Please log in to continue');
+      setChecking(false);
+      return;
+    }
+
+    fetchProfile(0);
+  }, [authLoading, user?.id]);  // ← Re-run when auth settles
 
   const handleAddProducts = () => {
     try {

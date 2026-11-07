@@ -44,6 +44,17 @@ class RecommendationEngine {
         // this._autoCleanup(); // ← REMOVED - runs too slow
     }
 
+    // ✅ NICHE CROSS-SELL MAP
+    _nicheMap = {
+        'vest': ['socks', 'bib', 'hat', 'booties'],
+        'onesie': ['bib', 'socks', 'blanket'],
+        'dress': ['shoes', 'hairband', 'socks'],
+        'toy': ['battery', 'storage', 'gift'],
+        'crib': ['blanket', 'mattress', 'mobile'],
+        'stroller': ['cover', 'bag', 'sunshade']
+    };
+
+
     // ============================================
     // AUTO-CLEANUP: Lazy cleanup (only when needed)
     // ============================================
@@ -144,7 +155,6 @@ class RecommendationEngine {
     // ============================================
     // LAYER 2: LOCALSTORAGE CACHE (FAST)
     // ============================================
-    
     getFromLocalCache(type = 'personalized') {
         try {
             const cacheKey = `${this._cachePrefix}_${this.userId}_${type}`;
@@ -159,7 +169,13 @@ class RecommendationEngine {
                 return null;
             }
             
-            return data.products;
+            // ✅ SHUFFLE THE CACHED RESULTS SO THEY FEEL FRESH
+            let products = data.products || [];
+            if (products.length > 1) {
+                products = products.sort(() => Math.random() - 0.5);
+            }
+            
+            return products;
             
         } catch (error) {
             return null;
@@ -207,11 +223,9 @@ class RecommendationEngine {
 
     // ✅ OPTIMIZED: Get personalized recommendations
     async getPersonalizedRecommendations(limit = 12) {
-        // Check memory cache first
         const memoryData = this.getFromMemoryCache('personalized', limit);
         if (memoryData) return memoryData;
 
-        // Check local cache
         const localData = this.getFromLocalCache('personalized');
         if (localData && localData.length > 0) {
             this.saveToMemoryCache('personalized', limit, localData);
@@ -228,12 +242,15 @@ class RecommendationEngine {
             
             const allKeywords = [...interests, ...behaviorKeywords];
             const uniqueKeywords = [...new Set(allKeywords.filter(k => k && k.trim().length > 0))];
+            const userLocation = await this.getUserLocation();
             
+            // ✅ 1. BUILD BASE QUERY
             let query = supabase
                 .from('products')
                 .select('*')
                 .eq('status', 'active')
                 .neq('seller_id', this.userId)
+                .order('last_shown_at', { ascending: true, nullsFirst: true }) // ✅ Added fair rotation
                 .limit(limit);
 
             if (uniqueKeywords.length > 0) {
@@ -244,41 +261,32 @@ class RecommendationEngine {
                 query = query.or(orConditions);
             }
 
-            const result = await fetchWithRetry(() => query);
+            // ✅ 2. TRY LOCATION FIRST
+            let result;
+            if (userLocation) {
+                const localQuery = query.ilike('location', `%${userLocation}%`);
+                result = await fetchWithRetry(() => localQuery);
+                
+                // If we got local results, great!
+                if (result?.data && result.data.length > 0) {
+                    return this._mapSellersToProducts(result.data, limit);
+                }
+                console.log('No local results, fetching globally...');
+            }
+
+            // ✅ 3. FALLBACK TO GLOBAL (No location filter)
+            result = await fetchWithRetry(() => query);
 
             if (result?.error) {
+                console.warn('Personalized query failed, falling back to trending');
                 return this.getTrendingProducts(limit);
             }
 
-            let products = [];
             if (result?.data && result.data.length > 0) {
-                const sellerIds = [...new Set(result.data.map(p => p.seller_id).filter(Boolean))];
-                let sellersMap = {};
-                
-                if (sellerIds.length > 0) {
-                    const { data: sellers } = await supabase
-                        .from('profiles')
-                        .select('user_id, username, location, phone_number')
-                        .in('user_id', sellerIds);
-                    
-                    if (sellers) {
-                        sellersMap = sellers.reduce((map, seller) => {
-                            map[seller.user_id] = seller;
-                            return map;
-                        }, {});
-                    }
-                }
-
-                products = result.data.map(product => ({
-                    ...product,
-                    profiles: sellersMap[product.seller_id] || null
-                }));
-
-                this.saveToLocalCache(products, 'personalized');
-                this.saveToMemoryCache('personalized', limit, products);
-                return products;
+                return this._mapSellersToProducts(result.data, limit);
             }
 
+            // ✅ 4. ULTIMATE FALLBACK: Trending
             const trending = await this.getTrendingProducts(limit);
             if (trending && trending.length > 0) {
                 this.saveToMemoryCache('personalized', limit, trending);
@@ -286,9 +294,38 @@ class RecommendationEngine {
             return trending;
 
         } catch (error) {
-            const trending = await this.getTrendingProducts(limit);
-            return trending || [];
+            console.error('Recommendation error:', error);
+            return this.getTrendingProducts(limit);
         }
+    }
+
+    // ✅ HELPER: Reduces code duplication for mapping sellers
+    async _mapSellersToProducts(productsData, limit) {
+        const sellerIds = [...new Set(productsData.map(p => p.seller_id).filter(Boolean))];
+        let sellersMap = {};
+        
+        if (sellerIds.length > 0) {
+            const { data: sellers } = await supabase
+                .from('profiles')
+                .select('user_id, username, location, phone_number')
+                .in('user_id', sellerIds);
+            
+            if (sellers) {
+                sellersMap = sellers.reduce((map, seller) => {
+                    map[seller.user_id] = seller;
+                    return map;
+                }, {});
+            }
+        }
+
+        const products = productsData.map(product => ({
+            ...product,
+            profiles: sellersMap[product.seller_id] || null
+        }));
+
+        this.saveToLocalCache(products, 'personalized');
+        this.saveToMemoryCache('personalized', limit, products);
+        return products;
     }
 
     // ✅ OPTIMIZED: Get trending products
@@ -305,13 +342,26 @@ class RecommendationEngine {
         if (!this.userId) return [];
 
         try {
-            const { data: products, error } = await fetchWithRetry(() => supabase
+            const userLocation = await this.getUserLocation();
+
+            // ✅ 1. Build the query
+            let query = supabase
                 .from('products')
                 .select('*')
                 .eq('status', 'active')
+                .order('last_shown_at', { ascending: true, nullsFirst: true }) 
                 .order('views', { ascending: false })
-                .limit(limit)
-            );
+                .limit(limit);
+
+            // ✅ 2. Apply location filter BEFORE fetching
+            if (userLocation) {
+                query = query.ilike('location', `%${userLocation}%`);
+            }
+
+            // ✅ 3. Fetch the data
+            const { data: products, error } = await fetchWithRetry(() => query);
+            
+            // If that returns 0, you can do a second query without the location filter
 
             if (error || !products || products.length === 0) {
                 return [];
@@ -409,6 +459,18 @@ class RecommendationEngine {
         }
     }
 
+    async getUserLocation() {
+        if (!this.userId) return null;
+        try {
+            const { data } = await supabase
+                .from('profiles')
+                .select('location')
+                .eq('user_id', this.userId)
+                .maybeSingle();
+            return data?.location || null;
+        } catch (e) { return null; }
+    }
+
     // ✅ Get alternative products - OPTIMIZED
     async getAlternativeProducts(searchTerm, limit = 10) {
         if (!this.userId || !searchTerm) {
@@ -416,13 +478,25 @@ class RecommendationEngine {
         }
 
         try {
-            const keywords = searchTerm.split(' ').filter(w => w.length > 2).slice(0, 5);
+            const searchLower = searchTerm.toLowerCase();
+            let crossSellKeywords = [];
             
-            if (keywords.length === 0) {
+            // Check if the search term is in our niche map
+            for (const [key, values] of Object.entries(this._nicheMap)) {
+                if (searchLower.includes(key)) {
+                    crossSellKeywords = values;
+                    break;
+                }
+            }
+
+            const keywords = searchTerm.split(' ').filter(w => w.length > 2).slice(0, 5);
+            const allKeywords = [...keywords, ...crossSellKeywords];
+
+            if (allKeywords.length === 0) {
                 return this.getPersonalizedRecommendations(limit);
             }
 
-            const orConditions = keywords
+            const orConditions = allKeywords
                 .map(k => `name.ilike.%${k.trim()}%`)
                 .join(',');
 

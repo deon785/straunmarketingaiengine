@@ -145,7 +145,7 @@ const NotificationSettings = () => {
 };
 
 // ============ MAIN COMPONENT ============
-const UserSettings = ({ user }) => {
+const UserSettings = ({ user, embedded = false }) => {
   const [loading, setLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -447,7 +447,7 @@ const UserSettings = ({ user }) => {
 
   // ============ RENDER ============
   return (
-    <div className="privacy-settings">
+    <div className={`privacy-settings${embedded ? ' privacy-settings--embedded' : ''}`}>
       {/* Error/Success messages */}
       {(error || success) && (
         <div className="message-container">

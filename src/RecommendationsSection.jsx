@@ -1,6 +1,6 @@
 // RecommendationsSection.jsx - COMPLETE FIXED VERSION WITH ALTERNATIVE PROSPECTS
 import React, { useState, useEffect } from 'react';
-import RecommendationEngine from './recommendationEngine';
+import RecommendationEngine from './RecommendationEngine';
 import { supabase } from './lib/supabase';
 
 const RecommendationsSection = ({ 
@@ -18,7 +18,12 @@ const RecommendationsSection = ({
     const [alternativeProspects, setAlternativeProspects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [activeTab, setActiveTab] = useState('personalized');
+    // ✅ Set the initial tab based on the mode
+    const [activeTab, setActiveTab] = useState(
+        isSimilar ? 'similar' : 
+        (isAlternative || isAlternativeProspects) ? 'personalized' : 
+        'personalized'
+    );
 
     const [contactProduct, setContactProduct] = useState(null);
     const [savingWishlist, setSavingWishlist] = useState(false);
@@ -218,6 +223,11 @@ const RecommendationsSection = ({
             setTrending(trendingRecs || []);
             setSimilar(similarRecs || []);
             setAlternativeProspects(prospectsRecs || []);
+
+            if (isSimilar && similarRecs.length > 0) {
+                setActiveTab('similar');
+            }
+
             
             // ✅ Log what we found
             console.log('📊 Recommendations loaded:', {
@@ -933,61 +943,69 @@ const RecommendationsSection = ({
             </div>
 
             {/* Tab Navigation - Only show tabs that have content */}
+                        {/* Tab Navigation - Clean text tabs with underline */}
             <div style={{ 
                 display: 'flex', 
-                gap: '10px', 
+                gap: '4px', 
                 marginBottom: '20px',
-                borderBottom: '2px solid #e0e0e0',
-                paddingBottom: '10px',
+                borderBottom: '1px solid #e0e0e0',
                 flexWrap: 'wrap'
             }}>
                 {hasPersonalized && (
                     <button
                         onClick={() => setActiveTab('personalized')}
                         style={{
-                            background: activeTab === 'personalized' ? '#667eea' : 'transparent',
-                            color: activeTab === 'personalized' ? 'white' : '#1a1a1a',
+                            background: 'transparent',
+                            color: activeTab === 'personalized' ? '#667eea' : '#666',
                             border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '20px',
+                            borderBottom: activeTab === 'personalized' ? '3px solid #667eea' : '3px solid transparent',
+                            padding: '10px 16px',
                             cursor: 'pointer',
-                            fontWeight: 'bold',
-                            transition: 'all 0.2s'
+                            fontWeight: activeTab === 'personalized' ? '700' : '500',
+                            fontSize: '14px',
+                            transition: 'all 0.2s',
+                            marginBottom: '-1px'
                         }}
                     >
-                        🎯 For You ({personalized.length})
+                        🎯 For You
                     </button>
                 )}
-                {hasTrending && (
+                {hasTrending && !isAlternative && !isSimilar && (
                     <button
                         onClick={() => setActiveTab('trending')}
                         style={{
-                            background: activeTab === 'trending' ? '#667eea' : 'transparent',
-                            color: activeTab === 'trending' ? 'white' : '#1a1a1a',
+                            background: 'transparent',
+                            color: activeTab === 'trending' ? '#667eea' : '#666',
                             border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '20px',
+                            borderBottom: activeTab === 'trending' ? '3px solid #667eea' : '3px solid transparent',
+                            padding: '10px 16px',
                             cursor: 'pointer',
-                            fontWeight: 'bold'
+                            fontWeight: activeTab === 'trending' ? '700' : '500',
+                            fontSize: '14px',
+                            transition: 'all 0.2s',
+                            marginBottom: '-1px'
                         }}
                     >
-                        🔥 Trending ({trending.length})
+                        🔥 Trending
                     </button>
                 )}
                 {hasSimilar && (
                     <button
                         onClick={() => setActiveTab('similar')}
                         style={{
-                            background: activeTab === 'similar' ? '#667eea' : 'transparent',
-                            color: activeTab === 'similar' ? 'white' : '#1a1a1a',
+                            background: 'transparent',
+                            color: activeTab === 'similar' ? '#667eea' : '#666',
                             border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '20px',
+                            borderBottom: activeTab === 'similar' ? '3px solid #667eea' : '3px solid transparent',
+                            padding: '10px 16px',
                             cursor: 'pointer',
-                            fontWeight: 'bold'
+                            fontWeight: activeTab === 'similar' ? '700' : '500',
+                            fontSize: '14px',
+                            transition: 'all 0.2s',
+                            marginBottom: '-1px'
                         }}
                     >
-                        🔍 Similar Items ({similar.length})
+                        🔍 Similar Items
                     </button>
                 )}
             </div>

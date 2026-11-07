@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
+import { useAuthActions } from './AuthContext';
 import ReactGA from 'react-ga4';
 import ProductForm from './ProductForm';
 import SellerCatalog from './SellerCatalog';
@@ -24,6 +25,7 @@ const fetchWithRetry = async (fn, n = 3) => {
 const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(initialProfile);
+  const { setMode } = useAuthActions();
   
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,31 +50,52 @@ const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
   const [newName, setNewName] = useState(profile?.shop_name || '');
   const [savingName, setSavingName] = useState(false);
 
-  const fetchMyProducts = useCallback(async () => {
+  // ✅ NEW: Combined fetching logic for speed
+  const fetchDashboardData = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setError(null);
+    
     try {
-      const { data, error: fetchErr } = await fetchWithRetry(() =>
-        supabase
-          .from('products')
-          .select('*')
-          .eq('seller_id', user.id)
-          .order('created_at', { ascending: false })
-      );
-      if (fetchErr) throw fetchErr;
-      setProducts(data || []);
+      // ✅ Run both queries at the exact same time (Parallel loading)
+      const [productsRes, profileRes] = await Promise.all([
+        fetchWithRetry(() =>
+          supabase
+            .from('products')
+            .select('*')
+            .eq('seller_id', user.id)
+            .order('created_at', { ascending: false })
+        ),
+        fetchWithRetry(() =>
+          supabase
+            .from('profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle()
+        )
+      ]);
+
+      if (productsRes.error) throw productsRes.error;
+      
+      setProducts(productsRes.data || []);
+      
+      // If we got fresh profile data, update it
+      if (profileRes.data) {
+        setProfile(profileRes.data);
+      }
     } catch (err) {
-      console.error('Fetch products failed:', err);
-      setError(err.message || 'Failed to load products.');
+      console.error('Fetch dashboard data failed:', err);
+      setError(err.message || 'Failed to load shop data.');
     } finally {
       setLoading(false);
     }
   }, [user]);
 
-  useEffect(() => { fetchMyProducts(); }, [fetchMyProducts]);
+  useEffect(() => { 
+    fetchDashboardData(); 
+  }, [fetchDashboardData]);
 
-    const handleSaveLocation = async () => {
+  const handleSaveLocation = async () => {
     if (!newLocation.trim()) {
       alert("City/Location is required.");
       return;
@@ -138,7 +161,7 @@ const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
     setView('catalog');
     setEditingProduct(null);
     fetchMyProducts();
-  }, [fetchMyProducts]);
+  }, [fetchDashboardData]);
 
   const handleEdit = useCallback((product) => {
     setEditingProduct(product);
@@ -202,8 +225,10 @@ const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
         {/* Right Side: Back to Search Button */}
         <button
           onClick={() => {
-              if (onBackToSocial) { onBackToSocial(); }
-              else { navigate('/app'); }
+              // ✅ Navigate to the feed. 
+              // If your app has a specific seller feed route, use that. 
+              // Otherwise, we pass a state flag to tell the next page we are a seller.
+              navigate('/app', { state: { fromSellerDashboard: true, searchForCustomers: true } });
           }}
           style={{
               background: 'linear-gradient(135deg, #d6336c, #7c3aed)',
@@ -233,6 +258,32 @@ const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
           🔍 Search Customers
         </button>
       </div>
+
+            {/* ⚠️ INCOMPLETE PROFILE WARNING BANNER */}
+      {(!profile?.shop_name || !profile?.location) && (
+        <div style={{
+          background: '#fffbeb', // Light yellow background
+          border: '1px solid #fcd34d', // Yellow border
+          borderRadius: '12px',
+          padding: '16px',
+          marginBottom: '24px',
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '12px',
+          animation: 'fadeIn 0.3s ease'
+        }}>
+          <div style={{ fontSize: '24px', lineHeight: '1' }}>⚠️</div>
+          <div>
+            <h3 style={{ margin: '0 0 4px 0', fontSize: '15px', color: '#92400e', fontWeight: 700 }}>
+              Action Required: Complete Your Shop Details
+            </h3>
+            <p style={{ margin: 0, fontSize: '14px', color: '#b45309', lineHeight: '1.5' }}>
+              Please make sure your <strong>Shop Name</strong> and <strong>Location</strong> are filled out. 
+              Put a clear address or area so customers can easily find you and won't get lost!
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Shop Name Editor */}
       {isEditingName && (
