@@ -26,7 +26,7 @@ import { fscrub } from 'fpoint';
 
 import PriceAlertButton from './PriceAlertButton.jsx';
 import RecommendationsSection from './RecommendationsSection';
-import RecommendationEngine from './RecommendationEngine.js';
+import RecommendationEngine from './RecommendationEngine';
 import { useLoading } from './LoadingContext';
 
 import DailyDeals from './DailyDeals';
@@ -5650,7 +5650,7 @@ function SocialAIMarketingEngine() {
                 
                 switch (filters.sortBy) {
                     case 'newest':
-                        query = query.order('last_shown_at', { ascending: true, nullsFirst: true });
+                        query = query.order('created_at', { ascending: false });
                         break;
                     case 'price_low':
                         query = query.order('price', { ascending: true });
@@ -5662,7 +5662,9 @@ function SocialAIMarketingEngine() {
                         query = query.order('created_at', { ascending: false });
                 }
             } else {
-                query = query.order('last_shown_at', { ascending: true, nullsFirst: true });
+                // ✅ FIX: Sort by created_at so the query always works. 
+                // We will shuffle the results below anyway.
+                query = query.order('created_at', { ascending: false });
             }
 
             query = query.limit(50);
