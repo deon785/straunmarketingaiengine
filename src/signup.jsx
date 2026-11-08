@@ -863,26 +863,22 @@ const Auth = () => {
       });
       
       bouncer.reset();
-      setLoading(false);
+      setLoading(false); // ✅ Clear loading state IMMEDIATELY
       
-      // ✅ FIXED: Let AuthContext handle the redirect based on profile/mode
-      // The AuthContext will check profile and mode expiry
-      // ✅ REDIRECT BASED ON INTENT
-      setTimeout(() => {
-        // ✅ Tell AuthContext we handled this redirect
-        sessionStorage.setItem('_signup_handled_redirect', String(Date.now()));
+      // ✅ Tell AuthContext we handled this redirect
+      sessionStorage.setItem('_signup_handled_redirect', String(Date.now()));
 
-        if (intent === 'buyer') {
-          console.log('🚀 Sign in: Redirecting to buyer decision');
-          navigate('/buyer-decision', { replace: true });
-        } else if (intent === 'seller') {
-          console.log('🚀 Sign in: Redirecting to seller decision');
-          navigate('/seller-decision', { replace: true });
-        } else {
-          console.log('🚀 Sign in: Redirecting to app');
-          navigate('/app', { replace: true });
-        }
-      }, 500);
+      // ✅ Navigate immediately without setTimeout
+      if (intent === 'buyer') {
+        console.log('🚀 Sign in: Redirecting to buyer decision');
+        navigate('/buyer-decision', { replace: true });
+      } else if (intent === 'seller') {
+        console.log('🚀 Sign in: Redirecting to seller decision');
+        navigate('/seller-decision', { replace: true });
+      } else {
+        console.log('🚀 Sign in: Redirecting to app');
+        navigate('/app', { replace: true });
+      }
     } catch (error) {
       console.error('Sign in error:', error);
       
@@ -1025,7 +1021,14 @@ const Auth = () => {
     }
 
     const checkExistingSession = async () => {
-        const { data: { session } } = await supabase.auth.getSession();
+      try {
+        // ✅ FIX: Add a timeout so it doesn't freeze the app
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Session check timed out')), 3000)
+        );
+
+        const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
         if (!session) {
             console.log('🔓 No existing session - showing login form');
             return;
@@ -1054,6 +1057,13 @@ const Auth = () => {
             // 3. Default: show mode selection
             return '/mode-selection';
         };
+
+         navigate(getPostLoginPath(), { replace: true });
+            
+        } catch (error) {
+            console.warn('⚠️ Session check failed or timed out:', error.message);
+            // Do nothing - let the user see the login form
+        }
     };
 
     checkExistingSession();
