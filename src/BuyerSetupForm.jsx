@@ -252,6 +252,12 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
                 interests: finalSanitizedData.interests
             });
 
+             // ✅ 1. FIRST, set localStorage and mode
+            setMode('buyer');
+            localStorage.setItem('straun_profileComplete', 'true');
+            console.log('✅ BuyerSetupForm: set straun_profileComplete = true');
+
+            // ✅ 2. THEN, notify the parent (SocialAIMarketingEngine)
             if (typeof onProfileComplete === 'function') {
                 onProfileComplete({
                     location: finalSanitizedData.location,
@@ -262,9 +268,6 @@ const BuyerSetupForm = ({ onProfileComplete, existingData, isLoading = false }) 
             } else {
                 setTimeout(() => navigate('/app'), 500);
             }
-
-            setMode('buyer');
-            localStorage.setItem('straun_profileComplete', 'true');
         } catch (err) {
             console.error('❌ Profile Submission Error:', err);
             setError(err.message || 'Error setting up profile. Please try again.');

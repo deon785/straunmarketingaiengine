@@ -224,10 +224,24 @@ const SellerDashboard = ({ user, profile: initialProfile, onBackToSocial }) => {
         
         {/* Right Side: Back to Search Button */}
         <button
-          onClick={() => {
-              // ✅ Navigate to the feed. 
-              // If your app has a specific seller feed route, use that. 
-              // Otherwise, we pass a state flag to tell the next page we are a seller.
+          onClick={async () => {
+              // ✅ 1. Mark as seller in DB immediately before navigating
+              try {
+                  await supabase
+                      .from('profiles')
+                      .update({
+                          is_seller: true,
+                          seller_setup_completed: true
+                      })
+                      .eq('user_id', user.id);
+                  
+                  // 2. Update local storage so Social Page sees it instantly
+                  localStorage.setItem('straun_profileComplete', 'true');
+              } catch (err) {
+                  console.error("Failed to update seller status:", err);
+              }
+
+              // ✅ 3. Navigate to the feed
               navigate('/app', { state: { fromSellerDashboard: true, searchForCustomers: true } });
           }}
           style={{

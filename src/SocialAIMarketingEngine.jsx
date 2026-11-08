@@ -4395,7 +4395,8 @@ function SocialAIMarketingEngine() {
         }
     }, [selectedMode, isProfileComplete, profileData, user, showToastNotification]);
 
-        // --- CHECK EXISTING PROFILE DATA (UPDATED LOGIC) ---
+    // --- CHECK EXISTING PROFILE DATA (UPDATED LOGIC) ---
+        // --- CHECK EXISTING PROFILE DATA (PRODUCTION FIX) ---
     useEffect(() => {
         const checkExistingProfile = async () => {
             if (!user) {
@@ -4413,8 +4414,7 @@ function SocialAIMarketingEngine() {
                 if (data) {
                     setProfileData(data);
 
-                    // ✅ NEW LOGIC: Auto-complete profile if DB says they are a seller/buyer
-                    // We check if they have a location, because we need location to search
+                    // ✅ PRODUCTION FIX: Check DB directly
                     const hasLocation = data.location && data.location.trim() !== '';
                     
                     if (selectedMode === 'seller' && data.is_seller && hasLocation) {
@@ -4422,13 +4422,14 @@ function SocialAIMarketingEngine() {
                         setIsProfileComplete(true);
                         localStorage.setItem('straun_profileComplete', 'true');
                     } 
-                    else if (selectedMode === 'buyer' && data.is_buyer && hasLocation) {
-                        console.log("✅ Auto-unlocking search: DB says user is a buyer with location");
+                    // ✅ BUYER FIX: Accept either is_buyer OR buyer_setup_completed
+                    else if (selectedMode === 'buyer' && (data.is_buyer || data.buyer_setup_completed)) {
+                        console.log("✅ Auto-unlocking search: DB says user is a buyer");
                         setIsProfileComplete(true);
                         localStorage.setItem('straun_profileComplete', 'true');
                     }
                     else {
-                        // Only set to false if we don't meet the criteria
+                        // If they don't meet criteria, only set false if local storage is false
                         const localComplete = localStorage.getItem('straun_profileComplete') === 'true';
                         if (!localComplete) {
                             setIsProfileComplete(false);
@@ -4436,19 +4437,21 @@ function SocialAIMarketingEngine() {
                     }
 
                 } else {
+                    // No profile at all
                     setProfileData(null);
                     setIsProfileComplete(false);
                 }
             } catch (err) {
                 console.error('Profile check error:', err);
-                setProfileData(null);
+                // Don't set to false on network error, it causes loop
             } 
         };
 
-        if (user) {
+        // ✅ ADD THIS: Wait for auth to load before checking
+        if (user && !authLoading) {
             checkExistingProfile();
         }
-    }, [user, selectedMode]); // Added selectedMode so it re-checks when mode switches
+    }, [user, selectedMode, authLoading]); // Added authLoading to ensure it waits
 
     useEffect(() => {
         const cacheKeys = Object.keys(searchCache);
@@ -5347,11 +5350,15 @@ function SocialAIMarketingEngine() {
                     }
                 }
 
-                setProfileData(savedProfileData);
+                                setProfileData(savedProfileData);
                 setIsProfileComplete(true);
                 // ✅ CRITICAL: Persist to localStorage so a page refresh doesn't lose this
                 localStorage.setItem('straun_profileComplete', 'true');
                 console.log('✅ handleProfileComplete: set straun_profileComplete in localStorage');
+                
+                // ✅ Add a small delay to let Supabase finish saving
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
                 setShowSellerDecision(false);
                 setShowBuyerDecision(false);
                 setShowBuyerForm(false); // ✅ Close buyer form
@@ -5438,8 +5445,14 @@ function SocialAIMarketingEngine() {
                 return;
             }
             
-            if (!isProfileComplete) {
-                setError('Please complete your profile before searching.');
+            // ✅ PRODUCTION FIX: Check ProfileData (from DB) instead of just local state
+            // For buyers, accept either is_buyer OR buyer_setup_completed
+            const isDatabaseProfileComplete = 
+                (selectedMode === 'seller' && profileData?.is_seller && profileData?.location) ||
+                (selectedMode === 'buyer' && (profileData?.is_buyer || profileData?.buyer_setup_completed));
+
+            if (!isProfileComplete && !isDatabaseProfileComplete) {
+                setError('Please complete your profile before searching. Add your location in the Dashboard.');
                 return;
             }
 
