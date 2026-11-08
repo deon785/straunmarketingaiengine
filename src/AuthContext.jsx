@@ -78,18 +78,14 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
-   // ✅ Add this useEffect to navigate after sign in
-    // ✅ ONLY redirect after sign-in if the user is on the login page AND signup.jsx didn't handle it
-  // The signup.jsx handles intent-based redirects (buyer-decision/seller-decision)
-  // This is just a safety net for direct logins
+  // ✅ Add this useEffect to navigate after sign in
   useEffect(() => {
     if (!user || !isAuthenticated) return;
 
-    // ✅ NEW: If signup.jsx just handled a redirect (within last 3 seconds), skip
-    const signupTs = Number(sessionStorage.getItem('_signup_handled_redirect') || 0);
-    const sinceSignup = Date.now() - signupTs;
-    if (sinceSignup < 3000) {
-      console.log('[REDIRECT:AuthContext] ⏭️ SKIP — signup handled this', (sinceSignup / 1000).toFixed(2), 's ago');
+    // ✅ FIX: ALWAYS skip if we are on the login page.
+    // signup.jsx is responsible for navigating away from /login.
+    if (window.location.pathname === '/login') {
+      console.log('[Auth] On login page - letting signup.jsx handle redirect');
       return;
     }
     
@@ -106,31 +102,11 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      // 3. Don't redirect if they have an intent - let signup.jsx handle it
+      // 3. Don't redirect if they have an intent
       const params = new URLSearchParams(window.location.search);
       if (params.get('intent')) {
         console.log('[Auth] 🎯 Intent detected - letting signup.jsx handle redirect');
         return;
-      }
-
-      // 4. Only auto-redirect from /login if the user has an ACTIVE mode
-      if (window.location.pathname === '/login') {
-          const timestamp = localStorage.getItem('straun_selectedMode_timestamp');
-          const savedMode = localStorage.getItem('straun_selectedMode');
-          
-          if (savedMode && timestamp) {
-              const age = Date.now() - parseInt(timestamp);
-              if (age < MODE_EXPIRY_MS) {
-                  console.log('[Auth] ✅ Active mode found, redirecting to /app');
-                  navigate('/app', { replace: true });
-              } else {
-                  console.log('[Auth] ⏰ Mode expired, going to mode selection');
-                  navigate('/mode-selection', { replace: true });
-              }
-          } else {
-              console.log('[Auth] 📋 No mode set, going to mode selection');
-              navigate('/mode-selection', { replace: true });
-          }
       }
     }
   }, [user, isAuthenticated, navigate]);

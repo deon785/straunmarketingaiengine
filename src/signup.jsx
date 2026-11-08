@@ -855,7 +855,8 @@ const Auth = () => {
 
       if (error) throw error;
 
-      await storeUserInLocalStorage(data);
+            // ✅ FIX: Do NOT await this. Let it run in the background.
+      storeUserInLocalStorage(data).catch(err => console.warn('Storage error:', err));
       
       setMessage({
         text: 'Login successful! Redirecting...',
@@ -863,20 +864,16 @@ const Auth = () => {
       });
       
       bouncer.reset();
-      setLoading(false); // ✅ Clear loading state IMMEDIATELY
+      setLoading(false);
       
-      // ✅ Tell AuthContext we handled this redirect
       sessionStorage.setItem('_signup_handled_redirect', String(Date.now()));
 
-      // ✅ Navigate immediately without setTimeout
+      // ✅ Navigate IMMEDIATELY based on intent
       if (intent === 'buyer') {
-        console.log('🚀 Sign in: Redirecting to buyer decision');
         navigate('/buyer-decision', { replace: true });
       } else if (intent === 'seller') {
-        console.log('🚀 Sign in: Redirecting to seller decision');
         navigate('/seller-decision', { replace: true });
       } else {
-        console.log('🚀 Sign in: Redirecting to app');
         navigate('/app', { replace: true });
       }
     } catch (error) {
