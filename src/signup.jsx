@@ -638,9 +638,8 @@ const Auth = () => {
     }
   }, []);
 
-  // ============ VALIDATION (Inside crew - only on submit) ============
-    // ============ VALIDATION (Inside crew - only on submit) ============
-  const validateForm = useCallback((values) => {
+    // ============ VALIDATION ============
+  const validateForm = useCallback((values, isSigningUp) => {
     const { email, password, phone, terms } = values;
     const errors = {};
     
@@ -658,16 +657,13 @@ const Auth = () => {
       errors.password = 'Password must be at least 6 characters';
     }
     
-    // 3. Check Terms ONLY if the checkbox is actually on the screen
-    // If you are on Sign In, the checkbox is not rendered, so this is skipped.
-    const termsCheckboxExists = document.getElementById('terms');
-    
-    if (termsCheckboxExists && terms === false) {
+    // 3. Check Terms ONLY if we are signing up
+    if (isSigningUp && !terms) {
       errors.terms = 'You must agree to Terms of Service and Privacy Policy';
     }
     
     // 4. Check Phone (Only for Sign Up)
-    if (isSignUp && phone) {
+    if (isSigningUp && phone) {
       let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
       let rawDigits = cleanedPhone.replace(/^\+/, '');
       const digitsOnly = rawDigits.replace(/\D/g, '');
@@ -685,8 +681,8 @@ const Auth = () => {
     }
     
     return errors;
-  }, [isSignUp]);
-
+  }, []); // No dependencies needed anymore
+  
   // ============ SIGN UP ============
   const handleSignUp = useCallback(async (values) => {
     const { email, password, phone } = values;
@@ -895,18 +891,20 @@ const Auth = () => {
     }
   }, [storeUserInLocalStorage, navigate, bouncer, intent]);
 
-  // ============ FORM SUBMIT ============
-  const handleSubmit = useCallback(async (e) => {
+    // ============ FORM SUBMIT ============
+  // ✅ We now accept the 'isSigningUp' boolean directly from the form submission
+  const handleSubmit = useCallback(async (e, isSigningUp) => {
     e.preventDefault();
     
-    // 🚪 BOUNCER GETS THE VALUES - Only on submit
+    // 🚪 BOUNCER GETS THE VALUES
     const values = bouncer.getValues();
     
-    // ✅ Validation happens HERE - Not on every keystroke
-    const errors = validateForm(values);
+    console.log(`🚀 Form Submit: Mode is ${isSigningUp ? 'SIGN UP' : 'SIGN IN'}`);
+
+    // ✅ Validation happens using the exact mode from the button click
+    const errors = validateForm(values, isSigningUp);
     
     if (Object.keys(errors).length > 0) {
-      // Show first error
       const firstError = Object.values(errors)[0];
       setMessage({ text: firstError, type: 'error' });
       return;
@@ -923,7 +921,8 @@ const Auth = () => {
     }
 
     try {
-      if (isSignUp) {
+      // ✅ Route to the correct function based on the passed argument
+      if (isSigningUp) {
         await handleSignUp(values);
       } else {
         await handleSignIn(values);
@@ -933,7 +932,7 @@ const Auth = () => {
       setLoading(false);
     }
   }, [referralCode, isAdminEmail, generateReferralCode, processReferral, resetNavigation, storeUserInLocalStorage, navigate, bouncer, intent]);
-
+  
   // ============ FORM SWITCH ============
   const handleFormSwitch = useCallback(() => {
     setIsSignUp(!isSignUp);
@@ -1105,7 +1104,8 @@ const Auth = () => {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} autoComplete="off">
+            {/* ✅ We pass the current mode directly to the submit handler */}
+            <form onSubmit={(e) => handleSubmit(e, isSignUp)} autoComplete="off">
               <div style={{ display: 'none' }}>
                 <input type="text" name="username" autoComplete="username" />
                 <input type="password" name="current-password" autoComplete="current-password" />
