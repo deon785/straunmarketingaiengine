@@ -363,6 +363,8 @@ function SocialAIMarketingEngine() {
 
     // ✅ NOW you can use searchParams.query
     const [productSearch, setProductSearch] = useState(searchParams.query);
+    // ✅ Tracks if the user has actually clicked search for the current text
+    const [hasSearched, setHasSearched] = useState(false);
 
     useEffect(() => {
         initializeRateLimiter();
@@ -5437,6 +5439,7 @@ function SocialAIMarketingEngine() {
             });
 
             setSearchLoading(true);
+            setHasSearched(true);
             setError(null);
             setShowSafetyWarning(false);
             
@@ -5947,7 +5950,34 @@ function SocialAIMarketingEngine() {
                 return hasMatch;
             });
 
-            console.log(`✅ Found ${matchingProspects.length} matching prospects`);
+            let prospectsToUse = matchingProspects;
+            let isFallback = false;
+
+            // ✅ FALLBACK LOGIC: If no matches, get 5 recent buyers as alternatives
+            if (matchingProspects.length === 0) {
+                console.log('⚠️ No exact matches. Fetching alternative active buyers...');
+                isFallback = true;
+                
+                // Fetch the 5 most recent active buyers with interests
+                 // This ensures we don't show the exact same 5 buyers every time.
+                const { data: recentBuyers } = await supabase
+                    .from('profiles')
+                    .select('user_id, username, location, interests, phone_number')
+                    .not('interests', 'is', null)
+                    .neq('user_id', user?.id || '')
+                    .eq('is_active', true)
+                    .limit(20); // Fetch 20, so we have a pool to shuffle
+
+                if (recentBuyers && recentBuyers.length > 0) {
+                    // 🎲 Shuffle the 20 buyers randomly
+                    const shuffledBuyers = [...recentBuyers].sort(() => Math.random() - 0.5);
+                    
+                    // ✅ Take only the first 5 after shuffling
+                    prospectsToUse = shuffledBuyers.slice(0, 5);
+                }
+            }
+
+            console.log(`✅ Found ${prospectsToUse.length} prospects (Fallback: ${isFallback})`);
 
             const sortedProspects = [...matchingProspects].sort((a, b) => {
                 const sellerLocLower = sellerLocation.toLowerCase();
@@ -6003,17 +6033,19 @@ function SocialAIMarketingEngine() {
 
                 return {
                     id: prospect.user_id,
-                    email: email,  // ✅ This is the username/email
+                    email: email,
                     username: prospect.username,
                     location: sanitizeLocation(prospect.location || 'Location not specified'),
-                    interest: searchTerm,
+                    // ✅ If it's a fallback, we don't use the search term as their "interest"
+                    interest: isFallback ? "Other items" : searchTerm, 
                     interests: interests,
                     relevantInterests: relevantInterests,
                     groupedInterests: groupedInterests,
                     interestsDisplay: interestsDisplay,
                     phone_number: sanitizePhone(prospect.phone_number),
                     isSameLocation: prospect.location && 
-                                prospect.location.toLowerCase() === sellerLocation.toLowerCase()
+                                prospect.location.toLowerCase() === sellerLocation.toLowerCase(),
+                    isAlternativeMatch: isFallback // ✅ Flag to identify alternatives
                 };
             });
             
@@ -7272,6 +7304,7 @@ function SocialAIMarketingEngine() {
                                         .replace(/[<>"'`&;\\]/g, '')
                                         .substring(0, 100);
                                         setProductSearch(value);
+                                        setHasSearched(false);
                                         setError(null);
                                     }}
                                     onKeyPress={handleKeyPress}
@@ -7878,6 +7911,22 @@ function SocialAIMarketingEngine() {
                                 <>
                                     {/* Existing seller results */}
                                     <div className="seller-results-card">
+                                         {/* ✅ NEW: Show a notice if we are showing fallback results */}
+                                        {prospects.length > 0 && prospects[0]?.isAlternativeMatch && (
+                                            <div style={{
+                                                background: '#fffbeb',
+                                                border: '1px solid #fcd34d',
+                                                borderRadius: '8px',
+                                                padding: '12px',
+                                                marginBottom: '15px',
+                                                color: '#92400e',
+                                                fontSize: '14px'
+                                            }}>
+                                                <strong>Note:</strong> No Direct Matches for "{productSearch}". 
+                                                Here Are Some Recently Active Buyers Who Are Interested in Baby Clothes Products!
+                                            </div>
+                                        )}
+
                                         <div className="results-header">
                                             <h3>📈 Marketing Prospects</h3>
                                             <div className="results-stats">
@@ -7894,7 +7943,7 @@ function SocialAIMarketingEngine() {
                                             </div>
                                         </div>
                                         
-                                        {prospects.length === 0 ? (
+                                        {prospects.length === 0 && !searchLoading ? (
                                             <div className="empty-results">
                                                 <div className="empty-icon">🔍</div>
                                                 <h4>
@@ -8097,55 +8146,6 @@ function SocialAIMarketingEngine() {
                                             </div>
                                         )}
                                     </div>
-                                    
-                                    {/* ✅ NEW: Show alternative prospects when no prospects found */}
-                                    {prospects.length === 0 && productSearch.trim() !== '' && user && (
-                                        <div className="recommendations-container">
-                                            <div className="no-results-message" style={{ 
-                                                textAlign: 'center', 
-                                                padding: '30px',
-                                                marginBottom: '15px'
-                                            }}>
-                                                <div style={{ fontSize: '48px', marginBottom: '10px' }}>👥</div>
-                                                <h4>No direct matches for "{productSearch}"</h4>
-                                                <p style={{ color: '#666', marginBottom: '15px' }}>
-                                                    Try these alternative buyers who might be interested:
-                                                </p>
-                                            </div>
-                                            
-                                            {/* Show alternative prospects */}
-                                            <RecommendationsSection 
-                                                userId={user.id}
-                                                currentProductId={null}
-                                                onProductClick={handleProductClick}
-                                                isAlternativeProspects={true}
-                                                searchTerm={productSearch}
-                                            />
-                                            
-                                            {/* Button to Daily Deals */}
-                                            <div style={{ textAlign: 'center', marginTop: '20px' }}>
-                                                <button
-                                                    onClick={() => setShowDailyDeals(true)}
-                                                    style={{
-                                                        padding: '12px 24px',
-                                                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                                                        color: 'white',
-                                                        border: 'none',
-                                                        borderRadius: '12px',
-                                                        cursor: 'pointer',
-                                                        fontWeight: 'bold',
-                                                        fontSize: '14px',
-                                                        boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-                                                        transition: 'all 0.3s ease'
-                                                    }}
-                                                    onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-                                                    onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                                                >
-                                                    🔥 View Daily Deals
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
                                 </>
                             ) : (
                                 /* ✅ CASE 2: BUYER MODE - Show products + recommendations */
@@ -8293,7 +8293,10 @@ function SocialAIMarketingEngine() {
                                                         <div className="product-card-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '15px', padding: '10px' }}>
                                                             {/* 1. Save to Wishlist */}
                                                             <button 
-                                                                onClick={() => saveToWishlist(p, 'product')}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    saveToWishlist(p, 'product');
+                                                                }}
                                                                 style={{
                                                                     width: '100%',
                                                                     backgroundColor: '#9c27b0',
@@ -8315,7 +8318,10 @@ function SocialAIMarketingEngine() {
 
                                                             {/* 2. Contact Seller (Opens Modal) */}
                                                             <button 
-                                                                onClick={() => setContactProduct(p)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setContactProduct(p);
+                                                                }}
                                                                 style={{
                                                                     width: '100%',
                                                                     backgroundColor: '#25D366',
@@ -8337,14 +8343,19 @@ function SocialAIMarketingEngine() {
                                                             </button>
 
                                                             {/* 3. View Seller Shop */}
-                                                            <button 
-                                                                onClick={() => navigate(`/buyer/shop/${p?.seller_id}`, { 
-                                                                    state: { 
-                                                                        sellerId: p?.seller_id, 
-                                                                        claimedProductId: p?.id, 
-                                                                        sellerName: 'Seller Shop' 
-                                                                    } 
-                                                                })} 
+                                                             <button 
+                                                                onClick={(e) => {
+                                                                    // ✅ STOP the click from triggering the card's WhatsApp action
+                                                                    e.stopPropagation(); 
+                                                                    
+                                                                    navigate(`/buyer/shop/${p?.seller_id}`, { 
+                                                                        state: { 
+                                                                            sellerId: p?.seller_id, 
+                                                                            claimedProductId: p?.id, 
+                                                                            sellerName: 'Seller Shop' 
+                                                                        } 
+                                                                    });
+                                                                }} 
                                                                 style={{
                                                                     width: '100%',
                                                                     backgroundColor: '#f1f5f9',
@@ -8407,7 +8418,7 @@ function SocialAIMarketingEngine() {
                                     )}
                                     
                                     {/* ✅ 2c: Show ALTERNATIVE products when search HAS NO results */}
-                                    {productsFound.length === 0 && productSearch.trim() !== '' && user && (
+                                    {hasSearched && !searchLoading && productsFound.length === 0 && productSearch.trim() !== '' && user && (
                                         <div className="recommendations-container">
                                             <div className="no-results-message" style={{ 
                                                 textAlign: 'center', 
@@ -8454,7 +8465,7 @@ function SocialAIMarketingEngine() {
                                     )}
                                     
                                     {/* ✅ 2d: No search performed yet - Show helpful message */}
-                                    {productsFound.length === 0 && productSearch.trim() === '' && user && (
+                                    {hasSearched && !searchLoading && productsFound.length === 0 && productSearch.trim() === '' && user && (
                                         <div style={{ 
                                             textAlign: 'center', 
                                             padding: '40px',
