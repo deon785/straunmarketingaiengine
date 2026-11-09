@@ -655,7 +655,8 @@ const Auth = () => {
       errors.password = 'Password must be at least 6 characters';
     }
     
-    if (isSignUp && !terms) {
+    // ✅ Bulletproof Fix: Check the actual state, not just the value
+    if (isSignUp === true && !terms) {
       errors.terms = 'You must agree to Terms of Service and Privacy Policy';
     }
     
