@@ -639,46 +639,45 @@ const Auth = () => {
   }, []);
 
   // ============ VALIDATION (Inside crew - only on submit) ============
+    // ============ VALIDATION (Inside crew - only on submit) ============
   const validateForm = useCallback((values) => {
     const { email, password, phone, terms } = values;
     const errors = {};
     
+    // 1. Check Email
     if (!email) {
       errors.email = 'Email is required';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errors.email = 'Please enter a valid email address';
     }
     
+    // 2. Check Password
     if (!password) {
       errors.password = 'Password is required';
     } else if (password.length < 6) {
       errors.password = 'Password must be at least 6 characters';
     }
     
-    // ✅ Bulletproof Fix: Check the actual state, not just the value
-    if (isSignUp === true && !terms) {
+    // 3. Check Terms ONLY if the checkbox is actually on the screen
+    // If you are on Sign In, the checkbox is not rendered, so this is skipped.
+    const termsCheckboxExists = document.getElementById('terms');
+    
+    if (termsCheckboxExists && terms === false) {
       errors.terms = 'You must agree to Terms of Service and Privacy Policy';
     }
     
-    // ✅ FIXED: Phone validation - EXACT lengths required
+    // 4. Check Phone (Only for Sign Up)
     if (isSignUp && phone) {
-      // Remove all spaces, dashes, parentheses, dots
       let cleanedPhone = phone.replace(/[\s\-\(\)\.]/g, '');
-      // Remove leading + if present
       let rawDigits = cleanedPhone.replace(/^\+/, '');
-      // Get only digits
       const digitsOnly = rawDigits.replace(/\D/g, '');
-      
-      // Check if it's a local format (starts with 0)
       const isLocalFormat = rawDigits.startsWith('0');
       
       if (isLocalFormat) {
-        // ✅ Local format (07...): MUST be exactly 10 digits (0 + 9 digits)
         if (digitsOnly.length !== 10) {
           errors.phone = 'Please enter a valid phone number (e.g., 0712345678)';
         }
       } else {
-        // ✅ International format (263...): MUST be exactly 12 digits (263 + 9 digits)
         if (digitsOnly.length !== 12) {
           errors.phone = 'Please enter a valid phone number (e.g., 263712345678)';
         }
